@@ -1,0 +1,37 @@
+{
+  "name": "mi-restaurante",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "@expo/metro-runtime": "~56.0.15",
+    "@react-native-async-storage/async-storage": "^2.2.0",
+    "axios": "^1.17.0",
+    "expo": "~56.0.11",
+    "expo-av": "^16.0.8",
+    "expo-constants": "~56.0.18",
+    "expo-image-picker": "^56.0.17",
+    "expo-notifications": "~56.0.18",
+    "expo-router": "^56.2.10",
+    "expo-status-bar": "~56.0.4",
+    "lucide-react": "^1.18.0",
+    "lucide-react-native": "^1.18.0",
+    "nativewind": "^2.0.11",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.85.3",
+    "react-native-web": "^0.21.2",
+    "socket.io-client": "^4.8.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "build:web": "expo export --platform web"
+  },
+  "private": true,
+  "devDependencies": {
+    "babel-preset-expo": "^56.0.15",
+    "tailwindcss": "3.3.2"
+  }
+}
