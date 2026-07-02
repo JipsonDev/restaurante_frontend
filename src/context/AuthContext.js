@@ -5,9 +5,7 @@ import * as safeStorage from '../services/storage';
 
 const ENV_API_HOST = process.env.EXPO_PUBLIC_API_HOST;
 const ENV_API_URL = process.env.EXPO_PUBLIC_API_URL;
-const WEB_HOST = Platform.OS === 'web' && typeof window !== 'undefined'
-  ? window.location.hostname
-  : null;
+
 const BUNDLE_HOST = (() => {
   if (Platform.OS === 'web') return null;
   const scriptURL = NativeModules?.SourceCode?.scriptURL || '';
@@ -15,11 +13,22 @@ const BUNDLE_HOST = (() => {
   return match?.[1] || null;
 })();
 
-export const IP_LOCAL = WEB_HOST || BUNDLE_HOST || ENV_API_HOST || (Platform.OS === 'android' ? '10.0.2.2' : 'localhost');
-export const API_ORIGIN = ENV_API_URL
-  ? ENV_API_URL.replace(/\/api\/?$/, '').replace(/\/$/, '')
-  : `http://${IP_LOCAL}:3000`;
+const cleanUrl = (url) => {
+  if (!url) return null;
+  return url.replace(/\/api\/?$/, '').replace(/\/$/, '');
+};
+
+const getApiOrigin = () => {
+  if (ENV_API_URL) return cleanUrl(ENV_API_URL);
+  if (ENV_API_HOST) return cleanUrl(ENV_API_HOST);
+
+  const localHost = BUNDLE_HOST || (Platform.OS === 'android' ? '10.0.2.2' : 'localhost');
+  return `http://${localHost}:3000`;
+};
+
+export const API_ORIGIN = getApiOrigin();
 export const BASE_URL = `${API_ORIGIN}/api`;
+
 
 export const assetUrl = (url) => {
   if (!url) return null;
