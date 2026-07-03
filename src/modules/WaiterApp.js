@@ -60,7 +60,9 @@ import {
 } from '../services/waiterNotifications';
 import { ALERT_TONES, playWebAlertTone } from '../services/webAudioAlerts';
 
-const SERVICE_RATE = 0.1;
+const DEFAULT_BUSINESS_CONFIG = {
+  servicio_porcentaje: '0',
+};
 // BUG FIX #1: Incluir 'ENTREGADO' en estados cerrados para que
 // una mesa con pedido entregado no quede marcada como "ocupada" indefinidamente.
 // Solo 'PAGADO' y 'CANCELADO' cierran la cuenta en el backend.
@@ -78,6 +80,11 @@ const Text = ({ style, ...props }) => (
 
 // --- UTILIDADES ---
 function money(n) { return `$${Number(n || 0).toFixed(2)}`; }
+
+function percentRate(value, fallback = 0) {
+  const parsed = Number(String(value ?? fallback).replace(',', '.'));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed / 100 : 0;
+}
 
 function lineExtras(item) {
   return (item.modificadores || []).reduce((sum, mod) => sum + Number(mod.precio_extra || 0), 0);
@@ -538,6 +545,7 @@ export default function App() {
   const [productos, setProductos] = useState([]);
   const [extras, setExtras] = useState([]);
   const [pedidos, setPedidos] = useState([]);
+  const [businessConfig, setBusinessConfig] = useState(DEFAULT_BUSINESS_CONFIG);
   const [loading, setLoading] = useState(true);
   const [mesaSel, setMesaSel] = useState(null);
   const [orderMode, setOrderMode] = useState('mesa');
@@ -602,6 +610,8 @@ export default function App() {
 
   const tableCardWidth = (shellWidth - bodyPad * 2 - tableGap * (tableColumns - 1)) / tableColumns;
   const productCardWidth = (shellWidth - bodyPad * 2 - productGap * (productColumns - 1)) / productColumns;
+  const serviceRate = percentRate(businessConfig.servicio_porcentaje, 0);
+  const servicePercent = Math.round(serviceRate * 10000) / 100;
 
   // Flush pendingAlertRef después de cada render para no llamar setState dentro de setState
   useEffect(() => {
@@ -719,13 +729,13 @@ export default function App() {
   const orderItems = showingCart ? cart : pedidoActual?.items || [];
   const subtotal = orderItems.reduce((sum, item) => sum + lineTotal(item), 0);
   const storedTotal = Number(pedidoActual?.total || 0);
-  const service = showingCart ? subtotal * SERVICE_RATE : Math.max(0, storedTotal - subtotal);
+  const service = showingCart ? subtotal * serviceRate : 0;
 
   // BUG FIX #7: mesaDisplayTotal estaba sumando el pedido anterior + el carrito
   // nuevo de forma acumulativa. El total a mostrar debe ser:
   // - Si hay carrito nuevo: subtotal_carrito + servicio + lo que ya estaba en cocina
   // - Si no hay carrito: el total del pedido del servidor
-  const cartSubtotalWithService = showingCart ? subtotal + subtotal * SERVICE_RATE : 0;
+  const cartSubtotalWithService = showingCart ? subtotal + subtotal * serviceRate : 0;
   const mesaDisplayTotal = showingCart
     ? cartSubtotalWithService + storedTotal          // nuevo + histórico
     : storedTotal || (subtotal + service);           // solo histórico
@@ -876,23 +886,26 @@ export default function App() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [mesasRes, productosRes, pedidosRes, extrasRes] = await Promise.all([
+      const [mesasRes, productosRes, pedidosRes, extrasRes, configRes] = await Promise.all([
         axios.get(`${BASE_URL}/mesas`),
         axios.get(`${BASE_URL}/productos`),
         axios.get(`${BASE_URL}/pedidos`),
         axios.get(`${BASE_URL}/extras`),
+        axios.get(`${BASE_URL}/configuracion`),
       ]);
       setMesas(mesasRes.data?.length ? mesasRes.data : FALLBACK_MESAS);
       setProductos((productosRes.data?.length ? productosRes.data : FALLBACK_PRODUCTOS)
         .filter((p) => Number(p.disponible ?? 1) === 1));
       setPedidos(Array.isArray(pedidosRes.data) ? pedidosRes.data : FALLBACK_PEDIDOS);
       setExtras(extrasRes.data || []);
+      setBusinessConfig(configRes.data || DEFAULT_BUSINESS_CONFIG);
       setMesaSel((prev) => prev || (mesasRes.data?.length ? mesasRes.data[0].id : FALLBACK_MESAS[0].id));
     } catch (_) {
       setMesas(FALLBACK_MESAS);
       setProductos(FALLBACK_PRODUCTOS);
       setPedidos(FALLBACK_PEDIDOS);
       setExtras([]);
+      setBusinessConfig(DEFAULT_BUSINESS_CONFIG);
       setMesaSel((prev) => prev || 1);
     } finally {
       setLoading(false);
@@ -1420,7 +1433,7 @@ export default function App() {
           const subtotalGuest = assignedItems.reduce((sum, item) => sum + Number(item.unitPrice || 0), 0);
           return {
             nombre: `Comensal ${guest}`,
-            monto: Number((subtotalGuest + subtotalGuest * SERVICE_RATE).toFixed(2)),
+            monto: Number((subtotalGuest + subtotalGuest * serviceRate).toFixed(2)),
             items: Array.from(itemMap.entries()).map(([detalle_pedido_id, cantidad]) => ({ detalle_pedido_id, cantidad })),
           };
         }).filter((division) => division.monto > 0);
@@ -1621,7 +1634,9 @@ export default function App() {
                   <View style={{ marginTop: 40, alignItems: 'center', padding: 24, backgroundColor: colors.surface, borderRadius: 24, borderWidth: 1, borderColor: colors.brand, width: '100%', maxWidth: 300 }}>
                     <Text style={{ color: colors.muted, fontSize: 16, fontWeight: '700', marginBottom: 8 }}>Cada uno paga</Text>
                     <Text style={{ color: colors.brand, fontSize: 42, fontWeight: '900', textAlign: 'center' }}>{money(equalAmount)}</Text>
-                    <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '600', marginTop: 8 }}>Incluye servicio (10%)</Text>
+                    {serviceRate > 0 ? (
+                      <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '600', marginTop: 8 }}>Incluye servicio ({servicePercent}%)</Text>
+                    ) : null}
                   </View>
                 </ScrollView>
               ) : (
@@ -1631,7 +1646,7 @@ export default function App() {
                       {splitGuests.map(g => {
                         const isActive = activeGuest === g;
                         const totalGuest = guestTotals[g] || 0;
-                        const guestDisplayTotal = totalGuest + (totalGuest * SERVICE_RATE);
+                        const guestDisplayTotal = totalGuest + (totalGuest * serviceRate);
                         return (
                           <TouchableOpacity
                             key={g}
@@ -1723,20 +1738,20 @@ export default function App() {
 
     if (isMobile) {
       return (
-        <View style={{ flexShrink: 0, backgroundColor: colors.surface, borderBottomWidth: 1, borderColor: colors.line, zIndex: 10, elevation: 4, paddingTop: Math.max(16, TOP_INSET || 0) }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: bodyPad, paddingBottom: 16 }}>
-            <TouchableOpacity onPress={() => setMenuOpen(true)} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: colors.field }}>
-              <Menu size={24} color={colors.ink} />
+        <View style={{ flexShrink: 0, backgroundColor: colors.surface, borderBottomWidth: 1, borderColor: colors.line, zIndex: 10, elevation: 4, paddingTop: Math.max(8, TOP_INSET || 0), ...softShadow }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: bodyPad, paddingBottom: 8 }}>
+            <TouchableOpacity onPress={() => setMenuOpen(true)} style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: colors.field }}>
+              <Menu size={22} color={colors.ink} />
             </TouchableOpacity>
             <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-              <Logo size="lg" dark={isDark} />
+              <Logo height={48} dark={isDark} />
             </View>
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TouchableOpacity onPress={toggleTheme} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: colors.field }}>
-                {isDark ? <Sun size={21} color={colors.ink} /> : <Moon size={21} color={colors.ink} />}
+              <TouchableOpacity onPress={toggleTheme} style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: colors.field }}>
+                {isDark ? <Sun size={19} color={colors.ink} /> : <Moon size={19} color={colors.ink} />}
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setNotiOpen(true)} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', position: 'relative', borderRadius: 12, backgroundColor: colors.field }}>
-                <Bell size={22} color={colors.ink} />
+              <TouchableOpacity onPress={() => setNotiOpen(true)} style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center', position: 'relative', borderRadius: 12, backgroundColor: colors.field }}>
+                <Bell size={20} color={colors.ink} />
                 {unreadNotifications > 0 ? (
                   <View style={{ position: 'absolute', top: 8, right: 8, minWidth: 14, height: 14, borderRadius: 7, backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.surface }}>
                     <Text style={{ color: colors.onAccent, fontSize: 8, fontWeight: '900' }}>{unreadNotifications}</Text>
@@ -1745,18 +1760,18 @@ export default function App() {
               </TouchableOpacity>
             </View>
           </View>
-          <View style={{ paddingHorizontal: bodyPad, paddingBottom: 16 }}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row', flexGrow: 1, gap: 8, justifyContent: 'space-between' }}>
+          <View style={{ paddingHorizontal: bodyPad, paddingBottom: 10 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row', flexGrow: 1, gap: 8, justifyContent: 'space-between', paddingRight: 4 }}>
               {items.map(([key, label, Icon]) => {
                 const active = step === key;
                 return (
                   <TouchableOpacity
                     key={key}
                     onPress={() => handleTabPress(key)}
-                    style={{ flex: 1, minWidth: 75, height: 46, borderRadius: 23, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', backgroundColor: active ? colors.softOrange : colors.field, borderWidth: 1, borderColor: active ? colors.brand : 'transparent' }}
+                    style={{ flex: 1, minWidth: 74, height: 40, borderRadius: 20, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', backgroundColor: active ? colors.softOrange : colors.field, borderWidth: 1, borderColor: active ? colors.brand : 'transparent' }}
                   >
-                    <Icon size={18} color={active ? colors.brand : colors.muted} strokeWidth={2.5} />
-                    {width >= 360 ? <Text numberOfLines={1} style={{ marginLeft: 6, color: active ? colors.brand : colors.muted, fontSize: 12, fontWeight: '800' }}>{label}</Text> : null}
+                    <Icon size={16} color={active ? colors.brand : colors.muted} strokeWidth={2.5} />
+                    {width >= 360 ? <Text numberOfLines={1} style={{ marginLeft: 5, color: active ? colors.brand : colors.muted, fontSize: 11, fontWeight: '800' }}>{label}</Text> : null}
                   </TouchableOpacity>
                 );
               })}
@@ -2469,10 +2484,14 @@ export default function App() {
           </Text>
           <Text style={{ color: colors.ink, fontSize: 14, fontWeight: '800' }}>{money(subtotal)}</Text>
         </View>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderColor: colors.line }}>
-          <Text style={{ color: colors.muted, fontSize: 14, fontWeight: '700' }}>Servicio sugerido (10%)</Text>
-          <Text style={{ color: colors.ink, fontSize: 14, fontWeight: '800' }}>{money(service)}</Text>
-        </View>
+        {serviceRate > 0 ? (
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderColor: colors.line }}>
+            <Text style={{ color: colors.muted, fontSize: 14, fontWeight: '700' }}>Servicio ({servicePercent}%)</Text>
+            <Text style={{ color: colors.ink, fontSize: 14, fontWeight: '800' }}>{money(service)}</Text>
+          </View>
+        ) : (
+          <View style={{ marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderColor: colors.line }} />
+        )}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, backgroundColor: colors.field, borderRadius: 14, padding: 14 }}>
           <Text style={{ color: colors.ink, fontSize: 18, fontWeight: '900' }}>{isExpressOrder ? 'Total express' : 'Total mesa'}</Text>
           <Text style={{ color: colors.brand, fontSize: 28, fontWeight: '900' }}>{money(mesaDisplayTotal)}</Text>
