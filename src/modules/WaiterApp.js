@@ -1723,7 +1723,7 @@ export default function App() {
 
     if (isMobile) {
       return (
-        <View style={{ backgroundColor: colors.surface, borderBottomWidth: 1, borderColor: colors.line, zIndex: 10, paddingTop: Math.max(16, TOP_INSET || 0) }}>
+        <View style={{ flexShrink: 0, backgroundColor: colors.surface, borderBottomWidth: 1, borderColor: colors.line, zIndex: 10, elevation: 4, paddingTop: Math.max(16, TOP_INSET || 0) }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: bodyPad, paddingBottom: 16 }}>
             <TouchableOpacity onPress={() => setMenuOpen(true)} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: colors.field }}>
               <Menu size={24} color={colors.ink} />
@@ -1767,7 +1767,7 @@ export default function App() {
     }
 
     return (
-      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: bodyPad, paddingTop: Math.max(16, TOP_INSET || 0), paddingBottom: 16, backgroundColor: colors.surface, borderBottomWidth: 1, borderColor: colors.line, zIndex: 10 }}>
+      <View style={{ flexShrink: 0, flexDirection: 'row', alignItems: 'center', paddingHorizontal: bodyPad, paddingTop: Math.max(16, TOP_INSET || 0), paddingBottom: 16, backgroundColor: colors.surface, borderBottomWidth: 1, borderColor: colors.line, zIndex: 10, elevation: 4 }}>
         <TouchableOpacity onPress={() => setMenuOpen(true)} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginRight: 16, borderRadius: 12, backgroundColor: colors.field }}>
           <Menu size={22} color={colors.ink} />
         </TouchableOpacity>
@@ -1889,18 +1889,18 @@ export default function App() {
   );
 
   const renderShell = (children, scrollable = true) => (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
       {renderTopTabs()}
       {scrollable ? (
         <ScrollView
-          style={{ flex: 1 }}
+          style={{ flex: 1, minHeight: 0 }}
           contentContainerStyle={{ paddingBottom: BOTTOM_INSET + (cartCount > 0 && step !== 'pedido' ? 96 : 32) }}
           showsVerticalScrollIndicator={false}
         >
           {children}
         </ScrollView>
       ) : (
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
           {children}
         </View>
       )}
@@ -2802,7 +2802,7 @@ export default function App() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.pageBg, fontFamily: WAITER_FONT }}>
+    <View style={{ flex: 1, minHeight: 0, overflow: 'hidden', backgroundColor: colors.pageBg, fontFamily: WAITER_FONT }}>
       {step === 'mesas' ? renderMesas() : null}
       {step === 'express' ? renderExpress() : null}
       {step === 'productos' ? renderProductos() : null}
