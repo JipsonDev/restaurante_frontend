@@ -105,8 +105,12 @@ export function AdminProvider({ children }) {
     try {
       const res = await axios.get(`${BASE_URL}/caja/resumen`);
       if (version === cajaReadVersion.current) setCaja(res.data);
-    } catch {
-      setReadError('No se pudo actualizar la caja. Reintenta antes de operar.');
+      // La caja cargó, pero alguna parte secundaria falló en el servidor: se informa sin bloquear.
+      const avisos = res.data?.avisos || [];
+      if (avisos.length) setReadError(`La caja cargó sin ${avisos.map(a => a.parte).join(', ')}. Detalle: ${avisos[0].error}`);
+    } catch (error) {
+      const detail = error?.response?.data?.message;
+      setReadError(detail ? `No se pudo actualizar la caja. ${detail}` : 'No se pudo actualizar la caja. Reintenta antes de operar.');
     }
   }, []);
 
