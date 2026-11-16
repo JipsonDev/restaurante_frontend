@@ -64,7 +64,7 @@ export default function WaiterCatalog({ width, products, categories, category, s
         <View style={{ minWidth: 28, height: 28, borderRadius: 14, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 }}><RollingNumber value={cartCount} size={14} color={c.onPrimary} /></View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <T size={16} weight="700" color={c.onInk}>Ver ronda nueva</T>
-          <T size={13} color={c.onInk} style={{ opacity: 0.7 }} numberOfLines={1}>{status.label}</T>
+          <T size={13} color={c.onInk} style={{ opacity: 0.7 }} numberOfLines={2}>{status.key === 'local' ? 'Guardada aquí · sin enviar' : status.label}</T>
         </View>
         <RollingNumber value={Number(cartTotal || 0)} format={money} size={17} color={c.onInk} />
       </Press>

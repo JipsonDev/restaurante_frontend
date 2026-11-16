@@ -200,7 +200,7 @@ export const comandaPalette = {
   dark: {
     bg: '#1A1917', surface: '#23211E', surfaceAlt: '#2A2825', soft: '#312E2A', softer: '#3A3631',
     line: '#3A3631', lineStrong: '#4D4842', text: '#EDE8E0', muted: '#B3AB9F', faint: '#9C9488',
-    primary: '#E0573A', primaryHover: '#EC6B4F', primaryPressed: '#C94A2F', primarySoft: 'rgba(224,87,58,0.18)', primaryText: '#FF8A70', onPrimary: '#1A1917',
+    primary: '#E8664A', primaryHover: '#F07A5F', primaryPressed: '#D2573C', primarySoft: 'rgba(224,87,58,0.18)', primaryText: '#FF8A70', onPrimary: '#1A1917',
     ink: '#EDE8E0', onInk: '#1A1917',
     green: '#7BD9A6', greenSoft: 'rgba(123,217,166,0.14)', amber: '#F2C14E', amberSoft: 'rgba(242,193,78,0.14)', red: '#FF8A70', redSoft: 'rgba(255,138,112,0.16)',
     sky: '#8FB8E8', skySoft: 'rgba(143,184,232,0.14)', purple: '#B7A6F5', purpleSoft: 'rgba(183,166,245,0.16)', pink: '#F08BB0', pinkSoft: 'rgba(240,139,176,0.16)',
@@ -217,7 +217,7 @@ export function WaiterAppearance({ children }) {
 // Estado de mesa en la dirección Comanda: etiqueta, forma del borde y colores.
 export function comandaTableMeta(state, c) {
   const map = {
-    Libre: { label: 'Libre', shape: 'dashed', bg: 'transparent', border: c.lineStrong, text: c.green, number: c.text },
+    Libre: { label: 'Libre', shape: 'dashed', bg: 'transparent', border: c.lineStrong, text: c.muted, number: c.text },
     Ocupada: { label: 'Ocupada', shape: 'solid', bg: c.surface, border: c.ink, text: c.text, number: c.text },
     Cuenta: { label: 'Por cobrar', shape: 'filled', bg: c.primary, border: c.primary, text: c.onPrimary, number: c.onPrimary },
     Reservada: { label: 'Reservada', shape: 'stamp', bg: c.surface, border: c.purple, text: c.purple, number: c.text },

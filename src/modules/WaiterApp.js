@@ -76,7 +76,7 @@ import { validateDraft, emptyExpressInfo, isExpressDraftKey, savedDraftKeys } fr
 // Comanda: hoja de pedido y cola sin conexión.
 import { ComandaHeader, LineCustomizer, NoticeSheet, OfflineQueue, OrderLine, PastRound, PriceChangesSheet, SectionLabel, SendBar, TearAway, TotalsBlock } from '../components/waiter/order';
 import { classifyError, nextDelay, priceDiffs, queueSummary, reusableExpressDraft } from '../utils/sendQueue.mjs';
-import { BottomSheet as CBottomSheet, Button as CButton, Chip as CChip, Field as CField, Label as CLabel, Num as CNum, Perforation as CPerforation, StampBurst as CStampBurst, T as CT, money as cMoney } from '../components/waiter/comanda';
+import { BottomSheet as CBottomSheet, Button as CButton, Chip as CChip, LeaderLine as CLeaderLine, Tally as CTally, Field as CField, Label as CLabel, Num as CNum, Perforation as CPerforation, StampBurst as CStampBurst, T as CT, money as cMoney } from '../components/waiter/comanda';
 import ExpressDraftList from '../components/ExpressDraftList';
 import { catalogContext } from '../utils/waiterNavigation.mjs';
 import { BOTTOM_INSET, TOP_INSET } from '../utils/safeArea';
@@ -100,7 +100,7 @@ const Text = ({ style, ...props }) => (
 );
 
 // --- UTILIDADES ---
-function money(n) { return `$${Number(n || 0).toFixed(2)}`; }
+function money(n) { return cMoney(n); } // un solo formato de precio: $1,80
 
 function percentRate(value, fallback = 0) {
   const parsed = Number(String(value ?? fallback).replace(',', '.'));
@@ -1115,7 +1115,9 @@ function App() {
       }
 
       // Comanda: la hoja se arranca, cae el sello «ENVIADA» y volvemos al salón sin modal bloqueante.
-      const sentMesaId = !isExpressOrder ? finalOrder.mesa_id : null;
+      // La mesa del aviso es la que el mesero eligió (no lo que devuelva el servidor), para no anunciar otra mesa.
+      const sentMesa = !isExpressOrder ? (mesaActual || mesas.find((m) => Number(m.id) === Number(finalOrder.mesa_id)) || null) : null;
+      const sentMesaId = !isExpressOrder ? (sentMesa?.id ?? finalOrder.mesa_id) : null;
       const sentExpressId = isExpressOrder ? finalOrder.id : null;
       setTearing(true);
       setSentBurst(true);
@@ -1126,7 +1128,7 @@ function App() {
       }, 260);
       toast.show('Ronda enviada a cocina', {
         tone: 'success',
-        detail: sentMesaId ? `Mesa ${mesaActual?.numero ?? sentMesaId}` : (finalOrder.cliente_nombre || undefined),
+        detail: sentMesaId ? `Mesa ${String(sentMesa?.numero ?? sentMesaId).padStart(2, '0')}` : (finalOrder.cliente_nombre || undefined),
         action: { label: sentMesaId ? 'Ver mesa' : 'Ver pedido', onPress: () => {
           if (sentMesaId) { setOrderMode('mesa'); setSelectedExpressPedidoId(null); setMesaSel(sentMesaId); setStep('pedido'); }
           else if (sentExpressId) openExpressOrder(finalOrder);
@@ -1351,113 +1353,44 @@ function App() {
       <CBottomSheet visible={splitOpen} onClose={() => setSplitOpen(false)} busy={splitSending} maxHeight="92%"
         title="Dividir cuenta" subtitle={`${isExpressOrder ? 'Pedido' : `Mesa ${mesaActual?.numero || '-'}`} · Total ${cMoney(mesaDisplayTotal)}`}
         footer={<CButton variant="primary" size="lg" full icon={Printer} loading={splitSending} onPress={enviarDivisionCaja}>Enviar división a caja</CButton>}>
-            <View style={{ flexDirection: 'row', marginTop: -4 }}>
-              <TouchableOpacity
-                onPress={() => setSplitMode('equal')}
-                style={{ flex: 1, height: 46, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: isEqual ? colors.softOrange : colors.field, borderWidth: 1, borderColor: isEqual ? colors.brand : 'transparent', marginRight: 8 }}
-              >
-                <Text style={{ color: isEqual ? colors.brand : colors.muted, fontWeight: '600', fontSize: 14 }}>Partes Iguales</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setSplitMode('items')}
-                style={{ flex: 1, height: 46, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: !isEqual ? colors.softOrange : colors.field, borderWidth: 1, borderColor: !isEqual ? colors.brand : 'transparent', marginLeft: 8 }}
-              >
-                <Text style={{ color: !isEqual ? colors.brand : colors.muted, fontWeight: '600', fontSize: 14 }}>Por Productos</Text>
-              </TouchableOpacity>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <CChip selected={isEqual} onPress={() => setSplitMode('equal')}>Partes iguales</CChip>
+              <CChip selected={!isEqual} onPress={() => setSplitMode('items')}>Por productos</CChip>
             </View>
-
-            <View>
-              {isEqual ? (
-                <View style={{ alignItems: 'center', paddingVertical: 8 }}>
-                  <Users size={64} color={colors.brand} style={{ marginBottom: 32 }} />
-                  <Text style={{ color: colors.muted, fontSize: 18, fontWeight: '500', marginBottom: 24, textAlign: 'center' }}>¿Entre cuántas personas?</Text>
-
-                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, borderRadius: 8, padding: 8, borderWidth: 1, borderColor: colors.line, ...softShadow }}>
-                    <TouchableOpacity
-                      onPress={() => setSplitWays(Math.max(2, splitWays - 1))}
-                      style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: colors.field, alignItems: 'center', justifyContent: 'center' }}
-                    >
-                      <Minus size={28} color={colors.ink} />
-                    </TouchableOpacity>
-                    <View style={{ width: 100, alignItems: 'center', justifyContent: 'center' }}>
-                      <Text style={{ fontSize: 36, fontWeight: '600', color: colors.ink }}>{splitWays}</Text>
+            {isEqual ? <View style={{ gap: 16, paddingTop: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <CT size={17} weight="600">Entre cuántas personas</CT>
+                <CTally value={splitWays} onChange={setSplitWays} min={2} max={50} label="Personas" />
+              </View>
+              <CPerforation />
+              <View style={{ gap: 10 }}>
+                {equalAmounts.map((amount, i) => <CLeaderLine key={i} left={<CT size={16}>Parte {i + 1}</CT>} right={<CNum size={16} weight="600">{cMoney(amount)}</CNum>} />)}
+              </View>
+              {service > 0 ? <CT size={14} color={colors.muted}>Incluye el servicio de la cuenta.</CT> : null}
+            </View> : <View style={{ gap: 12, paddingTop: 8 }}>
+              <ScrollView horizontal style={{ flexGrow: 0 }} showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                {splitGuests.map(g => {
+                  const guestDisplayTotal = splitCents(mesaDisplayTotal, splitGuests.map((x) => expandedOrderItems.filter((item) => Number(itemAssignments[item.splitKey] || 1) === Number(x)).reduce((sum, item) => sum + Math.round(Number(item.unitPrice || 0) * 100), 0)))[splitGuests.indexOf(g)];
+                  return <CChip key={g} selected={activeGuest === g} onPress={() => setActiveGuest(g)} accessibilityLabel={`Comensal ${g}, ${cMoney(guestDisplayTotal)}`}>{`C${g} · ${cMoney(guestDisplayTotal)}`}</CChip>;
+                })}
+                <CChip icon={Plus} onPress={addGuest} accessibilityLabel="Añadir comensal">Comensal</CChip>
+              </ScrollView>
+              <CT size={14} color={colors.muted}>Toca un producto para pasarlo al comensal {activeGuest}.</CT>
+              <View>
+                {expandedOrderItems.map((item) => {
+                  const assignedTo = itemAssignments[item.splitKey] || 1;
+                  const mine = assignedTo === activeGuest;
+                  return <TouchableOpacity key={item.splitKey} accessibilityRole="button" accessibilityState={{ selected: mine }} accessibilityLabel={`${item.nombre}, comensal ${assignedTo}`}
+                    onPress={() => setItemAssignments(prev => ({ ...prev, [item.splitKey]: activeGuest }))}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52, borderBottomWidth: 1, borderColor: colors.line }}>
+                    <View style={{ minWidth: 34, height: 26, paddingHorizontal: 4, borderRadius: 4, borderWidth: 1.5, borderColor: colors.ink, backgroundColor: mine ? colors.ink : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                      <CNum size={13} weight="700" color={mine ? colors.surface : colors.ink}>C{assignedTo}</CNum>
                     </View>
-                    <TouchableOpacity
-                      onPress={() => setSplitWays(Math.min(50, splitWays + 1))}
-                      style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: colors.action || colors.brand, alignItems: 'center', justifyContent: 'center' }}
-                    >
-                      <Plus size={28} color={colors.onAccent} />
-                    </TouchableOpacity>
-                  </View>
-
-                  <View style={{ marginTop: 40, alignItems: 'center', padding: 24, backgroundColor: colors.surface, borderRadius: 8, borderWidth: 1, borderColor: colors.brand, width: '100%', maxWidth: 300 }}>
-                    <Text style={{ color: colors.muted, fontSize: 16, fontWeight: '500', marginBottom: 8 }}>Importes por persona</Text>
-                    <Text style={{ color: colors.brand, fontSize: 42, fontWeight: '600', textAlign: 'center' }}>{[...new Set(equalAmounts)].map(money).join(' / ')}</Text>
-                    <Text style={{ color: colors.muted, marginTop: 8 }}>{equalAmounts.map((amount, i) => `Parte ${i + 1}: ${money(amount)}`).join(' · ')}</Text>
-                    {service > 0 ? (
-                      <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '600', marginTop: 8 }}>Incluye el servicio de la cuenta</Text>
-                    ) : null}
-                  </View>
-                </View>
-              ) : (
-                <View style={{ paddingTop: 4 }}>
-                  <View style={{ marginBottom: 16 }}>
-                    <ScrollView horizontal style={{ flexGrow: 0 }} showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingBottom: 8 }}>
-                      {splitGuests.map(g => {
-                        const isActive = activeGuest === g;
-                        const totalGuest = guestTotals[g] || 0;
-                        const guestDisplayTotal = splitCents(mesaDisplayTotal, splitGuests.map((g) => expandedOrderItems.filter((item) => Number(itemAssignments[item.splitKey] || 1) === Number(g)).reduce((sum, item) => sum + Math.round(Number(item.unitPrice || 0) * 100), 0)))[splitGuests.indexOf(g)];
-                        return (
-                          <TouchableOpacity
-                            key={g}
-                            onPress={() => setActiveGuest(g)}
-                            style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 8, backgroundColor: isActive ? colors.brand : colors.surface, borderWidth: 1, borderColor: isActive ? colors.brand : colors.line, ...softShadow, alignItems: 'center' }}
-                          >
-                            <Text style={{ color: isActive ? colors.onAccent : colors.ink, fontWeight: '600', fontSize: 14 }}>Comensal {g}</Text>
-                            <Text style={{ color: isActive ? 'rgba(255,255,255,0.8)' : colors.muted, fontWeight: '500', fontSize: 12, marginTop: 4 }}>{money(guestDisplayTotal)}</Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                      <TouchableOpacity
-                        onPress={addGuest}
-                        style={{ paddingHorizontal: 20, paddingVertical: 12, borderRadius: 8, backgroundColor: colors.softOrange, borderWidth: 1, borderColor: colors.brand, borderStyle: 'dashed', justifyContent: 'center', alignItems: 'center', flexDirection: 'row' }}
-                      >
-                        <Plus size={18} color={colors.brand} />
-                        <Text style={{ color: colors.brand, fontWeight: '600', fontSize: 14, marginLeft: 8 }}>Añadir nueva ronda</Text>
-                      </TouchableOpacity>
-                    </ScrollView>
-                  </View>
-
-                  <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '600', marginBottom: 12, paddingHorizontal: 4 }}>
-                    Toca un producto para asignarlo al Comensal {activeGuest}
-                  </Text>
-                  <View>
-                    <View style={{ gap: 10 }}>
-                      {expandedOrderItems.map((item) => {
-                        const assignedTo = itemAssignments[item.splitKey] || 1;
-                        const isCurrentActive = assignedTo === activeGuest;
-                        return (
-                          <TouchableOpacity
-                            key={item.splitKey}
-                            onPress={() => setItemAssignments(prev => ({ ...prev, [item.splitKey]: activeGuest }))}
-                            style={{ flexDirection: 'row', alignItems: 'center', padding: 16, backgroundColor: isCurrentActive ? colors.softOrange : colors.surface, borderRadius: 8, borderWidth: 1, borderColor: isCurrentActive ? colors.brand : colors.line, ...softShadow }}
-                          >
-                            <View style={{ width: 36, height: 44, borderRadius: 6, backgroundColor: isCurrentActive ? colors.brand : colors.field, alignItems: 'center', justifyContent: 'center', marginRight: 16 }}>
-                              <Text style={{ color: isCurrentActive ? colors.onAccent : colors.muted, fontWeight: '600', fontSize: 12 }}>C-{assignedTo}</Text>
-                            </View>
-                            <View style={{ flex: 1 }}>
-                              <Text style={{ color: isCurrentActive ? colors.ink : colors.muted, fontWeight: '600', fontSize: 15 }}>{item.nombre}</Text>
-                              <Text style={{ color: isCurrentActive ? colors.brand : colors.muted, fontWeight: '500', fontSize: 13, marginTop: 2 }}>{money(item.unitPrice)}</Text>
-                            </View>
-                            {isCurrentActive ? <CheckCircle2 size={20} color={colors.brand} /> : null}
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                  </View>
-                </View>
-              )}
-            </View>
+                    <View style={{ flex: 1 }}><CLeaderLine left={<CT size={16} weight={mine ? '600' : '400'} numberOfLines={1}>{item.nombre}</CT>} right={<CNum size={15}>{cMoney(item.unitPrice)}</CNum>} /></View>
+                  </TouchableOpacity>;
+                })}
+              </View>
+            </View>}
 
       </CBottomSheet>
     );
@@ -1843,7 +1776,7 @@ function App() {
       : [mesaActual?.ubicacion, mesaActual?.capacidad ? `${mesaActual.capacidad} plazas` : null, minutes != null ? `${minutes} min` : null].filter(Boolean).join(' · ') || 'Mesa';
     const title = isExpressOrder
       ? (pedidoActual ? pickupOrderLabel(pedidoActual) : expressInfo.nombre.trim() || 'Cliente sin nombre')
-      : pedidoActual ? 'Cuenta abierta' : 'Cuenta nueva';
+      : pedidoActual ? `Cuenta #${pedidoActual.id}` : 'Cuenta nueva';
     const subtitle = isExpressOrder
       ? (pedidoActual ? pickupDetailLabel(pedidoActual) : pickupDraftDetail) || null
       : `${totalItemsCount} ${totalItemsCount === 1 ? 'artículo' : 'artículos'}`;

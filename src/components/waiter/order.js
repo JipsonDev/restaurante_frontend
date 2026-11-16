@@ -2,7 +2,7 @@
 // Todo se apoya en el kit «Comanda» (comanda.js); aquí no se definen colores propios.
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Image, TextInput, View } from 'react-native';
-import { CloudOff, RefreshCw, Send, SlidersHorizontal, Trash2 } from 'lucide-react-native';
+import { CloudOff, RefreshCw, Send, PencilLine, Trash2 } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import {
   BottomSheet, Button, Chip, EASE, Label, LeaderLine, Num, Perforation, Press, RollingNumber, Stamp, Tally, T,
@@ -61,10 +61,10 @@ export function OrderLine({ item, total, detail, image, expanded, onToggle, onQt
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: space.sm, flexWrap: 'wrap' }}>
         <Tally value={Number(item.cantidad) || 1} min={1} onChange={n => onQty(n - (Number(item.cantidad) || 1))} label={`Cantidad de ${item.nombre}`} />
         <View style={{ flex: 1 }} />
-        <Button variant={expanded ? 'ink' : 'ghost'} icon={SlidersHorizontal} onPress={onToggle} accessibilityLabel={`Notas y extras de ${item.nombre}`}>{expanded ? 'Listo' : 'Notas'}</Button>
+        <Button variant={expanded ? 'ink' : 'ghost'} icon={PencilLine} onPress={onToggle} accessibilityLabel={`Notas y extras de ${item.nombre}`}>{expanded ? 'Listo' : 'Notas'}</Button>
         <Press accessibilityRole="button" accessibilityLabel={`Quitar ${item.nombre}`} onPress={remove} hapticKind={null}
           style={{ width: TOUCH, height: TOUCH, alignItems: 'center', justifyContent: 'center', borderRadius: radius.md }}>
-          <Trash2 size={20} color={c.red} />
+          <Trash2 size={20} color={c.muted} />
         </Press>
       </View>
       {expanded ? <View style={{ marginTop: space.md }}>{children}</View> : null}

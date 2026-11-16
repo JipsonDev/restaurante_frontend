@@ -19,7 +19,8 @@ export function minutesSince(value, now = Date.now()) {
   return Math.floor((n - d) / 60000);
 }
 // Compacto para la casilla: 7' · 1h05 · 3 d (una cuenta olvidada no rompe la cuadrícula).
-const shortMinutes = m => m == null ? '' : m >= 1440 ? `${Math.floor(m / 1440)} d` : m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}` : `${m}'`;
+// Un solo formato de tiempo en todas las mesas: «8 min», «1 h 05», «+1 día».
+const shortMinutes = m => m == null ? '' : m >= 1440 ? `+${Math.floor(m / 1440)} ${Math.floor(m / 1440) === 1 ? 'día' : 'días'}` : m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}` : `${Math.max(1, m)} min`;
 
 // Reservas de hoy (el mesero solo necesita la próxima de cada mesa). Se refresca cada minuto.
 export function useTodayReservations(enabled = true) {
@@ -67,7 +68,10 @@ export function TableTile({ mesa, state, order, width, now, selected, ready, ale
       borderColor: selected ? c.primary : meta.border, justifyContent: 'space-between', gap: 4 }}>
     <Ping trigger={state} color={filled ? c.primary : c.ink} />
     <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 4 }}>
-      <Num size={24} weight="700" color={meta.number} style={{ lineHeight: 28 }}>{String(mesa.numero).padStart(2, '0')}</Num>
+      <View>
+        <Num size={24} weight="700" color={meta.number} style={{ lineHeight: 28 }}>{String(mesa.numero).padStart(2, '0')}</Num>
+        {mesa.capacidad ? <Num size={12} color={muted}>{mesa.capacidad} p.</Num> : null}
+      </View>
       {order && opened != null ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
         {late ? <Clock3 size={13} color={filled ? c.onPrimary : c.red} /> : null}
         <Num size={13} weight={late ? '700' : '500'} color={late && !filled ? c.red : muted} numberOfLines={1}>{shortMinutes(opened)}</Num>
@@ -75,8 +79,10 @@ export function TableTile({ mesa, state, order, width, now, selected, ready, ale
     </View>
     {ready ? <Stamp color={filled ? c.onPrimary : c.green} rotate={-4} size={12}>{ready > 1 ? `${ready} listas` : 'Lista'}</Stamp> : null}
     {state === 'Reservada' || (state === 'Libre' && reservation && resMinutes != null && resMinutes <= 90) ? <Stamp color={c.purple} rotate={-5} size={12}>{`R ${timeOf(reservation?.fecha_hora) || ''}`.trim()}</Stamp> : null}
-    {order ? <Num size={15} weight="700" color={filled ? c.onPrimary : c.text} style={{ textAlign: 'right' }}>{money(balance)}</Num>
-      : <T size={14} weight="600" color={state === 'Libre' ? c.green : meta.text}>{state === 'Libre' ? `Libre · ${mesa.capacidad || '—'} p.` : meta.label}</T>}
+    <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'flex-end' }}>
+      {order ? <Num size={15} weight="700" color={filled ? c.onPrimary : c.text}>{money(balance)}</Num>
+        : <T size={14} weight="600" color={state === 'Libre' ? c.muted : meta.text}>{state === 'Libre' ? 'Libre' : meta.label}</T>}
+    </View>
   </Press>;
 }
 
@@ -161,9 +167,9 @@ export function TransferSheet({ open, from, mesas, stateFor, onPick, onClose, bu
         const meta = comandaTableMeta(state, c);
         return <Press key={m.id} accessibilityRole="button" accessibilityLabel={`${free ? 'Transferir a' : 'Unir con'} mesa ${m.numero}`} disabled={busy} onPress={() => onPick(m)} hapticKind="medium"
           style={{ width: '31%', minWidth: 96, minHeight: 72, padding: 10, borderRadius: radius.sm, borderWidth: 1.5, borderStyle: meta.shape === 'dashed' ? 'dashed' : 'solid',
-            borderColor: meta.shape === 'filled' ? c.primary : meta.border, backgroundColor: c.surface, justifyContent: 'space-between' }}>
-          <Num size={20} weight="700">{String(m.numero).padStart(2, '0')}</Num>
-          <T size={13} weight="700" color={free ? c.green : c.text}>{free ? 'Mover aquí' : 'Unir'}</T>
+            borderColor: meta.border, backgroundColor: meta.shape === 'filled' ? meta.bg : c.surface, justifyContent: 'space-between' }}>
+          <Num size={20} weight="700" color={meta.shape === 'filled' ? c.onPrimary : c.text}>{String(m.numero).padStart(2, '0')}</Num>
+          <T size={13} weight="700" color={meta.shape === 'filled' ? c.onPrimary : c.text}>{free ? 'Mover aquí' : 'Unir'}</T>
         </Press>;
       })}
     </View>

@@ -17,7 +17,7 @@ function ExpressRow({ order, wide, onOpen, now, alerts, colors, index }) {
   const delivery = order.tipo === 'Delivery';
   const detail = delivery ? [order.delivery_telefono, order.delivery_direccion].filter(Boolean).join(' · ') : order.cliente_dato;
   const items = (order.items || []).reduce((sum, item) => sum + Number(item.cantidad || 0), 0);
-  const note = state.issue ? ['Entrega registrada con cobro pendiente. Revisa el saldo en caja.', c.red]
+  const note = state.issue ? ['Se entregó sin cobrar todo: revisa el saldo en caja.', c.red]
     : state.ready && !state.paid ? ['Cocina lista · cobra antes de entregar.', c.amber]
     : state.canDeliver ? ['Pagado y listo para entregar.', c.green] : null;
   return <Appear delay={Math.min(index, 8) * 30}>
@@ -60,7 +60,7 @@ export default function WaiterExpress({ colors, width, orders, view, setView, dr
       <IconButton icon={RefreshCw} label="Actualizar Express" onPress={refresh} disabled={loading} />
     </View>
     <View style={{ flexDirection: 'row', gap: space.sm }}>
-      <Button variant="primary" size="lg" icon={ShoppingBag} onPress={() => startOrder('Para llevar')} style={{ flex: 1 }} accessibilityLabel="Nuevo pedido para llevar">Para llevar</Button>
+      <Button variant="outline" size="lg" icon={ShoppingBag} onPress={() => startOrder('Para llevar')} style={{ flex: 1 }} accessibilityLabel="Nuevo pedido para llevar">Para llevar</Button>
       <Button variant="outline" size="lg" icon={Truck} onPress={() => startOrder('Delivery')} style={{ flex: 1 }} accessibilityLabel="Nuevo pedido delivery">Delivery</Button>
     </View>
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.sm }}>

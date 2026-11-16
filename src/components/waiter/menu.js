@@ -2,13 +2,14 @@
 // «Batido de mora ····· 2,80». Tocar la línea suma uno; mantener (o el botón ⋯) abre la personalización.
 import React, { memo, useMemo, useState } from 'react';
 import { ScrollView, TextInput, View } from 'react-native';
-import { Search, SlidersHorizontal, X, RotateCcw, Flame, ShoppingBag, Bike, LockKeyhole } from 'lucide-react-native';
+import { Search, SlidersHorizontal, X, RotateCcw, Flame, ShoppingBag, Bike, LockKeyhole, Plus, Minus, PencilLine } from 'lucide-react-native';
 import { comandaTableMeta, useTheme } from '../../theme';
 import { menuStock } from '../../utils/waiterCatalog.mjs';
 import { normalize } from '../../utils/waiterFavorites.mjs';
 import { T, Num, Label, Press, Button, Chip, LeaderLine, RollingNumber, BottomSheet, EmptyState, TOUCH, FONT, WEB, radius, space } from './comanda';
 
-const price = n => Number(n || 0).toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const amount = n => Number(n || 0).toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const price = n => `$${amount(n)}`; // mismo formato que la comanda: $1,80
 
 // ── Línea de producto ──────────────────────────────────────────────────────
 export const MenuRow = memo(function MenuRow({ producto, qty = 0, isPromo, locked, canAdd, onAdd, onCustomize, onDecrement, chooseTarget }) {
@@ -20,7 +21,7 @@ export const MenuRow = memo(function MenuRow({ producto, qty = 0, isPromo, locke
   const add = () => { if (off) return; if (!canAdd) return chooseTarget(); onAdd(producto, isPromo); }; // sin stock: WaiterApp avisa con un toast
   const custom = () => { if (off) return; if (!canAdd) return chooseTarget(); onCustomize?.(producto, isPromo); };
   const note = locked ? 'Envío pendiente' : !available ? 'Agotado' : limit ? 'Sin más stock' : stock < 9999 && stock <= 5 ? `Quedan ${stock}` : null;
-  const label = `${producto.nombre}, ${price(producto.precio)} dólares${qty ? `, ${qty} en la ronda` : ''}${note ? `, ${note}` : ''}`;
+  const label = `${producto.nombre}, ${amount(producto.precio)} dólares${qty ? `, ${qty} en la ronda` : ''}${note ? `, ${note}` : ''}`;
   return <View style={{ flexDirection: 'row', alignItems: 'stretch', borderBottomWidth: 1, borderBottomColor: c.line, opacity: off ? 0.5 : 1 }}>
     <Press accessibilityRole="button" accessibilityLabel={label} accessibilityHint={canAdd ? 'Toca para añadir uno; mantén para personalizar' : 'Elige primero mesa o pedido'}
       disabled={off} onPress={add} onLongPress={onCustomize && canAdd ? custom : undefined} hapticKind={off ? undefined : 'tap'} scaleTo={0.99} sink={0}
@@ -28,7 +29,7 @@ export const MenuRow = memo(function MenuRow({ producto, qty = 0, isPromo, locke
       <View style={{ width: 34, alignItems: 'center' }}>
         {qty > 0 ? <View style={{ minWidth: 30, height: 28, paddingHorizontal: 4, borderRadius: radius.sm, backgroundColor: c.ink, alignItems: 'center', justifyContent: 'center' }}>
           <RollingNumber value={qty} size={15} color={c.onInk} />
-        </View> : <Num size={15} color={c.faint}>{locked ? '' : '+'}</Num>}
+        </View> : locked ? null : <View style={{ width: 28, height: 28, borderRadius: radius.sm, borderWidth: 1.5, borderColor: c.lineStrong, alignItems: 'center', justifyContent: 'center' }}><Plus size={16} strokeWidth={2.5} color={c.text} /></View>}
         {locked ? <LockKeyhole size={16} color={c.muted} /> : null}
       </View>
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
@@ -41,9 +42,9 @@ export const MenuRow = memo(function MenuRow({ producto, qty = 0, isPromo, locke
       </View>
     </Press>
     {qty > 0 && canAdd && !locked ? <Press accessibilityRole="button" accessibilityLabel={`Quitar uno de ${producto.nombre}`} onPress={() => onDecrement(producto, isPromo)} hapticKind="select"
-      scaleTo={0.9} sink={0} hoverStyle={{ backgroundColor: c.soft }} style={{ width: TOUCH, alignItems: 'center', justifyContent: 'center' }}><Num size={22} weight="700" color={c.muted}>−</Num></Press> : null}
+      scaleTo={0.9} sink={0} hoverStyle={{ backgroundColor: c.soft }} style={{ width: TOUCH, alignItems: 'center', justifyContent: 'center' }}><Minus size={22} strokeWidth={2.75} color={c.text} /></Press> : null}
     {onCustomize && canAdd && !off ? <Press accessibilityRole="button" accessibilityLabel={`Personalizar ${producto.nombre}`} onPress={custom} hapticKind="tap"
-      scaleTo={0.9} sink={0} hoverStyle={{ backgroundColor: c.soft }} style={{ width: TOUCH, alignItems: 'center', justifyContent: 'center' }}><SlidersHorizontal size={19} color={c.muted} /></Press> : null}
+      scaleTo={0.9} sink={0} hoverStyle={{ backgroundColor: c.soft }} style={{ width: TOUCH, alignItems: 'center', justifyContent: 'center' }}><PencilLine size={19} color={c.muted} /></Press> : null}
   </View>;
 });
 
@@ -128,7 +129,7 @@ function TableTile({ mesa, state, current, onPress }) {
   return <Press accessibilityRole="button" accessibilityLabel={`Mesa ${mesa.numero}, ${meta.label}${current ? ', seleccionada' : ''}`} accessibilityState={{ selected: current }} onPress={onPress} hapticKind="select" scaleTo={0.94}
     style={{ width: 86, minHeight: 72, padding: 8, borderRadius: radius.md, borderWidth: current ? 3 : meta.shape === 'stamp' ? 2 : 1.5, borderStyle: meta.shape === 'dashed' ? 'dashed' : 'solid',
       borderColor: current ? c.primary : meta.border, backgroundColor: meta.bg, justifyContent: 'space-between' }}>
-    <Num size={24} weight="700" color={meta.number}>{mesa.numero}</Num>
+    <Num size={24} weight="700" color={meta.number}>{String(mesa.numero).padStart(2, '0')}</Num>
     <T size={13} weight="600" color={meta.text} numberOfLines={1}>{meta.label}</T>
   </Press>;
 }
@@ -151,7 +152,7 @@ export function TargetPickerSheet({ visible, onClose, mesas = [], zoneOf, stateO
     </View>}>
     {mesas.length > 8 ? <MenuSearch value={query} onChangeText={setQuery} placeholder="Buscar mesa o zona" /> : null}
     {groups.length ? groups.map(([zone, list]) => <View key={zone} style={{ gap: space.sm }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><Label>{zone}</Label><Num size={13} color={c.muted}>{list.filter(m => stateOf(m) === 'Libre').length} libres</Num></View>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><Label>{zone}</Label><Num size={13} color={c.muted}>{(n => `${n} ${n === 1 ? 'libre' : 'libres'}`)(list.filter(m => stateOf(m) === 'Libre').length)}</Num></View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         {list.map(m => <TableTile key={m.id} mesa={m} state={stateOf(m)} current={Number(m.id) === Number(currentMesaId)} onPress={() => onPickTable(m)} />)}
       </View>
