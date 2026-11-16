@@ -1,38 +1,74 @@
+// Menú del mesero («Comanda»): cabecera compacta (destino, búsqueda, categorías) y la carta como líneas de libreta.
 import React, { useEffect, useMemo, useState } from 'react';
 import { FlatList, Platform, View } from 'react-native';
-import { ArrowDownUp, LayoutGrid, List, ShoppingBag, MapPin, Search, RefreshCw } from 'lucide-react-native';
-import ProductCard from './WaiterProductCard';
-import { WText, WButton, WSearch, WFilters } from './WaiterUI';
+import { MapPin, Search, ShoppingBag, ChevronRight } from 'lucide-react-native';
+import { useTheme } from '../theme';
 import { filterMenuProducts } from '../utils/waiterCatalog.mjs';
 import { draftDeliveryStatus } from '../utils/waiterSync.mjs';
+import { T, Num, Label, Press, Button, EmptyState, RollingNumber, money, TOUCH_MAIN, radius, space } from './waiter/comanda';
+import { MenuRow, MenuSearch, CategoryChips, MenuFiltersSheet, QuickStrip } from './waiter/menu';
 
-export default function WaiterCatalog({ colors: c, width, products, categories, category, setCategory, search, setSearch, preferences, setPreferences, catalog, locked, counts, cartCount, cartTotal, openOrder, chooseTarget, onAdd, onDecrement, refresh, loading, loadError, bottomInset, draftState }) {
-  const { availableOnly, sort, view } = preferences;
+export default function WaiterCatalog({ width, products, categories, category, setCategory, search, setSearch, preferences, setPreferences, catalog, locked, counts, cartCount, cartTotal, openOrder, chooseTarget, onAdd, onDecrement, onCustomize, favorites, repeat, refresh, loading, loadError, bottomInset, draftState }) {
+  const { c } = useTheme();
+  const { availableOnly, sort } = preferences;
   const setAvailableOnly = value => setPreferences(previous => ({ ...previous, availableOnly: value }));
   const setSort = value => setPreferences(previous => ({ ...previous, sort: value }));
-  const setView = value => setPreferences(previous => ({ ...previous, view: value }));
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [measured, setMeasured] = useState(null);
   const localWidth = Math.min(width, measured ?? width);
-  const list = view === 'list' || (view === 'auto' && localWidth < 600);
   const padding = localWidth < 768 ? 16 : localWidth >= 1024 ? 32 : 24;
-  const gap = 12;
-  const columns = list ? 1 : Math.max(1, Math.floor((localWidth - padding * 2 + gap) / ((localWidth < 600 ? 140 : 180) + gap)));
-  const cardWidth = Math.max(0, Math.floor((localWidth - padding * 2 - gap * (columns - 1) - 1) / columns));
+  const columns = localWidth >= 1000 ? 2 : 1; // en tableta, dos columnas de libreta
   useEffect(() => { if (!categories.includes(category)) setCategory('Todas'); }, [categories, category, setCategory]);
   const items = useMemo(() => filterMenuProducts(products, { query: search, category, availableOnly, sort }), [products, search, category, availableOnly, sort]);
+  const browsing = !search && category === 'Todas';
   const clear = () => { setSearch(''); setCategory('Todas'); setAvailableOnly(false); };
-  const header = <View style={{ gap: 12, paddingBottom: 14 }}>
-    <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}><View style={{ flex: 1 }}><WText style={{ fontSize: 25, color: c.ink }}>Menú</WText><WText style={{ color: c.muted, fontSize: 11, marginTop: 4 }}>Busca, selecciona y añade al pedido.</WText></View><WButton colors={c} label="Actualizar menú" Icon={RefreshCw} onPress={refresh} disabled={loading} /></View>
-    <View style={{ borderWidth: 1, borderColor: locked ? c.warning : c.line, borderRadius: 6, backgroundColor: c.surface, paddingLeft: 12, paddingRight: 4, minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 10 }}><View>{catalog.reason?.startsWith('express') || catalog.reason === 'draft' ? <ShoppingBag size={18} color={c.brand} /> : <MapPin size={18} color={c.brand} />}</View><View style={{ flex: 1, minWidth: 0 }}><WText numberOfLines={2} style={{ color: c.ink, fontSize: 12 }}>{catalog.label}</WText>{locked ? <WText style={{ color: c.warning, fontSize: 10, marginTop: 3 }}>Confirma el envío desde Pedido para continuar.</WText> : !catalog.editable ? <WText style={{ color: c.muted, fontSize: 10, marginTop: 3 }}>Puedes explorar el menú sin crear un pedido.</WText> : null}</View><WButton colors={c} label="Seleccionar destino" onPress={chooseTarget} disabled={locked} style={{ borderWidth: 0, backgroundColor: 'transparent' }}>{catalog.editable ? 'Cambiar' : 'Elegir'}</WButton></View>
-    {loadError ? <WText accessibilityRole="alert" style={{ color: c.danger, fontSize: 12 }}>No se pudo actualizar el catálogo. Pulsa actualizar para reintentar.</WText> : null}
-    <View style={{ flexDirection: 'row', gap: 8 }}><WSearch colors={c} label="Buscar productos" placeholder="Producto, descripción o categoría" value={search} onChangeText={setSearch} /><WButton colors={c} label={list ? 'Ver productos en tarjetas' : 'Ver productos en lista'} Icon={list ? LayoutGrid : List} onPress={() => setView(list ? 'grid' : 'list')} /></View>
-    <WFilters colors={c} label="Categorías del menú" items={categories.map(value => [value, value === 'Todas' ? 'Todo' : value])} value={category} onChange={setCategory} />
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: -10 }}><WButton colors={c} active={availableOnly} onPress={() => setAvailableOnly(!availableOnly)} label="Mostrar solo disponibles">Solo disponibles</WButton><WButton colors={c} label="Cambiar orden de productos" Icon={ArrowDownUp} onPress={() => setSort(sort === 'name' ? 'price' : 'name')}>{sort === 'name' ? 'Nombre A–Z' : 'Menor precio'}</WButton><WText accessibilityLiveRegion="polite" style={{ color: c.muted, fontSize: 11, marginLeft: 'auto' }}>{items.length} {items.length === 1 ? 'producto' : 'productos'}</WText></View>
+  const express = catalog.reason?.startsWith('express') || catalog.reason === 'draft';
+  const header = <View style={{ gap: space.md, paddingBottom: space.md }}>
+    <Press accessibilityRole="button" accessibilityLabel={`Destino: ${catalog.label}. ${catalog.editable ? 'Cambiar' : 'Elegir'}`} onPress={chooseTarget} disabled={locked} hapticKind="tap"
+      hoverStyle={{ backgroundColor: c.soft }} style={{ minHeight: TOUCH_MAIN, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.md, borderRadius: radius.md,
+        borderWidth: 1.5, borderStyle: catalog.editable ? 'solid' : 'dashed', borderColor: locked ? c.amber : catalog.editable ? c.ink : c.lineStrong, backgroundColor: c.surface }}>
+      {express ? <ShoppingBag size={20} color={c.text} /> : <MapPin size={20} color={c.text} />}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Label size={13}>{catalog.editable ? 'Pidiendo para' : 'Sin destino'}</Label>
+        <T size={16} weight="700" numberOfLines={1}>{catalog.label}</T>
+        {locked ? <T size={13} color={c.amber} weight="600">Confirma el envío desde Comanda para seguir.</T> : null}
+      </View>
+      <T size={15} weight="700" color={c.primary}>{catalog.editable ? 'Cambiar' : 'Elegir'}</T>
+      <ChevronRight size={18} color={c.primary} />
+    </Press>
+    {loadError ? <View accessibilityRole="alert" style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+      <T size={14} color={c.red} weight="600" style={{ flex: 1 }}>No se pudo actualizar el menú.</T><Button size="sm" onPress={refresh} loading={loading}>Reintentar</Button>
+    </View> : null}
+    <MenuSearch value={search} onChangeText={setSearch} onFilters={() => setFiltersOpen(true)} filtersActive={availableOnly || sort !== 'name'} />
+    <CategoryChips items={categories.map(value => [value, value === 'Todas' ? 'Todo' : value])} value={category} onChange={setCategory} />
+    {browsing ? <QuickStrip favorites={favorites} counts={counts} canAdd={catalog.editable} locked={locked} onAdd={onAdd} chooseTarget={chooseTarget} repeat={catalog.editable ? repeat : null} /> : null}
+    <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: space.xs }}>
+      <Label color={c.text}>{category === 'Todas' ? 'Carta' : category}</Label>
+      <Num size={13} color={c.muted} accessibilityLiveRegion="polite">{items.length} {items.length === 1 ? 'producto' : 'productos'}</Num>
+    </View>
   </View>;
-  return <View style={{ flex: 1, minHeight: 0, minWidth: 0 }} onLayout={event => { const next = event.nativeEvent.layout.width; if (next > 0) setMeasured(next); }}>
-    <FlatList key={`${columns}-${list}`} data={items} numColumns={columns} keyExtractor={item => String(item.id)} ListHeaderComponent={header} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} initialNumToRender={8} windowSize={5} removeClippedSubviews={Platform.OS !== 'web'} contentContainerStyle={{ padding, paddingTop: 20, paddingBottom: (bottomInset || 0) + 24 }} columnWrapperStyle={columns > 1 ? { gap, marginBottom: gap } : undefined} ItemSeparatorComponent={columns === 1 ? () => <View style={{ height: gap }} /> : undefined}
-      ListEmptyComponent={<View style={{ alignItems: 'center', gap: 12, paddingVertical: 32 }}><Search size={26} color={c.muted} /><WText style={{ color: c.ink, fontSize: 14 }}>{products.length ? 'No hay productos con estos filtros' : 'El menú todavía no tiene productos'}</WText>{products.length ? <WButton colors={c} onPress={clear}>Limpiar filtros</WButton> : null}</View>}
-      renderItem={({ item }) => <ProductCard producto={item} colors={c} cardWidth={cardWidth} qty={counts[item.id] || 0} layout={list ? 'list' : 'grid'} locked={locked} canAdd={catalog.editable} chooseTarget={chooseTarget} onPress={onAdd} onDecrement={onDecrement} />} />
-    {cartCount > 0 ? <View style={{ borderTopWidth: 1, borderColor: c.line, backgroundColor: c.secondary, padding: 10, paddingBottom: (bottomInset || 0) + 10 }}><WText style={{color:draftState?.error||draftState?.pending?c.warning:c.muted,fontSize:10,marginBottom:6}}>{draftDeliveryStatus({hasDraft:true,...draftState}).label}</WText><WButton colors={c} primary onPress={openOrder} Icon={ShoppingBag} label="Ver pedido actual">Ver pedido · {cartCount} {cartCount === 1 ? 'artículo' : 'artículos'} · ${Number(cartTotal || 0).toFixed(2)}</WButton></View> : null}
+  const row = item => <MenuRow producto={item} qty={counts[item.id] || 0} locked={locked} canAdd={catalog.editable} chooseTarget={chooseTarget} onAdd={onAdd} onDecrement={onDecrement} onCustomize={onCustomize} />;
+  const status = draftDeliveryStatus({ hasDraft: true, ...draftState });
+  return <View style={{ flex: 1, minHeight: 0, minWidth: 0, backgroundColor: c.bg }} onLayout={event => { const next = event.nativeEvent.layout.width; if (next > 0) setMeasured(next); }}>
+    <FlatList key={columns} data={items} numColumns={columns} keyExtractor={item => String(item.id)} ListHeaderComponent={header} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}
+      initialNumToRender={14} windowSize={7} removeClippedSubviews={Platform.OS !== 'web'}
+      contentContainerStyle={{ padding, paddingTop: space.lg, paddingBottom: (bottomInset || 0) + 24, maxWidth: 1180, width: '100%', alignSelf: 'center' }}
+      columnWrapperStyle={columns > 1 ? { gap: space.xl } : undefined}
+      ListEmptyComponent={<EmptyState icon={Search} title={products.length ? 'Nada coincide con la búsqueda' : 'El menú todavía no tiene productos'}
+        description={products.length ? 'Revisa la ortografía o quita los filtros.' : 'Cuando el administrador cargue productos aparecerán aquí.'}
+        action={products.length ? <Button onPress={clear}>Limpiar filtros</Button> : <Button onPress={refresh} loading={loading}>Actualizar</Button>} />}
+      renderItem={({ item }) => columns > 1 ? <View style={{ flex: 1, minWidth: 0 }}>{row(item)}</View> : row(item)} />
+    {cartCount > 0 ? <View style={{ borderTopWidth: 1, borderColor: c.line, backgroundColor: c.surface, paddingHorizontal: padding, paddingTop: 8, paddingBottom: (bottomInset || 0) + 8 }}>
+      <Press accessibilityRole="button" accessibilityLabel={`Ver comanda: ${cartCount} ${cartCount === 1 ? 'artículo' : 'artículos'}, ${money(cartTotal)}`} onPress={openOrder} hapticKind="tap"
+        style={{ minHeight: TOUCH_MAIN, borderRadius: radius.md, backgroundColor: c.ink, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.lg, maxWidth: 1116, width: '100%', alignSelf: 'center' }}>
+        <View style={{ minWidth: 28, height: 28, borderRadius: 14, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 }}><RollingNumber value={cartCount} size={14} color={c.onPrimary} /></View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <T size={16} weight="700" color={c.onInk}>Ver ronda nueva</T>
+          <T size={13} color={c.onInk} style={{ opacity: 0.7 }} numberOfLines={2}>{status.key === 'local' ? 'Guardada aquí · sin enviar' : status.label}</T>
+        </View>
+        <RollingNumber value={Number(cartTotal || 0)} format={money} size={17} color={c.onInk} />
+      </Press>
+    </View> : null}
+    <MenuFiltersSheet visible={filtersOpen} onClose={() => setFiltersOpen(false)} availableOnly={availableOnly} setAvailableOnly={setAvailableOnly} sort={sort} setSort={setSort} onRefresh={refresh} loading={loading} />
   </View>;
 }

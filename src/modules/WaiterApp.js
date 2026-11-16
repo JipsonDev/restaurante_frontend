@@ -59,15 +59,24 @@ import axios from 'axios';
 import { useFonts } from 'expo-font';
 import { runExclusive } from '../utils/waiterLogic.mjs';
 import { useAuth, BASE_URL, assetUrl } from '../context/AuthContext';
-import { useTheme, operationalColors as UI_COLORS, tableStatusMeta } from '../theme';
+import { useTheme, operationalColors as UI_COLORS, tableStatusMeta, WaiterAppearance } from '../theme';
+import { ComandaToastProvider, FONT as COMANDA_FONT, useComandaFonts, useComandaToast, useToastLift } from '../components/waiter/comanda';
 import Logo from '../components/Logo';
 import WaiterFloor from '../components/WaiterFloor';
-import { addDraftProduct, changeDraftQuantity } from '../utils/waiterCart.mjs';
+import { TableActionsSheet, TransferSheet, readyRounds, salonHaptic, useTodayReservations } from '../components/waiter/salon'; // Salón:
+import { addDraftProduct, changeDraftQuantity, addCustomizedProduct, addLines } from '../utils/waiterCart.mjs';
+import { topProducts, lastRoundItems, extrasForProduct } from '../utils/waiterFavorites.mjs'; // Menú:
+import CustomizeSheet from '../components/waiter/CustomizeSheet'; // Menú:
+import { TargetPickerSheet, MenuSearch, CategoryChips } from '../components/waiter/menu'; // Menú:
 import { createRefreshQueue } from '../utils/kitchenLogic.mjs';
 import ProductCard from '../components/WaiterProductCard';
-import WaiterNavigation from '../components/WaiterNavigation';
+import WaiterNavigation, { WaiterBottomBar, WaiterMoreSheet } from '../components/WaiterNavigation';
 import useWaiterDrafts from '../services/useWaiterDrafts';
 import { validateDraft, emptyExpressInfo, isExpressDraftKey, savedDraftKeys } from '../utils/orderDrafts.mjs';
+// Comanda: hoja de pedido y cola sin conexión.
+import { ComandaHeader, LineCustomizer, NoticeSheet, OfflineQueue, OrderLine, PastRound, PriceChangesSheet, SectionLabel, SendBar, TearAway, TotalsBlock } from '../components/waiter/order';
+import { classifyError, nextDelay, priceDiffs, queueSummary, reusableExpressDraft } from '../utils/sendQueue.mjs';
+import { BottomSheet as CBottomSheet, Button as CButton, Chip as CChip, LeaderLine as CLeaderLine, Tally as CTally, Field as CField, Label as CLabel, Num as CNum, Perforation as CPerforation, StampBurst as CStampBurst, T as CT, money as cMoney } from '../components/waiter/comanda';
 import ExpressDraftList from '../components/ExpressDraftList';
 import { catalogContext } from '../utils/waiterNavigation.mjs';
 import { BOTTOM_INSET, TOP_INSET } from '../utils/safeArea';
@@ -84,19 +93,14 @@ const DEFAULT_BUSINESS_CONFIG = {
   servicio_porcentaje: '0',
 };
 // Solo 'PAGADO' y 'CANCELADO' cierran la cuenta en el backend.
-const WAITER_FONT = Platform.select({
-  web: 'Manrope, "Segoe UI", system-ui, sans-serif',
-  ios: 'System',
-  android: 'sans-serif',
-  default: undefined,
-});
+const WAITER_FONT = COMANDA_FONT;
 
 const Text = ({ style, ...props }) => (
   <RNText {...props} style={[WAITER_FONT ? { fontFamily: WAITER_FONT } : null, style]} />
 );
 
 // --- UTILIDADES ---
-function money(n) { return `$${Number(n || 0).toFixed(2)}`; }
+function money(n) { return cMoney(n); } // un solo formato de precio: $1,80
 
 function percentRate(value, fallback = 0) {
   const parsed = Number(String(value ?? fallback).replace(',', '.'));
@@ -238,8 +242,15 @@ const SwipeableRow = ({ children, onDelete, enabled, colors }) => {
   );
 };
 
-export default function App() {
-  useFonts({ Manrope: require('../../assets/fonts/Manrope-Regular.ttf') });
+// La app del mesero usa su propia identidad («Comanda»), independiente del panel de administración.
+export default function WaiterApp() {
+  return <WaiterAppearance><ComandaToastProvider bottomOffset={BOTTOM_INSET + 72}><App /></ComandaToastProvider></WaiterAppearance>;
+}
+
+function App() {
+  useComandaFonts();
+  const toast = useComandaToast();
+  const setToastLift = useToastLift();
   const { user, logout } = useAuth();
   const { width: windowWidth } = useWindowDimensions();
   const [measuredWidth, setMeasuredWidth] = useState(null);
@@ -249,7 +260,15 @@ export default function App() {
   }, []);
   const width = Math.min(windowWidth, measuredWidth ?? windowWidth);
   const { isDark, toggle: toggleTheme } = useTheme();
-  const colors = useMemo(() => isDark ? UI_COLORS.dark : { ...UI_COLORS.light, pageBg: '#F7F8FA', ink: '#142238', success: '#047857', warning: '#92570A', danger: '#BE123C', brand: '#8A5B08', brandHover: '#D99A1F', softOrange: '#FFF4D6', onAccent: '#142238', action: '#F6B325' }, [isDark]);
+  const { c: palette } = useTheme();
+  // Colores de la app en la paleta Comanda (papel, tinta, achiote).
+  const colors = useMemo(() => ({
+    pageBg: palette.bg, secondary: palette.surface, elevated: palette.surfaceAlt, surface: palette.surface, field: palette.soft, line: palette.line,
+    ink: palette.text, muted: palette.muted, faint: palette.faint, brand: palette.primary, brandHover: palette.primaryHover, softOrange: palette.primarySoft,
+    action: palette.primary, onAccent: palette.onPrimary, promotion: palette.purple, promotionSoft: palette.purpleSoft,
+    danger: palette.red, success: palette.green, successSoft: palette.greenSoft, warning: palette.amber, warningSoft: palette.amberSoft,
+    info: palette.sky, infoSoft: palette.skySoft, isDark: palette.isDark,
+  }), [palette]);
 
   const [step, setStep] = useState('mesas');
   const serviceNow = useServiceClock(['mesas', 'express', 'pedido'].includes(step));
@@ -296,6 +315,16 @@ export default function App() {
   const [targetOpen, setTargetOpen] = useState(false);
   const [addedNotice, setAddedNotice] = useState(null);
   const [customAlert, setCustomAlert] = useState(null);
+  // Comanda: animación de envío, cambios de precio y cola sin conexión.
+  const [tearing, setTearing] = useState(false);
+  const [sentBurst, setSentBurst] = useState(false);
+  const [priceReview, setPriceReview] = useState(null); // { diffs, message, items, config }
+  const [priceAccepting, setPriceAccepting] = useState(false);
+  const [resendTick, setResendTick] = useState(0);
+  const [queueAttempt, setQueueAttempt] = useState(0);
+  const [queueWakeAt, setQueueWakeAt] = useState(0);
+  const [queueRetrying, setQueueRetrying] = useState(false);
+  const queueLock = useRef(false);
   const kitchenNoticeTimer = useRef(null);
   const realtimeStatusRef = useRef('connecting');
   const serviceAlerts = useServiceAlerts(user?.id, (items) => {
@@ -431,6 +460,8 @@ export default function App() {
   const orderNote = orderNotes[cartKey] || '';
   const showingCart = cart.length > 0;
   const cartCount = cart.reduce((sum, item) => sum + Number(item.cantidad || 0), 0);
+  // Los avisos suben por encima de la barra «Enviar ronda» cuando está visible.
+  useEffect(() => { setToastLift(step === 'pedido' && cartCount > 0 ? 76 : 0); }, [step, cartCount]);
   const cartQtyByProduct = useMemo(() => cart.reduce((acc, item) => {
     acc[item.producto_id] = (acc[item.producto_id] || 0) + Number(item.cantidad || 0);
     return acc;
@@ -836,7 +867,10 @@ export default function App() {
 
   const startExpressOrder = (tipo = 'Para llevar') => {
     if (!drafts.ready || orderSendLock.current) return;
-    const key = drafts.createExpress(tipo);
+    // Comanda: reutiliza un borrador Express vacío en vez de crear uno nuevo cada vez.
+    const reusable = reusableExpressDraft(drafts);
+    const key = reusable || drafts.createExpress(tipo);
+    if (reusable && drafts.expressDrafts[reusable]?.pickupType !== tipo) drafts.updateExpress(reusable, { pickupType: tipo === 'Delivery' ? 'Delivery' : 'Para llevar' });
     setExpressView('active');
     setOrderMode('express');
     setSelectedExpressDraftKey(key);
@@ -868,9 +902,17 @@ export default function App() {
     setOrderNotes((prev) => ({ ...prev, [cartKey]: value }));
   }, [cartKey, drafts.pending, setCarritos, setOrderNotes]);
 
+  // Menú: avisos de stock como toast (no modal) y «añadido» con acción «Ver comanda», limitado a uno cada 2,5 s.
+  const lastAddToast = useRef(0);
+  const announceAdded = useCallback((text, detail, force = false) => {
+    const now = Date.now();
+    if (!force && now - lastAddToast.current < 2500) return;
+    lastAddToast.current = now;
+    toast.show(text, { detail, tone: 'success', duration: 2600, haptic: false, action: { label: 'Ver comanda', onPress: () => setStep('pedido') } });
+  }, [toast]);
   const handleNoStock = useCallback((producto) => {
-    setCustomAlert({ title: 'Agotado', message: `El producto "${producto.nombre}" no tiene unidades disponibles en stock.` });
-  }, []);
+    toast.show(`${producto.nombre} está agotado`, { tone: 'error', detail: 'No quedan unidades en stock.' });
+  }, [toast]);
 
   const handleAddProduct = useCallback((producto, isPromo = false) => {
     if (pendingSend || orderSendLock.current) return;
@@ -878,12 +920,54 @@ export default function App() {
     const localId = `${isPromo ? 'promo-' : ''}${producto.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const preview = addDraftProduct(cart, producto, isPromo, localId);
     if (preview.error) {
-      setCustomAlert({ title: 'Límite de stock', message: `No hay más unidades disponibles de ${producto.nombre}.` });
+      toast.show(`No quedan más ${producto.nombre}`, { tone: 'error', detail: 'Ya tienes en la ronda todas las unidades en stock.' });
       return;
     }
     setCartForMesa(current => addDraftProduct(current, producto, isPromo, localId).items);
     setAddedNotice({ id: producto.id, nombre: producto.nombre });
-  }, [cart, setCartForMesa, catalog.editable, pendingSend]);
+    // En la carta basta el contador que rueda y la barra «Ver ronda nueva»; en Promos (sin barra) se avisa.
+    if (isPromo || step !== 'productos') announceAdded(`${producto.nombre} añadido`, catalog.label);
+  }, [cart, setCartForMesa, catalog.editable, catalog.label, pendingSend, toast, announceAdded, step]);
+
+  // Menú: personalizar al añadir y repetir la ronda anterior (con «Deshacer»).
+  const [customizing, setCustomizing] = useState(null);
+  const openCustomize = useCallback((producto) => {
+    if (pendingSend || orderSendLock.current) return;
+    if (!catalog.editable) { setTargetOpen(true); return; }
+    setCustomizing(producto);
+  }, [catalog.editable, pendingSend]);
+  const handleCustomizedAdd = useCallback((choice) => {
+    const producto = customizing;
+    if (!producto || pendingSend || orderSendLock.current) return;
+    const localId = `${producto.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const preview = addCustomizedProduct(cart, producto, choice, localId);
+    if (preview.error) {
+      toast.show(`Solo quedan ${preview.available} de ${producto.nombre}`, { tone: 'error' });
+      return;
+    }
+    setCartForMesa(current => addCustomizedProduct(current, producto, choice, localId).items);
+    setCustomizing(null);
+    const extrasText = [...choice.modificadores.map(m => m.nombre), choice.notas].filter(Boolean).join(' · ');
+    announceAdded(`${choice.cantidad} × ${producto.nombre}`, extrasText || catalog.label, true);
+  }, [customizing, cart, setCartForMesa, pendingSend, toast, announceAdded, catalog.label]);
+  const favoriteProducts = useMemo(() => topProducts(pedidos, { products: productos.filter(p => !isPromotionProduct(p)) }), [pedidos, productos]);
+  const repeatLines = useMemo(() => lastRoundItems(pedidoActual), [pedidoActual]);
+  const repeatSummary = useMemo(() => {
+    if (!repeatLines.length) return null;
+    const priceOf = l => Number(productos.find(p => Number(p.id) === Number(l.producto_id))?.precio || 0) + l.modificadores.reduce((m, x) => m + Number(x.precio_extra || 0), 0);
+    return { summary: repeatLines.map(l => `${l.cantidad}× ${l.nombre}`).join(', '), total: repeatLines.reduce((s, l) => s + Number(l.cantidad || 0) * priceOf(l), 0) };
+  }, [repeatLines, productos]);
+  const handleRepeatRound = useCallback(() => {
+    if (!repeatLines.length || pendingSend || orderSendLock.current || !catalog.editable) return;
+    const before = cart;
+    const result = addLines(cart, repeatLines, productos);
+    if (result.items === cart) { toast.show('No se pudo repetir la ronda', { tone: 'error', detail: 'Esos productos ya no tienen stock.' }); return; }
+    setCartForMesa(() => result.items);
+    toast.show('Ronda anterior repetida', {
+      tone: 'success', detail: result.skipped.length ? `Sin stock: ${result.skipped.join(', ')}` : `${repeatLines.reduce((s, l) => s + Number(l.cantidad || 0), 0)} artículos añadidos`,
+      action: { label: 'Deshacer', onPress: () => setCartForMesa(() => before) },
+    });
+  }, [repeatLines, cart, productos, pendingSend, catalog.editable, setCartForMesa, toast]);
 
   const handleDecrementProduct = useCallback((producto, isPromo = false) => {
     setCartForMesa((current) => {
@@ -961,25 +1045,7 @@ export default function App() {
     setOrderSending(true);
     try {
       if (!drafts.ready) throw new Error('Espera a que se recuperen los borradores.');
-      if (!pendingSend) {
-        const [productResponse, tableResponse, orderResponse, configResponse] = await Promise.all([
-          axios.get(`${BASE_URL}/productos`, { timeout: 10000 }),
-          isExpressOrder ? Promise.resolve(null) : axios.get(`${BASE_URL}/mesas`, { timeout: 10000 }),
-          selectedExpressPedidoId ? axios.get(`${BASE_URL}/pedidos/${selectedExpressPedidoId}`, { timeout: 10000 }) : Promise.resolve(null),
-          axios.get(`${BASE_URL}/configuracion`, { timeout: 10000 }),
-        ]);
-        if (!isExpressOrder && !tableResponse.data.some(m => Number(m.id) === Number(mesaSel) && Number(m.activo ?? 1) === 1)) throw new Error('La mesa ya no esta disponible. El borrador se conserva.');
-        if (orderResponse && (!catalogContext({ express: true, savedExpressId: selectedExpressPedidoId, order: orderResponse.data }).editable)) throw new Error('El Express fue cobrado, cancelado o tiene abonos. El borrador se conserva.');
-        const checked = validateDraft(cart, productResponse.data);
-        setProductos(productResponse.data.filter(p => Number(p.disponible ?? 1) === 1));
-        if (checked.error) throw new Error(checked.error);
-        const serviceChanged = percentRate(configResponse.data.servicio_porcentaje, 0) !== serviceRate;
-        setBusinessConfig(configResponse.data);
-        if (checked.changes.length || serviceChanged) {
-          setCarritos(prev => ({ ...prev, [cartKey]: checked.items }));
-          return setCustomAlert({ title: 'Precios actualizados', message: `${checked.changes.length ? `Cambiaron los precios de: ${checked.changes.join(', ')}. ` : ''}${serviceChanged ? 'Cambió el porcentaje de servicio. ' : ''}Revisa el total y vuelve a enviar.` });
-        }
-      }
+      // Comanda: sin GET previos — el backend valida mesa, Express, disponibilidad, precios y servicio (409).
       const expressName = expressInfo.nombre.trim();
       const expressData = expressInfo.dato.trim();
       const deliveryPhone = expressInfo.telefono.trim();
@@ -1048,22 +1114,117 @@ export default function App() {
         setMesaSel(null);
       }
 
-      // Ahora sí cambiar de vista — ya hay pedido en el estado local
-      setStep(isExpressOrder && !selectedExpressPedidoId ? 'express' : 'pedido');
-      setCustomAlert({ title: 'Orden Enviada', message: 'La comanda ha sido enviada a cocina y la cuenta se registró en caja con éxito.' });
+      // Comanda: la hoja se arranca, cae el sello «ENVIADA» y volvemos al salón sin modal bloqueante.
+      // La mesa del aviso es la que el mesero eligió (no lo que devuelva el servidor), para no anunciar otra mesa.
+      const sentMesa = !isExpressOrder ? (mesaActual || mesas.find((m) => Number(m.id) === Number(finalOrder.mesa_id)) || null) : null;
+      const sentMesaId = !isExpressOrder ? (sentMesa?.id ?? finalOrder.mesa_id) : null;
+      const sentExpressId = isExpressOrder ? finalOrder.id : null;
+      setTearing(true);
+      setSentBurst(true);
+      setTimeout(() => {
+        setTearing(false);
+        setEditItemId(null);
+        setStep(isExpressOrder ? 'express' : 'mesas');
+      }, 260);
+      toast.show('Ronda enviada a cocina', {
+        tone: 'success',
+        detail: sentMesaId ? `Mesa ${String(sentMesa?.numero ?? sentMesaId).padStart(2, '0')}` : (finalOrder.cliente_nombre || undefined),
+        action: { label: sentMesaId ? 'Ver mesa' : 'Ver pedido', onPress: () => {
+          if (sentMesaId) { setOrderMode('mesa'); setSelectedExpressPedidoId(null); setMesaSel(sentMesaId); setStep('pedido'); }
+          else if (sentExpressId) openExpressOrder(finalOrder);
+        } },
+      });
 
       // Sync en background sin bloquear la UI
       scheduleLiveSync();
     } catch (error) {
-      if ([400, 404, 409, 422].includes(error.response?.status) && error.response?.data?.code !== 'REQUEST_CONFLICT') await drafts.reject(cartKey).catch(() => {});
-      setCustomAlert({
-        title: 'No se confirmó el envío',
-        message: error.response?.data?.message || error.response?.data?.error || error.message
-      });
+      // Comanda: según el tipo de error se conserva en cola, se piden confirmaciones o se descarta.
+      const kind = classifyError(error);
+      const serverMessage = error.response?.data?.message || error.response?.data?.error || error.message;
+      if (kind === 'offline' || kind === 'retry') {
+        setQueueAttempt(0); setQueueWakeAt(Date.now() + nextDelay(0));
+        toast.show(kind === 'offline' ? 'Sin conexión · ronda en cola' : 'El servidor no respondió · ronda en cola', {
+          tone: 'warning', detail: 'Se enviará sola al volver la red. No se duplica.',
+        });
+        setStep(isExpressOrder ? 'express' : 'mesas');
+      } else if (kind === 'changed') {
+        await drafts.reject(cartKey).catch(() => {});
+        await reviewPriceChanges(serverMessage);
+      } else {
+        if (error.response?.data?.code !== 'REQUEST_CONFLICT') await drafts.reject(cartKey).catch(() => {});
+        setCustomAlert({ title: 'No se pudo enviar la ronda', message: `${serverMessage} El borrador se conserva.` });
+      }
     } finally {
       setOrderSending(false);
     }
   });
+
+  // Comanda: tras un 409 de precio/servicio, se trae catálogo y configuración y se muestran las diferencias.
+  const reviewPriceChanges = async (message) => {
+    try {
+      const [productResponse, configResponse] = await Promise.all([
+        axios.get(`${BASE_URL}/productos`, { timeout: 10000 }),
+        axios.get(`${BASE_URL}/configuracion`, { timeout: 10000 }),
+      ]);
+      const checked = validateDraft(cart, productResponse.data);
+      setProductos(productResponse.data.filter(p => Number(p.disponible ?? 1) === 1));
+      setPriceReview({ message, diffs: priceDiffs(cart, productResponse.data.filter(p => Number(p.disponible ?? 1) === 1)), items: checked.items || cart, config: configResponse.data });
+    } catch (error) {
+      setCustomAlert({ title: 'Cambiaron los precios', message: `${message} Actualiza el menú y vuelve a enviar.` });
+    }
+  };
+  const acceptPriceChanges = () => {
+    if (!priceReview) return;
+    setPriceAccepting(true);
+    setCarritos(prev => ({ ...prev, [cartKey]: priceReview.items }));
+    if (priceReview.config) setBusinessConfig(priceReview.config);
+    setPriceReview(null);
+    setPriceAccepting(false);
+    setResendTick(n => n + 1); // se reenvía en el siguiente render, con el carrito y el servicio ya actualizados
+  };
+  useEffect(() => { if (resendTick) enviarCocina(); }, [resendTick]);
+
+  // Comanda: reenvío automático de rondas en cola (mismo request_id → el backend no duplica).
+  const flushQueue = useCallback(async (manual = false) => {
+    const entries = Object.entries(drafts.pending || {});
+    if (!entries.length || queueLock.current || orderSendLock.current) return;
+    queueLock.current = true; if (manual) setQueueRetrying(true);
+    let failed = false; let sent = 0;
+    try {
+      for (const [key, request] of entries) {
+        try {
+          await axios.post(`${BASE_URL}/pedidos`, request, { timeout: 20000 });
+          await drafts.complete(key); sent += 1;
+        } catch (error) {
+          const kind = classifyError(error);
+          if (kind === 'offline' || kind === 'retry') { failed = true; break; }
+          await drafts.reject(key).catch(() => {});
+          toast.show('Una ronda en cola no se aceptó', { tone: 'error', detail: `${queueSummary({ [key]: request }, mesas)[0]?.label || ''}: ${error.response?.data?.error || error.message}. El borrador se conserva.` });
+        }
+      }
+    } finally {
+      queueLock.current = false; setQueueRetrying(false);
+    }
+    if (sent) { toast.show(sent === 1 ? 'Ronda en cola enviada a cocina' : `${sent} rondas en cola enviadas`, { tone: 'success' }); scheduleLiveSync(); }
+    if (failed) {
+      setQueueAttempt(a => { const next = a + 1; setQueueWakeAt(Date.now() + nextDelay(next)); return next; });
+      if (manual) toast.show('Todavía sin conexión', { tone: 'warning', detail: 'La ronda sigue en cola.' });
+    } else { setQueueAttempt(0); setQueueWakeAt(0); }
+  }, [drafts, mesas, toast]);
+  const pendingCount = Object.keys(drafts.pending || {}).length;
+  useEffect(() => {
+    if (!pendingCount || !drafts.ready) return undefined;
+    const wait = Math.max(500, (queueWakeAt || Date.now() + nextDelay(queueAttempt)) - Date.now());
+    const timer = setTimeout(() => flushQueue(false), wait);
+    return () => clearTimeout(timer);
+  }, [pendingCount, drafts.ready, queueWakeAt, queueAttempt]);
+  useEffect(() => { if (realtimeStatus === 'connected' && pendingCount) flushQueue(false); }, [realtimeStatus]);
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
+    const online = () => flushQueue(false);
+    window.addEventListener('online', online);
+    return () => window.removeEventListener('online', online);
+  }, [flushQueue]);
 
   const deliveryLock = useRef(false);
   const [deliveringRound, setDeliveringRound] = useState(null);
@@ -1168,56 +1329,11 @@ export default function App() {
   const meseroNombre = user?.nombre || user?.name || 'Mesero';
 
   // --- MODAL DE TRANSFERIR O UNIR MESA ---
-  const renderTransferModal = () => {
-    if (!transferOpen) return null;
-    return (
-      <Modal visible={transferOpen} transparent animationType="slide" onRequestClose={() => setTransferOpen(false)}>
-        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: isDark ? 'rgba(9, 14, 23, 0.8)' : 'rgba(15, 23, 42, 0.5)' }}>
-          <View style={{ backgroundColor: colors.pageBg, height: '80%', borderTopLeftRadius: 32, borderTopRightRadius: 32, paddingBottom: BOTTOM_INSET, ...modernShadow }}>
-            <View style={{ padding: 24, borderBottomWidth: 1, borderColor: colors.line, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: colors.surface }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.softOrange, alignItems: 'center', justifyContent: 'center', marginRight: 16 }}>
-                  <ArrowRightLeft size={24} color={colors.brand} />
-                </View>
-                <View>
-                  <Text style={{ fontSize: 22, fontWeight: '600', color: colors.ink }}>Mover Mesa</Text>
-                  <Text style={{ fontSize: 13, color: colors.muted, fontWeight: '500', marginTop: 2 }}>Desde Mesa {mesaActual?.numero}</Text>
-                </View>
-              </View>
-              <TouchableOpacity onPress={() => setTransferOpen(false)} style={{ width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.field }}>
-                <X size={20} color={colors.ink} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView contentContainerStyle={{ padding: 24 }}>
-              <Text style={{ color: colors.muted, fontSize: 14, fontWeight: '600', marginBottom: 16 }}>Selecciona la mesa destino:</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
-                {mesas.filter(m => Number(m.id) !== Number(mesaSel)).map(m => {
-                  const vState = mesaEstadoVisual(m);
-                  const isFree = vState === 'Libre';
-                  return (
-                    <TouchableOpacity
-                      key={m.id}
-                      onPress={() => enviarTransferencia(m)}
-                      disabled={transferSending}
-                      style={{ width: isMobile ? '100%' : '48%', backgroundColor: colors.surface, padding: 16, borderRadius: 8, borderWidth: 1, borderColor: colors.line, ...softShadow }}
-                    >
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                        <Text style={{ fontSize: 18, fontWeight: '600', color: colors.ink }}>Mesa {m.numero}</Text>
-                        <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: isFree ? colors.success : colors.warning }} />
-                      </View>
-                      <Text style={{ fontSize: 13, color: colors.muted, fontWeight: '500' }}>
-                        {isFree ? 'Transferir cuenta' : 'Unir cuentas'}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-    );
-  };
+  // Salón: hoja «Transferir o unir» (BottomSheet Comanda). Libre = mueve la cuenta; ocupada = une.
+  const renderTransferModal = () => (
+    <TransferSheet open={transferOpen} from={mesaActual} mesas={mesas} stateFor={mesaEstadoVisual} busy={transferSending}
+      onClose={() => setTransferOpen(false)} onPick={(m) => enviarTransferencia(m)} />
+  );
 
   // --- MODAL DE DIVIDIR CUENTA ---
   const renderSplitBillModal = () => {
@@ -1232,173 +1348,51 @@ export default function App() {
       setActiveGuest(nextId);
     };
 
+    // Comanda: dividir cuenta en hoja inferior arrastrable.
     return (
-      <Modal visible={splitOpen} transparent animationType="slide" onRequestClose={() => setSplitOpen(false)}>
-        <View style={{
-          flex: 1,
-          justifyContent: isMobile ? 'flex-end' : 'center',
-          alignItems: isMobile ? 'stretch' : 'center',
-          backgroundColor: isDark ? 'rgba(9, 14, 23, 0.8)' : 'rgba(15, 23, 42, 0.5)'
-        }}>
-          <View style={{
-            backgroundColor: colors.pageBg,
-            height: isMobile ? '90%' : '85%',
-            width: isMobile ? '100%' : 600,
-            maxHeight: 900,
-            borderTopLeftRadius: 32,
-            borderTopRightRadius: 32,
-            borderBottomLeftRadius: isMobile ? 0 : 32,
-            borderBottomRightRadius: isMobile ? 0 : 32,
-            paddingBottom: isMobile ? BOTTOM_INSET : 0,
-            ...modernShadow,
-            overflow: 'hidden'
-          }}>
-            {isMobile && (
-              <View style={{ width: '100%', alignItems: 'center', paddingTop: 12, paddingBottom: 4, backgroundColor: colors.surface }}>
-                <View style={{ width: 40, height: 5, borderRadius: 3, backgroundColor: colors.line }} />
+      <CBottomSheet visible={splitOpen} onClose={() => setSplitOpen(false)} busy={splitSending} maxHeight="92%"
+        title="Dividir cuenta" subtitle={`${isExpressOrder ? 'Pedido' : `Mesa ${mesaActual?.numero || '-'}`} · Total ${cMoney(mesaDisplayTotal)}`}
+        footer={<CButton variant="primary" size="lg" full icon={Printer} loading={splitSending} onPress={enviarDivisionCaja}>Enviar división a caja</CButton>}>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <CChip selected={isEqual} onPress={() => setSplitMode('equal')}>Partes iguales</CChip>
+              <CChip selected={!isEqual} onPress={() => setSplitMode('items')}>Por productos</CChip>
+            </View>
+            {isEqual ? <View style={{ gap: 16, paddingTop: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <CT size={17} weight="600">Entre cuántas personas</CT>
+                <CTally value={splitWays} onChange={setSplitWays} min={2} max={50} label="Personas" />
               </View>
-            )}
-
-            <View style={{ padding: 24, paddingTop: isMobile ? 12 : 24, borderBottomWidth: 1, borderColor: colors.line, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: colors.surface }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.softOrange, alignItems: 'center', justifyContent: 'center', marginRight: 16 }}>
-                  <PieChart size={24} color={colors.brand} />
-                </View>
-                <View>
-                  <Text style={{ fontSize: 22, fontWeight: '600', color: colors.ink }}>Dividir Cuenta</Text>
-                  <Text style={{ fontSize: 13, color: colors.muted, fontWeight: '500', marginTop: 2 }}>
-                    Mesa {mesaActual?.numero || '-'} · Total: {money(mesaDisplayTotal)}
-                  </Text>
-                </View>
+              <CPerforation />
+              <View style={{ gap: 10 }}>
+                {equalAmounts.map((amount, i) => <CLeaderLine key={i} left={<CT size={16}>Parte {i + 1}</CT>} right={<CNum size={16} weight="600">{cMoney(amount)}</CNum>} />)}
               </View>
-              <TouchableOpacity onPress={() => setSplitOpen(false)} style={{ width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.field }}>
-                <X size={20} color={colors.ink} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={{ flexDirection: 'row', padding: 16, backgroundColor: colors.surface }}>
-              <TouchableOpacity
-                onPress={() => setSplitMode('equal')}
-                style={{ flex: 1, height: 46, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: isEqual ? colors.softOrange : colors.field, borderWidth: 1, borderColor: isEqual ? colors.brand : 'transparent', marginRight: 8 }}
-              >
-                <Text style={{ color: isEqual ? colors.brand : colors.muted, fontWeight: '600', fontSize: 14 }}>Partes Iguales</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setSplitMode('items')}
-                style={{ flex: 1, height: 46, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: !isEqual ? colors.softOrange : colors.field, borderWidth: 1, borderColor: !isEqual ? colors.brand : 'transparent', marginLeft: 8 }}
-              >
-                <Text style={{ color: !isEqual ? colors.brand : colors.muted, fontWeight: '600', fontSize: 14 }}>Por Productos</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={{ flex: 1 }}>
-              {isEqual ? (
-                <ScrollView contentContainerStyle={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }} showsVerticalScrollIndicator={false}>
-                  <Users size={64} color={colors.brand} style={{ marginBottom: 32 }} />
-                  <Text style={{ color: colors.muted, fontSize: 18, fontWeight: '500', marginBottom: 24, textAlign: 'center' }}>¿Entre cuántas personas?</Text>
-
-                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, borderRadius: 8, padding: 8, borderWidth: 1, borderColor: colors.line, ...softShadow }}>
-                    <TouchableOpacity
-                      onPress={() => setSplitWays(Math.max(2, splitWays - 1))}
-                      style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: colors.field, alignItems: 'center', justifyContent: 'center' }}
-                    >
-                      <Minus size={28} color={colors.ink} />
-                    </TouchableOpacity>
-                    <View style={{ width: 100, alignItems: 'center', justifyContent: 'center' }}>
-                      <Text style={{ fontSize: 36, fontWeight: '600', color: colors.ink }}>{splitWays}</Text>
+              {service > 0 ? <CT size={14} color={colors.muted}>Incluye el servicio de la cuenta.</CT> : null}
+            </View> : <View style={{ gap: 12, paddingTop: 8 }}>
+              <ScrollView horizontal style={{ flexGrow: 0 }} showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                {splitGuests.map(g => {
+                  const guestDisplayTotal = splitCents(mesaDisplayTotal, splitGuests.map((x) => expandedOrderItems.filter((item) => Number(itemAssignments[item.splitKey] || 1) === Number(x)).reduce((sum, item) => sum + Math.round(Number(item.unitPrice || 0) * 100), 0)))[splitGuests.indexOf(g)];
+                  return <CChip key={g} selected={activeGuest === g} onPress={() => setActiveGuest(g)} accessibilityLabel={`Comensal ${g}, ${cMoney(guestDisplayTotal)}`}>{`C${g} · ${cMoney(guestDisplayTotal)}`}</CChip>;
+                })}
+                <CChip icon={Plus} onPress={addGuest} accessibilityLabel="Añadir comensal">Comensal</CChip>
+              </ScrollView>
+              <CT size={14} color={colors.muted}>Toca un producto para pasarlo al comensal {activeGuest}.</CT>
+              <View>
+                {expandedOrderItems.map((item) => {
+                  const assignedTo = itemAssignments[item.splitKey] || 1;
+                  const mine = assignedTo === activeGuest;
+                  return <TouchableOpacity key={item.splitKey} accessibilityRole="button" accessibilityState={{ selected: mine }} accessibilityLabel={`${item.nombre}, comensal ${assignedTo}`}
+                    onPress={() => setItemAssignments(prev => ({ ...prev, [item.splitKey]: activeGuest }))}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52, borderBottomWidth: 1, borderColor: colors.line }}>
+                    <View style={{ minWidth: 34, height: 26, paddingHorizontal: 4, borderRadius: 4, borderWidth: 1.5, borderColor: colors.ink, backgroundColor: mine ? colors.ink : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                      <CNum size={13} weight="700" color={mine ? colors.surface : colors.ink}>C{assignedTo}</CNum>
                     </View>
-                    <TouchableOpacity
-                      onPress={() => setSplitWays(Math.min(50, splitWays + 1))}
-                      style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: colors.action || colors.brand, alignItems: 'center', justifyContent: 'center' }}
-                    >
-                      <Plus size={28} color={colors.onAccent} />
-                    </TouchableOpacity>
-                  </View>
+                    <View style={{ flex: 1 }}><CLeaderLine left={<CT size={16} weight={mine ? '600' : '400'} numberOfLines={1}>{item.nombre}</CT>} right={<CNum size={15}>{cMoney(item.unitPrice)}</CNum>} /></View>
+                  </TouchableOpacity>;
+                })}
+              </View>
+            </View>}
 
-                  <View style={{ marginTop: 40, alignItems: 'center', padding: 24, backgroundColor: colors.surface, borderRadius: 8, borderWidth: 1, borderColor: colors.brand, width: '100%', maxWidth: 300 }}>
-                    <Text style={{ color: colors.muted, fontSize: 16, fontWeight: '500', marginBottom: 8 }}>Importes por persona</Text>
-                    <Text style={{ color: colors.brand, fontSize: 42, fontWeight: '600', textAlign: 'center' }}>{[...new Set(equalAmounts)].map(money).join(' / ')}</Text>
-                    <Text style={{ color: colors.muted, marginTop: 8 }}>{equalAmounts.map((amount, i) => `Parte ${i + 1}: ${money(amount)}`).join(' · ')}</Text>
-                    {service > 0 ? (
-                      <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '600', marginTop: 8 }}>Incluye el servicio de la cuenta</Text>
-                    ) : null}
-                  </View>
-                </ScrollView>
-              ) : (
-                <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 24 }}>
-                  <View style={{ marginBottom: 16 }}>
-                    <ScrollView horizontal style={{ flexGrow: 0 }} showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingBottom: 8 }}>
-                      {splitGuests.map(g => {
-                        const isActive = activeGuest === g;
-                        const totalGuest = guestTotals[g] || 0;
-                        const guestDisplayTotal = splitCents(mesaDisplayTotal, splitGuests.map((g) => expandedOrderItems.filter((item) => Number(itemAssignments[item.splitKey] || 1) === Number(g)).reduce((sum, item) => sum + Math.round(Number(item.unitPrice || 0) * 100), 0)))[splitGuests.indexOf(g)];
-                        return (
-                          <TouchableOpacity
-                            key={g}
-                            onPress={() => setActiveGuest(g)}
-                            style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 8, backgroundColor: isActive ? colors.brand : colors.surface, borderWidth: 1, borderColor: isActive ? colors.brand : colors.line, ...softShadow, alignItems: 'center' }}
-                          >
-                            <Text style={{ color: isActive ? colors.onAccent : colors.ink, fontWeight: '600', fontSize: 14 }}>Comensal {g}</Text>
-                            <Text style={{ color: isActive ? 'rgba(255,255,255,0.8)' : colors.muted, fontWeight: '500', fontSize: 12, marginTop: 4 }}>{money(guestDisplayTotal)}</Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                      <TouchableOpacity
-                        onPress={addGuest}
-                        style={{ paddingHorizontal: 20, paddingVertical: 12, borderRadius: 8, backgroundColor: colors.softOrange, borderWidth: 1, borderColor: colors.brand, borderStyle: 'dashed', justifyContent: 'center', alignItems: 'center', flexDirection: 'row' }}
-                      >
-                        <Plus size={18} color={colors.brand} />
-                        <Text style={{ color: colors.brand, fontWeight: '600', fontSize: 14, marginLeft: 8 }}>Añadir nueva ronda</Text>
-                      </TouchableOpacity>
-                    </ScrollView>
-                  </View>
-
-                  <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '600', marginBottom: 12, paddingHorizontal: 4 }}>
-                    Toca un producto para asignarlo al Comensal {activeGuest}
-                  </Text>
-                  <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
-                    <View style={{ gap: 10 }}>
-                      {expandedOrderItems.map((item) => {
-                        const assignedTo = itemAssignments[item.splitKey] || 1;
-                        const isCurrentActive = assignedTo === activeGuest;
-                        return (
-                          <TouchableOpacity
-                            key={item.splitKey}
-                            onPress={() => setItemAssignments(prev => ({ ...prev, [item.splitKey]: activeGuest }))}
-                            style={{ flexDirection: 'row', alignItems: 'center', padding: 16, backgroundColor: isCurrentActive ? colors.softOrange : colors.surface, borderRadius: 8, borderWidth: 1, borderColor: isCurrentActive ? colors.brand : colors.line, ...softShadow }}
-                          >
-                            <View style={{ width: 36, height: 44, borderRadius: 6, backgroundColor: isCurrentActive ? colors.brand : colors.field, alignItems: 'center', justifyContent: 'center', marginRight: 16 }}>
-                              <Text style={{ color: isCurrentActive ? colors.onAccent : colors.muted, fontWeight: '600', fontSize: 12 }}>C-{assignedTo}</Text>
-                            </View>
-                            <View style={{ flex: 1 }}>
-                              <Text style={{ color: isCurrentActive ? colors.ink : colors.muted, fontWeight: '600', fontSize: 15 }}>{item.nombre}</Text>
-                              <Text style={{ color: isCurrentActive ? colors.brand : colors.muted, fontWeight: '500', fontSize: 13, marginTop: 2 }}>{money(item.unitPrice)}</Text>
-                            </View>
-                            {isCurrentActive ? <CheckCircle2 size={20} color={colors.brand} /> : null}
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                  </ScrollView>
-                </View>
-              )}
-            </View>
-
-            <View style={{ padding: 24, borderTopWidth: 1, borderColor: colors.line, backgroundColor: colors.surface }}>
-              <TouchableOpacity
-                disabled={splitSending}
-                onPress={enviarDivisionCaja}
-                style={{ height: 56, borderRadius: 8, backgroundColor: splitSending ? colors.muted : colors.brand, alignItems: 'center', justifyContent: 'center', flexDirection: 'row' }}
-              >
-                {splitSending ? <ActivityIndicator color={colors.onAccent} /> : <Printer size={20} color={colors.onAccent} />}
-                <Text style={{ color: colors.onAccent, fontSize: 16, fontWeight: '600', marginLeft: 12 }}>
-                  {splitSending ? 'Enviando...' : 'Enviar division a caja'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      </CBottomSheet>
     );
   };
 
@@ -1421,38 +1415,34 @@ export default function App() {
     contextLabel={catalog.label} topInset={TOP_INSET} bottomInset={BOTTOM_INSET}
   />;
 
-  const renderSideMenu = () => null;
+  const renderSideMenu = () => <WaiterMoreSheet open={menuOpen} onClose={() => setMenuOpen(false)} name={meseroNombre} navigate={navigate}
+    dark={isDark} toggleTheme={toggleTheme} refresh={loadData} logout={logout}
+    draftCount={draftKeys.length} draftAttention={!!drafts.error || Object.keys(drafts.pending).length > 0} openDrafts={() => setDraftListOpen(true)}
+    connection={realtimeStatus} lastSyncAt={lastSyncAt} syncing={loading || backgroundSyncing} syncError={loadError} contextLabel={catalog.label} />;
 
-  const renderTargetPicker = () => (
-    <Modal visible={targetOpen} transparent animationType="fade" onRequestClose={() => setTargetOpen(false)}>
-      <View style={{ flex: 1, backgroundColor: '#0f172a88', padding: 16, alignItems: 'center', justifyContent: 'center' }}>
-        <View style={{ width: '100%', maxWidth: 600, maxHeight: '90%', backgroundColor: colors.surface, borderRadius: 10, borderWidth: 1, borderColor: colors.line }}>
-          <View style={{ padding: 20, flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1, borderBottomColor: colors.line }}>
-            <View style={{ flex: 1 }}><Text style={{ fontSize: 18, fontWeight: '500', color: colors.ink }}>Destino del pedido</Text><Text style={{ color: colors.muted, fontSize: 12, marginTop: 4 }}>Selecciona una mesa o prepara un nuevo Express.</Text></View>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar selector de destino" onPress={() => setTargetOpen(false)} style={{ padding: 10 }}><X size={20} color={colors.muted} /></TouchableOpacity>
-          </View>
-          <ScrollView contentContainerStyle={{ padding: 16, gap: 10 }} keyboardShouldPersistTaps="handled">
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              {[['Para llevar', 'Pedido para llevar'], ['Delivery', 'Pedido delivery']].map(([type, label]) => <TouchableOpacity key={type} accessibilityRole="button" accessibilityLabel={label} onPress={() => { setTargetOpen(false); startExpressOrder(type); }} style={{ flex: 1, minWidth: 140, padding: 14, borderRadius: 6, backgroundColor: colors.softOrange, borderWidth: 1, borderColor: colors.brand }}><Text style={{ color: colors.brand, fontSize: 13, fontWeight: '600' }}>{label}</Text></TouchableOpacity>)}
-            </View>
-            <Text style={{ marginTop: 12, color: colors.muted, fontSize: 11 }}>MESAS DEL SALÓN</Text>
-            {mesas.map(mesa => <TouchableOpacity key={mesa.id} accessibilityRole="button" accessibilityLabel={`Usar mesa ${mesa.numero}`} onPress={() => { setTargetOpen(false); selectMesa(mesa); setStep('productos'); }} style={{ padding: 14, flexDirection: 'row', justifyContent: 'space-between', borderWidth: 1, borderColor: colors.line, borderRadius: 6 }}>
-              <View style={{ flex: 1 }}><Text style={{ color: colors.ink, fontWeight: '600' }}>Mesa {mesa.numero}</Text><Text style={{ color: colors.muted, fontSize: 11, marginTop: 4 }}>{mesaUbicacion(mesa)}</Text></View><Text style={{ color: statusMeta(mesaEstadoVisual(mesa), isDark).text, fontSize: 12 }}>{statusMeta(mesaEstadoVisual(mesa), isDark).label}</Text>
-            </TouchableOpacity>)}
-          </ScrollView>
-        </View>
-      </View>
-    </Modal>
-  );
+  // Menú: «Destino del pedido» como hoja inferior, mesas por zona con su estado por forma; Express como secundario.
+  const renderTargetPicker = () => <>
+    <TargetPickerSheet visible={targetOpen} onClose={() => setTargetOpen(false)} mesas={mesas} zoneOf={mesaUbicacion} stateOf={mesaEstadoVisual}
+      currentMesaId={orderMode === 'mesa' ? mesaSel : null}
+      onPickTable={mesa => { setTargetOpen(false); selectMesa(mesa); setStep('productos'); }}
+      onPickExpress={type => { setTargetOpen(false); startExpressOrder(type); }} />
+    <CustomizeSheet visible={!!customizing} product={customizing} extras={extras} inCart={customizing ? (cartQtyByProduct[customizing.id] || 0) : 0}
+      onClose={() => setCustomizing(null)} onConfirm={handleCustomizedAdd} />
+  </>;
 
+  // Menú: contexto del catálogo (destino) en el mismo lenguaje de libreta, sin barra de color.
   const renderCatalogContext = () => (
-    <View style={{ borderWidth: 1, borderColor: colors.line, borderLeftWidth: 3, borderLeftColor: colors.brand, backgroundColor: colors.surface, padding: 10, borderRadius: 6, marginBottom: 12, gap: 10 }}>
-      {loadError ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Reintentar carga del catálogo" onPress={loadData} style={{ paddingVertical: 8 }}><Text style={{ color: colors.danger, fontSize: 12 }}>No se pudo cargar el catálogo. Toca para reintentar.</Text></TouchableOpacity> : null}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-        <View style={{ flex: 1 }}><Text style={{ color: colors.ink, fontSize: 13, fontWeight: '500' }}>{isExpressOrder && !selectedExpressPedidoId ? `${pickupTypeLabel(pickupType)} · borrador` : catalog.label}</Text>
-          {!catalog.editable ? <Text style={{ color: colors.muted, fontSize: 12, marginTop: 4 }}>{ catalog.reason === 'closed-express' ? 'Puedes consultar el menú. Selecciona otro destino para un nuevo pedido.' : catalog.reason === 'advance' ? 'Esta cuenta tiene abonos. Gestiona el saldo en caja antes de modificarla.' : 'Consulta el menú y elige un destino cuando quieras pedir.'}</Text> : null}</View>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Seleccionar destino" onPress={() => setTargetOpen(true)} style={{ paddingHorizontal: 12, minHeight: 44, justifyContent: 'center', borderRadius: 6, backgroundColor: colors.softOrange }}><Text style={{ color: colors.brand, fontWeight: '600', fontSize: 12 }}>{catalog.editable ? 'Cambiar' : 'Elegir destino'}</Text></TouchableOpacity>
-      </View>
+    <View style={{ gap: 8, marginBottom: 12 }}>
+      {loadError ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Reintentar carga del catálogo" onPress={loadData} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: colors.danger, fontSize: 14, fontWeight: '600' }}>No se pudo cargar el catálogo. Toca para reintentar.</Text></TouchableOpacity> : null}
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Destino: ${catalog.label}. ${catalog.editable ? 'Cambiar' : 'Elegir destino'}`} onPress={() => setTargetOpen(true)}
+        style={{ minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, borderRadius: 6, borderWidth: 1.5, borderStyle: catalog.editable ? 'solid' : 'dashed', borderColor: catalog.editable ? colors.ink : colors.line, backgroundColor: colors.surface }}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' }}>{catalog.editable ? 'Pidiendo para' : 'Sin destino'}</Text>
+          <Text numberOfLines={1} style={{ color: colors.ink, fontSize: 16, fontWeight: '700' }}>{isExpressOrder && !selectedExpressPedidoId ? `${pickupTypeLabel(pickupType)} · borrador` : catalog.label}</Text>
+          {!catalog.editable ? <Text style={{ color: colors.muted, fontSize: 13, marginTop: 2 }}>{ catalog.reason === 'closed-express' ? 'Puedes consultar el menú. Selecciona otro destino para un nuevo pedido.' : catalog.reason === 'advance' ? 'Esta cuenta tiene abonos. Gestiona el saldo en caja antes de modificarla.' : 'Consulta el menú y elige un destino cuando quieras pedir.'}</Text> : null}
+        </View>
+        <Text style={{ color: colors.brand, fontWeight: '700', fontSize: 15 }}>{catalog.editable ? 'Cambiar' : 'Elegir'}</Text>
+      </TouchableOpacity>
     </View>
   );
 
@@ -1477,12 +1467,16 @@ export default function App() {
       if (key === selectedExpressDraftKey) { setSelectedExpressDraftKey(null); setOrderMode('mesa'); setMesaSel(null); setStep('express'); }
     } catch (error) { setCustomAlert({ title: 'No se eliminó el borrador', message: error.message }); }
   };
-  const renderDraftStatus = () => (drafts.error || pendingSend) ? (
-    <View style={{ paddingHorizontal: bodyPad, paddingVertical: 8, gap: 6, backgroundColor: colors.surface, borderBottomWidth: 1, borderColor: colors.line }}>
-      {drafts.error ? <Text style={{ color: colors.danger, fontSize: 12 }}>{drafts.error} Conserva esta página abierta y vuelve a intentar.</Text> : null}
-      {pendingSend ? <TouchableOpacity accessibilityRole="button" disabled={orderSending} onPress={enviarCocina} style={{ minHeight: 40, justifyContent: 'center' }}><Text style={{ color: colors.brand, fontWeight: '500', fontSize: 12 }}>{orderSending ? 'Confirmando envío…' : 'Envío sin confirmar · reintentar'}</Text></TouchableOpacity> : null}
-    </View>
-  ) : null;
+  const renderDraftStatus = () => {
+    // Comanda: errores de guardado + bandeja de rondas en cola (visible en todas las vistas).
+    const queued = (step === 'pedido' || orderSending) && pendingSend ? queueSummary(Object.fromEntries(Object.entries(drafts.pending || {}).filter(([k]) => k !== String(cartKey))), mesas) : queueSummary(drafts.pending, mesas);
+    if (!drafts.error && !queued.length) return null;
+    return <View>
+      {drafts.error ? <View style={{ paddingHorizontal: bodyPad, paddingVertical: 10, backgroundColor: colors.surface, borderBottomWidth: 1, borderColor: colors.line }}>
+        <CT size={14} color={colors.danger}>{drafts.error} Conserva esta página abierta y vuelve a intentar.</CT></View> : null}
+      <OfflineQueue entries={queued} retrying={queueRetrying} onRetry={() => flushQueue(true)} nextIn={queueWakeAt ? Math.max(0, queueWakeAt - Date.now()) : 0} />
+    </View>;
+  };
   const renderDraftList = () => (
     <Modal visible={draftListOpen} transparent animationType="fade" onRequestClose={() => setDraftListOpen(false)}>
       <View style={{ flex: 1, backgroundColor: '#0f172a88', padding: 16, alignItems: 'center', justifyContent: 'center' }}>
@@ -1499,33 +1493,119 @@ export default function App() {
     </Modal>
   );
 
-  const renderShell = (children, scrollable = true) => (
-    <View style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-      {renderTopTabs()}
-      {renderDraftStatus()}
-      {scrollable ? (
-        <ScrollView
-          style={{ flex: 1, minHeight: 0 }}
-          contentContainerStyle={{ paddingBottom: BOTTOM_INSET + (cartCount > 0 && step !== 'pedido' ? 96 : 32) }}
-          showsVerticalScrollIndicator={false}
-        >
-          {children}
-        </ScrollView>
-      ) : (
-        <View style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          {children}
-        </View>
-      )}
-    </View>
-  );
+  // Comanda: en tablet (≥900) Menú y Comanda comparten pantalla: catálogo a la izquierda, hoja a la derecha.
+  const bareShell = useRef(false);
+  const renderShell = (children, scrollable = true, footer = null) => {
+    if (bareShell.current) return (
+      <View style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        {scrollable ? <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>{children}</ScrollView>
+          : <View style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>{children}</View>}
+        {footer}
+      </View>
+    );
+    const splitView = width >= 900 && (step === 'productos' || step === 'pedido') && (!!mesaActual || isExpressOrder);
+    let body;
+    if (splitView) {
+      bareShell.current = true;
+      try {
+        body = <View style={{ flex: 1, minHeight: 0, flexDirection: 'row' }}>
+          <View style={{ flex: 1.35, minWidth: 0, minHeight: 0 }}>{renderProductos()}</View>
+          <View style={{ width: Math.min(460, Math.max(360, width * 0.4)), minHeight: 0, borderLeftWidth: 1, borderColor: colors.line, backgroundColor: colors.surface }}>
+            {renderShell(renderPedidoBody(), true, renderSendBar())}
+          </View>
+        </View>;
+      } finally { bareShell.current = false; }
+    }
+    return (
+      <View style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        {renderTopTabs()}
+        {renderDraftStatus()}
+        {splitView ? body : scrollable ? (
+          <ScrollView
+            style={{ flex: 1, minHeight: 0 }}
+            contentContainerStyle={{ paddingBottom: footer ? 24 : cartCount > 0 && step !== 'pedido' ? 96 : 32 }}
+            showsVerticalScrollIndicator={false}
+          >
+            {children}
+          </ScrollView>
+        ) : (
+          <View style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+            {children}
+          </View>
+        )}
+        {splitView ? null : footer}
+        <WaiterBottomBar step={step} navigate={navigate} cartCount={cartCount} expressCount={expressOrders.length} bottomInset={BOTTOM_INSET} setMenuOpen={setMenuOpen} />
+      </View>
+    );
+  };
 
-  const renderMesas = () => renderShell(<WaiterFloor
-    colors={colors} width={width} groups={mesasPorUbicacion} counts={tableCounts} now={serviceNow} alerts={serviceAlerts}
-    search={mesaSearch} setSearch={setMesaSearch} filter={mesaFilter} setFilter={setMesaFilter}
-    compact={compactTables} setCompact={setCompactTables} selected={mesaSel} selectTable={selectMesa}
-    stateFor={mesaEstadoVisual} orderFor={activeOrderForMesa} zones={mesaZones} zone={mesaZone} setZone={setMesaZone}
-    refresh={loadData} refreshing={loading} loadError={loadError}
-  />);
+  // Salón: reservas de hoy, acciones rápidas (mantener presionada), bandeja «Listo».
+  const salonReservations = useTodayReservations(!!user);
+  const [salonActionsMesa, setSalonActionsMesa] = useState(null);
+  const [trayDelivering, setTrayDelivering] = useState(null);
+  const salonReady = useMemo(() => readyRounds(pedidos, serviceNow), [pedidos, serviceNow]);
+  const salonFocusMesa = (mesa) => { setOrderMode('mesa'); setSelectedExpressPedidoId(null); setMesaSel(mesa.id); setEditItemId(null); };
+  const salonPedirCuenta = async (mesa) => {
+    const order = activeOrderForMesa(mesa.id);
+    if (!order) return;
+    try {
+      const { data } = await axios.post(`${BASE_URL}/pedidos/${order.id}/solicitar-cobro`);
+      if (data.pedido) setPedidos((prev) => upsertById(prev, data.pedido));
+      setMesas((prev) => prev.map((m) => (Number(m.id) === Number(mesa.id) ? { ...m, estado: 'Cuenta' } : m)));
+      toast.show(`Mesa ${mesa.numero}: cuenta pedida`, { detail: 'Caja ya la ve como por cobrar.', tone: 'success', haptic: 'success' });
+      scheduleLiveSync();
+    } catch (error) {
+      toast.show('No se pudo pedir la cuenta', { detail: error.response?.data?.message || error.message, tone: 'error', haptic: 'warning' });
+    }
+  };
+  const salonEntregar = (round, pedido) => runExclusive(deliveryLock, async () => {
+    if (!pedido.mesa_id && String(pedido.estado_cobro || '').toUpperCase() !== 'PAGADO') {
+      toast.show('Primero cobrar en caja', { detail: `Pedido #${pedido.id} aún no está pagado.`, tone: 'warning', haptic: 'warning' });
+      return;
+    }
+    setTrayDelivering(round.id);
+    try {
+      const { data } = await axios.put(`${BASE_URL}/pedidos/${round.pedido_id || pedido.id}/rondas/${round.id}`, { estado: 'ENTREGADO' });
+      if (data.pedido) setPedidos((prev) => upsertById(prev, data.pedido));
+      toast.show(pedido.mesa_id ? `Mesa ${pedido.mesa_numero || pedido.mesa_id}: entregado` : `#${pedido.id}: entregado`, { tone: 'success', haptic: 'success' });
+      scheduleLiveSync();
+    } catch (error) {
+      toast.show('No se pudo marcar como entregado', { detail: error.response?.data?.message || error.message, tone: 'error', haptic: 'warning' });
+    } finally { setTrayDelivering(null); }
+  });
+  const salonActionsOrder = salonActionsMesa ? activeOrderForMesa(salonActionsMesa.id) : null;
+  // Salón: el aviso flotante ahora es un toast Comanda con acción «Ver» (comida lista vibra con 'success').
+  useEffect(() => {
+    if (!kitchenNotice) return;
+    const n = kitchenNotice;
+    setKitchenNotice(null);
+    if (n.action === 'delay_summary') {
+      toast.show(n.title, { detail: n.body, tone: 'warning', action: { label: 'Ver', onPress: () => setNotiOpen(true) } });
+    } else if (n.action === 'sync_error') {
+      toast.show(n.title, { detail: n.body, tone: 'error', action: { label: 'Reintentar', onPress: () => scheduleLiveSync() } });
+    } else {
+      salonHaptic(n.action === 'manual_ping' ? 'warning' : 'success');
+      toast.show(n.title, { detail: n.body, tone: 'success', haptic: false, duration: 6000, action: { label: 'Ver', onPress: () => openPedidoFromNotification(n) } });
+    }
+  }, [kitchenNotice]);
+
+  const renderMesas = () => <>
+    {renderShell(<WaiterFloor
+      colors={colors} width={width} groups={mesasPorUbicacion} counts={tableCounts} now={serviceNow} alerts={serviceAlerts}
+      search={mesaSearch} setSearch={setMesaSearch} filter={mesaFilter} setFilter={setMesaFilter}
+      compact={compactTables} setCompact={setCompactTables} selected={mesaSel} selectTable={selectMesa}
+      stateFor={mesaEstadoVisual} orderFor={activeOrderForMesa} zones={mesaZones} zone={mesaZone} setZone={setMesaZone}
+      refresh={loadData} refreshing={loading} loadError={loadError}
+      reservations={salonReservations} onLongPressTable={setSalonActionsMesa} openTray={() => setNotiOpen(true)} readyCount={salonReady.length}
+    />)}
+    <TableActionsSheet mesa={salonActionsMesa} state={salonActionsMesa ? mesaEstadoVisual(salonActionsMesa) : 'Libre'} order={salonActionsOrder} onClose={() => setSalonActionsMesa(null)}
+      actions={{
+        order: () => { const m = salonActionsMesa; salonFocusMesa(m); setStep('productos'); },
+        view: () => selectMesa(salonActionsMesa),
+        bill: () => salonPedirCuenta(salonActionsMesa),
+        transfer: () => { salonFocusMesa(salonActionsMesa); setTransferOpen(true); },
+      }} />
+  </>;
 
   const renderExpress = () => renderShell(<WaiterExpress
     colors={colors} width={width} orders={expressOrders} view={expressView} setView={setExpressView} drafts={drafts} openDraft={resumeDraft} discardDraft={discardDraft} now={serviceNow} alerts={serviceAlerts}
@@ -1546,15 +1626,10 @@ export default function App() {
     return GlassWater;
   };
 
+  // Menú: categorías como Chips de tinta (sin iconos genéricos).
   const renderCategoryTabs = (values, selected, onSelect) => (
-    <ScrollView horizontal style={{ flexGrow: 0 }} showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 14 }}>
-      {values.map(cat => {
-        const active = selected === cat;
-        const Icon = categoryIconFor(cat);
-        return <TouchableOpacity key={cat} accessibilityRole="button" accessibilityLabel={`Categoría ${cat}`} accessibilityState={{ selected: active }} onPress={() => onSelect(cat)} style={{ minHeight: 44, paddingHorizontal: 14, flexDirection: 'row', gap: 7, borderRadius: 6, borderWidth: 1, borderColor: active ? colors.brand : colors.line, backgroundColor: active ? colors.softOrange : colors.surface, alignItems: 'center' }}>
-          <Icon size={16} color={active ? colors.brand : colors.muted} /><Text style={{ color: active ? colors.brand : colors.ink, fontSize: 12, fontWeight: '600' }}>{cat === 'Todas' ? 'Todo' : cat}</Text>
-        </TouchableOpacity>;
-      })}
+    <ScrollView horizontal style={{ flexGrow: 0 }} showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 12 }}>
+      <CategoryChips items={values.map(cat => [cat, cat === 'Todas' ? 'Todo' : cat])} value={selected} onChange={onSelect} />
     </ScrollView>
   );
 
@@ -1563,81 +1638,55 @@ export default function App() {
     colors={colors} width={width} products={productos} categories={categorias} category={categoria} setCategory={setCategoria}
     search={productoBusqueda} setSearch={setProductoBusqueda} preferences={menuPreferences} setPreferences={setMenuPreferences}
     catalog={{ ...catalog, label: isExpressOrder && !selectedExpressPedidoId ? `${expressInfo.nombre.trim() || 'Sin nombre'} · ${pickupTypeLabel(pickupType)} · borrador` : catalog.label }} locked={!!pendingSend || orderSending}
-    counts={cartQtyByProduct} cartCount={cartCount} cartTotal={mesaDisplayTotal} openOrder={() => setStep('pedido')}
-    chooseTarget={() => setTargetOpen(true)} onAdd={handleAddProduct} onDecrement={handleDecrementProduct}
+    counts={cartQtyByProduct} cartCount={width >= 900 && (!!mesaActual || isExpressOrder) ? 0 : cartCount} cartTotal={showingCart ? subtotal : 0} openOrder={() => setStep('pedido')}
+    chooseTarget={() => setTargetOpen(true)} onAdd={handleAddProduct} onDecrement={handleDecrementProduct} onCustomize={openCustomize}
+    favorites={favoriteProducts} repeat={repeatSummary ? { ...repeatSummary, onPress: handleRepeatRound } : null}
     refresh={loadData} loading={loading} loadError={loadError} bottomInset={BOTTOM_INSET}
   />, false);
 
   const renderPromociones = () => {
+    // Menú: promociones como líneas de comanda, mismo lenguaje que la carta.
     const listHeader = (
-      <View style={{ paddingBottom: 16 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20 }}>
-          <View style={{ width: 44, height: 44, borderRadius: 6, backgroundColor: colors.softOrange, alignItems: 'center', justifyContent: 'center' }}>
-            <BadgePercent size={24} color={colors.brand} />
-          </View>
-          <Text style={{ color: colors.ink, fontSize: 24, fontWeight: '500', marginLeft: 16 }}>Promociones</Text>
-        </View>
-
-        <View style={{ height: 46, borderWidth: 1, borderColor: colors.line, borderRadius: 6, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, marginBottom: 24, backgroundColor: colors.surface, ...softShadow }}>
-          <Search size={18} color={colors.muted} />
-          <TextInput
-            value={promoBusqueda}
-            onChangeText={setPromoBusqueda}
-            placeholder="Buscar promociones..."
-            placeholderTextColor={colors.muted}
-            style={{ flex: 1, color: colors.ink, fontSize: 14, fontWeight: '600', marginLeft: 12, paddingVertical: 0 }}
-          />
-        </View>
-
+      <View style={{ paddingBottom: 12, gap: 12 }}>
         {renderCatalogContext()}
-        {renderCategoryTabs(promoCategorias, promoCategoria, setPromoCategoria)}
+        <MenuSearch value={promoBusqueda} onChangeText={setPromoBusqueda} placeholder="Buscar promociones" />
+        {promoCategorias.length > 2 ? renderCategoryTabs(promoCategorias, promoCategoria, setPromoCategoria) : null}
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
+          <Text style={{ color: colors.ink, fontSize: 13, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' }}>Promociones</Text>
+          <Text style={{ color: colors.muted, fontSize: 13 }}>{promocionesFiltradas.length} {promocionesFiltradas.length === 1 ? 'promo' : 'promos'}</Text>
+        </View>
       </View>
     );
 
     return renderShell(
       <FlatList
         data={promocionesFiltradas}
-        key={productColumns}
         keyExtractor={(item) => item.id.toString()}
-        numColumns={productColumns}
         showsVerticalScrollIndicator={false}
-        initialNumToRender={isMobile ? 6 : 9}
-        maxToRenderPerBatch={isMobile ? 4 : 8}
-        updateCellsBatchingPeriod={80}
-        windowSize={isMobile ? 5 : 9}
+        initialNumToRender={12}
+        windowSize={7}
         removeClippedSubviews={Platform.OS !== 'web'}
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{ padding: bodyPad, paddingTop: 24, paddingBottom: BOTTOM_INSET + (cartCount > 0 && step !== 'pedido' ? 96 : 32) }}
-        columnWrapperStyle={productColumns > 1 ? { gap: productGap, marginBottom: productGap, justifyContent: 'flex-start' } : undefined}
-        ItemSeparatorComponent={productColumns === 1 ? () => <View style={{ height: productGap }} /> : undefined}
+        style={{ backgroundColor: colors.pageBg }}
+        contentContainerStyle={{ padding: bodyPad, paddingTop: 16, paddingBottom: BOTTOM_INSET + 32, maxWidth: 760, width: '100%', alignSelf: 'center' }}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={
-          promociones.length === 0 ? (
-            <View style={{ width: '100%', borderWidth: 1, borderColor: colors.line, borderRadius: 8, backgroundColor: colors.surface, padding: 32, alignItems: 'center', ...softShadow }}>
-              <BadgePercent size={48} color={colors.line} />
-              <Text style={{ color: colors.ink, fontSize: 18, fontWeight: '600', marginTop: 16 }}>Sin promociones activas</Text>
-            </View>
-          ) : (
-            <View style={{ width: '100%', alignItems: 'center', paddingVertical: 40 }}>
-              <Search size={44} color={colors.line} />
-              <Text style={{ color: colors.ink, fontWeight: '600', fontSize: 16, marginTop: 16 }}>Sin resultados</Text>
-            </View>
-          )
+          <View style={{ alignItems: 'center', paddingVertical: 40, gap: 8 }}>
+            {promociones.length === 0 ? <BadgePercent size={32} color={colors.faint || colors.muted} /> : <Search size={32} color={colors.faint || colors.muted} />}
+            <Text style={{ color: colors.ink, fontSize: 18, fontWeight: '700' }}>{promociones.length === 0 ? 'Sin promociones activas' : 'Nada coincide con la búsqueda'}</Text>
+            <Text style={{ color: colors.muted, fontSize: 15, textAlign: 'center' }}>{promociones.length === 0 ? 'Cuando el administrador cree promos aparecerán aquí.' : 'Prueba con otro nombre.'}</Text>
+          </View>
         }
         renderItem={({ item }) => (
           <ProductCard
             producto={item}
-            canAdd={catalog.editable && !pendingSend}
+            canAdd={catalog.editable}
+            locked={!!pendingSend || orderSending}
             chooseTarget={() => setTargetOpen(true)}
             qty={cartQtyByProduct[item.id] || 0}
             isPromo={true}
             onPress={(p) => handleAddProduct(p, true)}
             onDecrement={handleDecrementProduct}
-            onNoStock={handleNoStock}
-            cardWidth={productCardWidth}
-            isMobile={isMobile}
-            colors={colors}
-            showDescription={true}
           />
         )}
       />,
@@ -1649,448 +1698,155 @@ export default function App() {
   // estado cambiante) y envuelto en useCallback para evitar re-renders innecesarios
   // de toda la lista cuando cambia un solo item.
   const renderOrderItem = useCallback((item, isCartItem = true) => {
+    // Comanda: línea de la ronda nueva — cantidad con Tally, quitar con «Deshacer» 5 s, personalización en línea.
     const itemId = item.localId || item.id;
     const isEditing = editItemId === itemId;
-
     const productoOriginal = productos.find(p => Number(p.id) === Number(item.producto_id));
     const imgUrl = item.imagen_url || productoOriginal?.imagen_url;
-    const img = imgUrl ? assetUrl(imgUrl) : null;
-    const quantityControls = (<View style={{ width: 116, height: 44, borderRadius: 6, borderWidth: 1, borderColor: colors.line, flexDirection: 'row', alignItems: 'center', justifyContent: isCartItem ? 'space-between' : 'center', paddingHorizontal: 0, marginRight: 8, backgroundColor: colors.surface }}>
-                {isCartItem ? (
-                  <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Reducir cantidad de ${item.nombre}`} disabled={!showingCart} onPress={() => changeQty(item, -1)} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
-                    <Minus size={14} color={showingCart ? colors.ink : colors.muted} strokeWidth={3} />
-                  </TouchableOpacity>
-                ) : null}
-                <Text numberOfLines={1} adjustsFontSizeToFit style={{ color: colors.ink, fontSize: 15, fontWeight: '600', minWidth: 20, textAlign: 'center' }}>
-                  {item.cantidad}
-                </Text>
-                {isCartItem ? (
-                  <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Aumentar cantidad de ${item.nombre}`} disabled={!showingCart} onPress={() => changeQty(item, 1)} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
-                    <Plus size={14} color={showingCart ? colors.ink : colors.muted} strokeWidth={3} />
-                  </TouchableOpacity>
-                ) : null}
-              </View>);
+    const detail = [item.notas, ...(item.modificadores || []).map(modifierLabel)].filter(Boolean).join(' · ');
+    const removeWithUndo = () => {
+      const key = cartKey;
+      const index = cart.findIndex(i => (i.localId || i.id) === itemId);
+      removeItem(item);
+      if (isEditing) setEditItemId(null);
+      toast.show(`${item.nombre} quitado`, { duration: 5000, action: { label: 'Deshacer', onPress: () => setCarritos(prev => {
+        const list = [...(prev[key] || [])];
+        if (list.some(i => (i.localId || i.id) === itemId)) return prev;
+        list.splice(Math.max(0, Math.min(index, list.length)), 0, item);
+        return { ...prev, [key]: list };
+      }) } });
+    };
+    return <OrderLine key={itemId} item={item} total={lineTotal(item)} detail={detail} image={!isMobile && imgUrl ? assetUrl(imgUrl) : null}
+      expanded={isEditing} locked={!showingCart || !!pendingSend} onToggle={() => setEditItemId(isEditing ? null : itemId)}
+      onQty={delta => changeQty(item, delta)} onRemove={removeWithUndo}>
+      <LineCustomizer item={item} custom={customExtras[itemId] || {}}
+        exclusions={(productoOriginal ? extrasForProduct(extras, productoOriginal) : exclusionExtras).filter(e => e.tipo !== 'EXTRA')}
+        paid={(productoOriginal ? extrasForProduct(extras, productoOriginal) : paidExtras).filter(e => e.tipo === 'EXTRA')}
+        onNote={text => updateItem(item, { notas: text })} onToggle={extra => toggleModifier(item, extra)}
+        onCustomChange={patch => updateCustomExtra(itemId, patch)} onCustomAdd={() => addCustomExtra(item)} />
+    </OrderLine>;
+  }, [editItemId, productos, colors, isMobile, showingCart, pendingSend, cart, cartKey, extras, exclusionExtras, paidExtras, customExtras, changeQty, removeItem, updateItem, toggleModifier, addCustomExtra, updateCustomExtra, toast]);
 
-    return (
-      <View key={itemId} style={{ marginBottom: 12 }}>
-        <SwipeableRow enabled={isCartItem} onDelete={() => removeItem(item)} colors={colors}>
-          <View style={{ width: '100%', borderWidth: 1, borderColor: colors.line, borderRadius: 8, backgroundColor: colors.surface, padding: isMobile ? 12 : 16, ...softShadow }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <View style={{ width: isMobile ? 42 : 64, height: isMobile ? 42 : 64, borderRadius: 8, overflow: 'hidden', backgroundColor: colors.field, alignItems: 'center', justifyContent: 'center', marginRight: 12, borderWidth: 1, borderColor: colors.line, opacity: isCartItem ? 1 : 0.7 }}>
-                {img ? <Image source={{ uri: img }} style={{ width: '100%', height: '100%' }} resizeMode="cover" /> : <ChefHat size={32} color={colors.muted} />}
-              </View>
-
-              <View style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
-                <Text numberOfLines={2} style={{ color: colors.ink, fontSize: isMobile ? 15 : 17, fontWeight: '600', lineHeight: isMobile ? 18 : 22 }}>
-                  {item.nombre}
-                </Text>
-                <Text numberOfLines={2} style={{ color: colors.muted, fontSize: 13, fontWeight: '600', marginTop: 4 }}>
-                  {[item.notas, ...(item.modificadores || []).map(modifierLabel)].filter(Boolean).join(', ') || item.categoria_nombre || 'Sin observaciones'}
-                </Text>
-              </View>
-
-              {!isMobile ? quantityControls : null}
-
-              <Text numberOfLines={1} adjustsFontSizeToFit style={{ width: isMobile ? 60 : 80, textAlign: 'right', color: colors.brand, fontSize: isMobile ? 14 : 18, fontWeight: '600' }}>
-                {money(lineTotal(item))}
-              </Text>
-
-              {isCartItem && !isMobile ? (
-                <TouchableOpacity onPress={() => removeItem(item)} style={{ width: 36, height: 44, borderRadius: 6, backgroundColor: colors.field, alignItems: 'center', justifyContent: 'center', marginLeft: 8 }}>
-                  <Trash2 size={16} color={colors.danger} />
-                </TouchableOpacity>
-              ) : null}
-            </View>
-
-            {isMobile ? <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>{isCartItem ? <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Eliminar ${item.nombre} del borrador`} onPress={() => removeItem(item)} style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}><Trash2 size={17} color={colors.danger} /></TouchableOpacity> : <View />}{quantityControls}</View> : null}
-            {isCartItem ? (
-              <>
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  accessibilityLabel={`Notas y extras de ${item.nombre}`}
-                  accessibilityState={{ expanded: isEditing }}
-                  onPress={() => setEditItemId(isEditing ? null : itemId)}
-                  style={{ alignSelf: 'flex-start', marginTop: 16, height: 44, borderRadius: 6, paddingHorizontal: 16, backgroundColor: isEditing ? colors.softOrange : colors.field, alignItems: 'center', justifyContent: 'center', flexDirection: 'row' }}
-                >
-                  <Receipt size={14} color={isEditing ? colors.brand : colors.muted} />
-                  <Text style={{ color: isEditing ? colors.brand : colors.muted, fontSize: 12, fontWeight: '600', marginLeft: 8 }}>
-                    {isEditing ? 'Ocultar notas y extras' : 'Notas y extras adicionales'}
-                  </Text>
-                </TouchableOpacity>
-                {isEditing ? (
-                  <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderColor: colors.line }}>
-                    <Text style={{ color: colors.ink, fontSize: 13, fontWeight: '600', marginBottom: 8 }}>Notas adicionales</Text>
-                    <TextInput
-                      value={item.notas || ''}
-                      onChangeText={(text) => updateItem(item, { notas: text })}
-                      accessibilityLabel={`Notas para ${item.nombre}`}
-                      placeholder="Ej. sin cebolla, poco picante..."
-                      placeholderTextColor={colors.muted}
-                      multiline
-                      style={{ minHeight: 48, borderWidth: 1, borderColor: colors.line, borderRadius: 8, backgroundColor: colors.field, color: colors.ink, paddingHorizontal: 14, paddingVertical: 10, fontSize: 13, fontWeight: '600' }}
-                    />
-
-                    {exclusionExtras.length > 0 ? <Text style={{ color: colors.ink, fontSize: 13, fontWeight: '600', marginTop: 16, marginBottom: 10 }}>Exclusiones y opciones</Text> : null}
-                    <View style={{ gap: 8 }}>
-                      {exclusionExtras.map((extra) => {
-                        const active = (item.modificadores || []).some((m) => m.nombre === extra.nombre);
-                        const extraPrice = Number(extra.precio_extra ?? extra.precio ?? 0);
-                        return (
-                          <TouchableOpacity
-                            key={`${itemId}-${extra.nombre}`}
-                            accessibilityRole="button"
-                            accessibilityLabel={`Extra ${extra.nombre}`}
-                            accessibilityState={{ selected: active }}
-                            onPress={() => toggleModifier(item, extra)}
-                            style={{ minHeight: 44, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: active ? colors.brand : colors.line, backgroundColor: active ? colors.softOrange : colors.surface, justifyContent: 'center' }}
-                          >
-                            <Text style={{ color: active ? colors.brand : colors.muted, fontSize: 12, fontWeight: '500' }}>
-                              {extra.nombre}{extraPrice ? ` +${money(extraPrice)}` : ''}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-
-                    {paidExtras.length > 0 ? <Text style={{ color: colors.ink, fontSize: 13, fontWeight: '600', marginTop: 16, marginBottom: 10 }}>Extras adicionales con costo</Text> : null}
-                    <View style={{ gap: 8 }}>
-                      {paidExtras.map((extra) => {
-                        const active = (item.modificadores || []).some((m) => m.nombre === extra.nombre);
-                        const extraPrice = Number(extra.precio_extra ?? extra.precio ?? 0);
-                        return (
-                          <TouchableOpacity
-                            key={`${itemId}-${extra.nombre}`}
-                            accessibilityRole="button"
-                            accessibilityLabel={`Extra ${extra.nombre}`}
-                            accessibilityState={{ selected: active }}
-                            onPress={() => toggleModifier(item, extra)}
-                            style={{ minHeight: 44, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: active ? colors.brand : colors.line, backgroundColor: active ? colors.softOrange : colors.surface, justifyContent: 'center' }}
-                          >
-                            <Text style={{ color: active ? colors.brand : colors.muted, fontSize: 12, fontWeight: '500' }}>
-                              {extra.nombre} +{money(extraPrice)}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-
-                    <Text style={{ color: colors.ink, fontSize: 13, fontWeight: '600', marginTop: 16, marginBottom: 10 }}>Crear extra personalizado</Text>
-                    <View style={{ flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center', gap: 10 }}>
-                      <TextInput
-                        value={customExtras[itemId]?.nombre || ''}
-                        onChangeText={(text) => updateCustomExtra(itemId, { nombre: text })}
-                        accessibilityLabel="Nombre del extra personalizado"
-                        placeholder="Escribir otro extra..."
-                        placeholderTextColor={colors.muted}
-                        style={{ flex: 1, height: 44, borderWidth: 1, borderColor: colors.line, borderRadius: 8, backgroundColor: colors.field, color: colors.ink, paddingHorizontal: 16, fontSize: 13, fontWeight: '600' }}
-                      />
-                      <TextInput
-                        value={customExtras[itemId]?.precio || ''}
-                        onChangeText={(text) => updateCustomExtra(itemId, { precio: text })}
-                        accessibilityLabel="Precio del extra personalizado"
-                        placeholder="0.00"
-                        placeholderTextColor={colors.muted}
-                        keyboardType="decimal-pad"
-                        style={{ width: isMobile ? '100%' : 80, height: 44, borderWidth: 1, borderColor: colors.line, borderRadius: 8, backgroundColor: colors.field, color: colors.ink, paddingHorizontal: 12, textAlign: 'center', fontSize: 13, fontWeight: '600' }}
-                      />
-                      <TouchableOpacity onPress={() => addCustomExtra(item)} style={{ width: 44, height: 44, borderRadius: 8, backgroundColor: colors.action || colors.brand, alignItems: 'center', justifyContent: 'center' }}>
-                        <Plus size={20} color={colors.onAccent} />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ) : null}
-              </>
-            ) : null}
-          </View>
-        </SwipeableRow>
-      </View>
-    );
-  }, [editItemId, productos, colors, isMobile, showingCart, exclusionExtras, paidExtras, customExtras, changeQty, removeItem, updateItem, toggleModifier, addCustomExtra, updateCustomExtra]);
 
   const renderTotals = () => {
+    // Comanda: acciones de la cuenta ya abierta (rondas anteriores, dividir, mover, cobro).
+    if (!pedidoActual) return null;
     const rounds = accountRounds(pedidoActual).filter((round) => round.estado !== 'CANCELADO');
     const paid = pedidoActual?.estado_cobro === 'PAGADO';
-
     return (
-      <View style={{ backgroundColor: colors.surface, padding: isMobile ? 18 : 22, borderRadius: 10, borderWidth: 1, borderColor: colors.line, ...softShadow, marginTop: 0 }}>
-        <Text style={{ color: colors.ink, fontWeight: '500', fontSize: 18, marginBottom: 18 }}>Resumen y acciones</Text>
-        {showingCart && pedidoActual ? (
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
-            <Text style={{ color: colors.muted, fontSize: 14, fontWeight: '500' }}>Cuenta anterior (en cocina)</Text>
-            <Text style={{ color: colors.ink, fontSize: 14, fontWeight: '600' }}>{money(storedTotal)}</Text>
-          </View>
-        ) : null}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
-          <Text style={{ color: colors.muted, fontSize: 14, fontWeight: '500' }}>
-            {showingCart ? 'Subtotal nuevos' : 'Subtotal'}
-          </Text>
-          <Text style={{ color: colors.ink, fontSize: 14, fontWeight: '600' }}>{money(subtotal)}</Text>
+      <View>
+        {rounds.length ? <SectionLabel>Rondas anteriores</SectionLabel> : null}
+        {rounds.map((round, index) => {
+          const canDeliver = round.estado === 'LISTO' && (!isExpressOrder || round.estado_cobro === 'PAGADO');
+          return <PastRound key={round.id} round={round} index={index + 1}
+            action={canDeliver ? <CButton variant="ink" full onPress={() => marcarEntregado(round)} loading={deliveringRound === round.id} disabled={deliveringRound !== null} accessibilityLabel={`Entregar ronda ${round.id}`}>Entregar esta ronda</CButton> : null}>
+            {round.estado === 'LISTO' && isExpressOrder && round.estado_cobro !== 'PAGADO' ? <CT size={14} color={colors.warning}>Listo en cocina. La entrega se habilita al completar el cobro.</CT> : null}
+          </PastRound>;
+        })}
+        {paid ? <CT size={15} weight="600" color={colors.success} style={{ marginTop: 12 }}>{pedidoActual.pendiente_entrega ? 'Pago completo · falta la entrega' : 'Pedido completado · guardado en el historial'}</CT> : null}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16 }}>
+          {catalog.editable && !showingCart ? <CButton variant="primary" icon={Plus} onPress={() => setStep('productos')} style={{ flexGrow: 1 }}>Nueva ronda</CButton> : null}
+          <CButton icon={PieChart} disabled={paid} onPress={() => setSplitOpen(true)} style={{ flexGrow: 1 }}>Dividir</CButton>
+          {!isExpressOrder ? <CButton icon={ArrowRightLeft} onPress={() => setTransferOpen(true)} style={{ flexGrow: 1 }}>Mover</CButton> : null}
+          <CButton variant="ink" icon={Printer} disabled={paid} onPress={solicitarCobroCaja} style={{ flexGrow: 1 }} accessibilityLabel="Solicitar cobro en caja">{paid ? 'Pago completado' : 'Pedir cobro en caja'}</CButton>
         </View>
-        {service > 0 ? (
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderColor: colors.line }}>
-            <Text style={{ color: colors.muted, fontSize: 14, fontWeight: '500' }}>{showingCart ? `Servicio (${servicePercent}%)` : 'Servicio incluido'}</Text>
-            <Text style={{ color: colors.ink, fontSize: 14, fontWeight: '600' }}>{money(service)}</Text>
-          </View>
-        ) : (
-          <View style={{ marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderColor: colors.line }} />
-        )}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, backgroundColor: colors.field, borderRadius: 8, padding: 14 }}>
-          <Text style={{ color: colors.ink, fontSize: 18, fontWeight: '600' }}>{isExpressOrder ? 'Total express' : 'Total mesa'}</Text>
-          <Text style={{ color: colors.brand, fontSize: 28, fontWeight: '600' }}>{money(mesaDisplayTotal)}</Text>
-        </View>
-
-        {showingCart ? (
-          <TouchableOpacity onPress={enviarCocina} disabled={orderSending} style={{ height: 56, borderRadius: 10, backgroundColor: colors.action || colors.brand, alignItems: 'center', justifyContent: 'center', flexDirection: 'row' }}>
-            <ChefHat size={24} color={colors.onAccent} />
-            <Text style={{ color: colors.onAccent, fontSize: 16, fontWeight: '600', marginLeft: 12 }}>{orderSending ? 'Confirmando…' : pendingSend ? 'Reintentar envío pendiente' : 'Enviar a Cocina y Caja'}</Text>
-          </TouchableOpacity>
-        ) : pedidoActual ? (
-          <View style={{ gap: 12 }}>
-            {paid ? <Text style={{ color: colors.success, fontWeight: '500' }}>{pedidoActual.pendiente_entrega ? 'Pago completo · falta la entrega' : 'Pedido completado · guardado en el historial'}</Text> : null}
-            {rounds.map((round) => (
-              <View key={round.id} style={{ padding: 12, borderRadius: 8, backgroundColor: colors.field, gap: 8 }}>
-                <Text style={{ color: colors.ink, fontWeight: '600' }}>Ronda #{round.id} · {round.estado}{round.estado_cobro === 'PAGADO' ? ' · Pagada' : ''}</Text>
-                <Text style={{ color: colors.muted }}>{(round.items || []).map((item) => `${item.cantidad} × ${item.nombre}`).join(', ')}</Text>
-                {round.estado === 'LISTO' && isExpressOrder && round.estado_cobro !== 'PAGADO' ? <Text style={{ color: colors.warning, fontSize: 12, lineHeight: 19 }}>Listo en cocina. Entrega bloqueada hasta completar el cobro.</Text> : null}
-                {round.estado === 'LISTO' && (!isExpressOrder || round.estado_cobro === 'PAGADO') ? (
-                  <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Entregar ronda ${round.id}`} disabled={deliveringRound !== null} onPress={() => marcarEntregado(round)} style={{ height: 46, borderRadius: 8, backgroundColor: colors.success, alignItems: 'center', justifyContent: 'center' }}>
-                    <Text style={{ color: colors.onAccent, fontWeight: '600' }}>{deliveringRound === round.id ? 'Entregando…' : 'Entregar esta ronda'}</Text>
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            ))}
-
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
-              {catalog.editable ? (
-                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Añadir nueva ronda" onPress={() => setStep('productos')} style={{ flex: 1, minWidth: '45%', height: 48, borderRadius: 8, backgroundColor: colors.softOrange, borderWidth: 1, borderColor: colors.brand, alignItems: 'center', justifyContent: 'center', flexDirection: 'row' }}>
-                  <Plus size={16} color={colors.brand} />
-                  <Text adjustsFontSizeToFit numberOfLines={1} style={{ color: colors.brand, fontSize: 13, fontWeight: '600', marginLeft: 6 }}>Añadir nueva ronda</Text>
-                </TouchableOpacity>
-              ) : null}
-
-              <TouchableOpacity disabled={paid} onPress={() => setSplitOpen(true)} style={{ flex: 1, minWidth: '45%', height: 48, borderRadius: 8, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', ...softShadow }}>
-                <PieChart size={16} color={colors.ink} />
-                <Text adjustsFontSizeToFit numberOfLines={1} style={{ color: colors.ink, fontSize: 13, fontWeight: '600', marginLeft: 6 }}>Dividir</Text>
-              </TouchableOpacity>
-
-              {!isExpressOrder ? (
-                <TouchableOpacity onPress={() => setTransferOpen(true)} style={{ flex: 1, minWidth: '45%', height: 48, borderRadius: 8, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', ...softShadow }}>
-                  <ArrowRightLeft size={16} color={colors.ink} />
-                  <Text adjustsFontSizeToFit numberOfLines={1} style={{ color: colors.ink, fontSize: 13, fontWeight: '600', marginLeft: 6 }}>Mover</Text>
-                </TouchableOpacity>
-              ) : null}
-
-              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Solicitar cobro en caja" disabled={paid} onPress={solicitarCobroCaja} style={{ width: '100%', height: 48, borderRadius: 8, backgroundColor: paid ? colors.field : colors.action || colors.brand, borderWidth: 1, borderColor: colors.line, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', ...softShadow }}>
-                <Printer size={16} color={paid ? colors.muted : colors.onAccent} />
-                <Text adjustsFontSizeToFit numberOfLines={1} style={{ color: paid ? colors.muted : colors.onAccent, fontSize: 13, fontWeight: '600', marginLeft: 6 }}>{paid ? 'Pago completado' : 'Solicitar cobro en caja'}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        ) : null}
       </View>
     );
   };
 
-  const renderPedido = () => {
+  const renderPedidoBody = () => {
+    // Comanda: la hoja de la libreta — encabezado, ronda nueva, total y rondas anteriores.
     const activeOrderMesa = mesaActual || { numero: pedidoActual?.mesa_numero || '-' };
-
     const cartItems = cart;
     const historicalItems = pedidoActual?.items || [];
     const totalItemsCount = [...cartItems, ...historicalItems].reduce((sum, item) => sum + Number(item.cantidad || 0), 0);
     const currentPickupType = pedidoActual?.tipo === 'Delivery' ? 'Delivery' : pickupType;
     const pickupDraftDetail = currentPickupType === 'Delivery'
-      ? [expressInfo.telefono.trim(), expressInfo.direccion.trim(), expressInfo.referencia.trim(), expressInfo.dato.trim()].filter(Boolean).join(' - ')
+      ? [expressInfo.telefono.trim(), expressInfo.direccion.trim(), expressInfo.referencia.trim(), expressInfo.dato.trim()].filter(Boolean).join(' · ')
       : expressInfo.dato.trim();
-    const orderTitle = isExpressOrder
-      ? (pedidoActual ? pickupOrderLabel(pedidoActual) : expressInfo.nombre.trim() || `Pedido ${pickupTypeLabel(currentPickupType)}`)
-      : `Mesa ${activeOrderMesa.numero || '-'}`;
-    const orderSubtitle = isExpressOrder
-      ? `${pedidoActual ? (pickupDetailLabel(pedidoActual) || pickupTypeLabel(currentPickupType)) : (pickupDraftDetail || 'Cliente pendiente')} · ${totalItemsCount} ${totalItemsCount === 1 ? 'artículo' : 'artículos'}`
-      : `${mesaActual?.capacidad ? `${mesaActual.capacidad} plazas · ` : ''}${totalItemsCount} ${totalItemsCount === 1 ? 'artículo' : 'artículos'}`;
-
-    return renderShell(
-      <View style={{ padding: bodyPad, paddingTop: 24, maxWidth: 1180, alignSelf: 'center', width: '100%' }}>
-        <View style={{ marginBottom: 18 }}><Text style={{ color: colors.ink, fontSize: 27, fontWeight: '500' }}>Pedido</Text><Text style={{ color: colors.muted, fontSize: 13, marginTop: 6 }}>Productos, preparación, pago y entrega en una sola vista.</Text></View>
-        {isExpressOrder && currentExpressDraft ? <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Añadir productos al borrador" onPress={() => setStep('productos')} style={{ minHeight: 44, paddingHorizontal: 14, justifyContent: 'center', borderWidth: 1, borderColor: colors.brand, borderRadius: 6, backgroundColor: colors.softOrange }}><Text style={{ color: colors.brand, fontSize: 13 }}>Añadir productos</Text></TouchableOpacity>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cambiar borrador Express" onPress={() => setDraftListOpen(true)} style={{ minHeight: 44, paddingHorizontal: 14, justifyContent: 'center' }}><Text style={{ color: colors.muted, fontSize: 13 }}>Cambiar borrador</Text></TouchableOpacity>
-        </View> : null}
-        <OrderOverview order={pedidoActual} title={orderTitle} subtitle={orderSubtitle} express={isExpressOrder} draft={showingCart} draftCount={cartCount} total={mesaDisplayTotal} colors={colors} deliveryState={draftDeliveryStatus({hasDraft:(isExpressOrder&&!!currentExpressDraft)||showingCart||!!orderNote,pending:!!pendingSend,sending:orderSending,saving:drafts.saving,error:drafts.error,order:pedidoActual})} />
-
-        {totalItemsCount === 0 && !(isExpressOrder && currentExpressDraft && !selectedExpressPedidoId) ? (
-          <View style={{ alignItems: 'center', paddingVertical: 60 }}>
-            <Receipt size={64} color={colors.line} />
-            <Text style={{ color: colors.ink, fontSize: 18, fontWeight: '600', marginTop: 20 }}>Cuenta vacía</Text>
-            <Text style={{ color: colors.muted, fontSize: 14, fontWeight: '600', marginTop: 8 }}>No hay productos añadidos a esta mesa.</Text>
-            <TouchableOpacity
-              onPress={() => setStep('productos')}
-              style={{ marginTop: 24, height: 44, borderRadius: 8, paddingHorizontal: 24, backgroundColor: colors.action || colors.brand, alignItems: 'center', justifyContent: 'center', ...softShadow }}
-            >
-              <Text style={{ color: colors.onAccent, fontSize: 14, fontWeight: '600' }}>Explorar menú</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={{ flexDirection: width >= 1000 ? 'row' : 'column', alignItems: 'flex-start', gap: 22 }}>
-          <View style={{ flex: 1, minWidth: 0, width: '100%' }}>
-            <OrderServicePanel key={pedidoActual?.id||'draft'} order={pedidoActual} now={serviceNow} colors={colors} alerts={serviceAlerts}/>
-            {isExpressOrder && currentExpressDraft && !selectedExpressPedidoId ? (
-              <View pointerEvents={pendingSend ? 'none' : 'auto'} style={{ marginBottom: 24, borderRadius: 8, padding: 14, opacity: pendingSend ? 0.65 : 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, ...softShadow }}>
-                <Text style={{ color: colors.ink, fontSize: 15, fontWeight: '600', marginBottom: 10 }}>Datos del cliente</Text>
-                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
-                  {['Para llevar', 'Delivery'].map((tipo) => {
-                    const active = pickupType === tipo;
-                    return (
-                      <TouchableOpacity
-                        key={tipo}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Tipo de borrador: ${pickupTypeLabel(tipo)}`}
-                        accessibilityState={{ selected: active, disabled: !!pendingSend }}
-                        disabled={!!pendingSend}
-                        onPress={() => setPickupType(tipo)}
-                        style={{ flex: 1, minHeight: 44, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: active ? colors.softOrange : colors.field, borderWidth: 1, borderColor: active ? colors.brand : colors.line }}
-                      >
-                        <Text style={{ color: active ? colors.brand : colors.muted, fontSize: 13, fontWeight: '600' }}>{pickupTypeLabel(tipo)}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-                <TextInput
-                  value={expressInfo.nombre}
-                  onChangeText={(nombre) => setExpressInfo((prev) => ({ ...prev, nombre }))}
-                  editable={!pendingSend}
-                  accessibilityLabel="Nombre del cliente"
-                  placeholder="Nombre del cliente (obligatorio)"
-                  placeholderTextColor={colors.muted}
-                  maxLength={120}
-                  style={{ height: 46, borderRadius: 8, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.field, color: colors.ink, fontSize: 14, fontWeight: '500', paddingHorizontal: 14, marginBottom: 10 }}
-                />
-                <TextInput
-                  value={expressInfo.dato}
-                  onChangeText={(dato) => setExpressInfo((prev) => ({ ...prev, dato }))}
-                  editable={!pendingSend}
-                  accessibilityLabel="Referencia del cliente"
-                  placeholder={pickupType === 'Delivery' ? 'Dato de plataforma o referencia (opcional)' : 'Telefono, referencia, placa u otro dato (opcional)'}
-                  placeholderTextColor={colors.muted}
-                  maxLength={160}
-                  style={{ height: 46, borderRadius: 8, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.field, color: colors.ink, fontSize: 14, fontWeight: '500', paddingHorizontal: 14, marginBottom: pickupType === 'Delivery' ? 10 : 0 }}
-                />
-                {pickupType === 'Delivery' ? (
-                  <>
-                    <TextInput
-                      value={expressInfo.telefono}
-                      onChangeText={(telefono) => setExpressInfo((prev) => ({ ...prev, telefono }))}
-                      editable={!pendingSend}
-                      accessibilityLabel="Teléfono de delivery"
-                      placeholder="Telefono directo (opcional)"
-                      placeholderTextColor={colors.muted}
-                      maxLength={40}
-                      style={{ height: 46, borderRadius: 8, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.field, color: colors.ink, fontSize: 14, fontWeight: '500', paddingHorizontal: 14, marginBottom: 10 }}
-                    />
-                    <TextInput
-                      value={expressInfo.direccion}
-                      onChangeText={(direccion) => setExpressInfo((prev) => ({ ...prev, direccion }))}
-                      editable={!pendingSend}
-                      accessibilityLabel="Dirección de delivery"
-                      placeholder="Direccion si contacta directo al local (opcional)"
-                      placeholderTextColor={colors.muted}
-                      maxLength={220}
-                      style={{ height: 46, borderRadius: 8, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.field, color: colors.ink, fontSize: 14, fontWeight: '500', paddingHorizontal: 14, marginBottom: 10 }}
-                    />
-                    <TextInput
-                      value={expressInfo.referencia}
-                      onChangeText={(referencia) => setExpressInfo((prev) => ({ ...prev, referencia }))}
-                      editable={!pendingSend}
-                      accessibilityLabel="Referencia de delivery"
-                      placeholder="Referencia de entrega, app o repartidor (opcional)"
-                      placeholderTextColor={colors.muted}
-                      maxLength={220}
-                      style={{ height: 46, borderRadius: 8, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.field, color: colors.ink, fontSize: 14, fontWeight: '500', paddingHorizontal: 14 }}
-                    />
-                  </>
-                ) : null}
-              </View>
-            ) : null}
-
-            {cartItems.length > 0 ? (
-              <View style={{ marginBottom: 24 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.action || colors.brand, marginRight: 8 }} />
-                  <Text style={{ color: colors.ink, fontSize: 15, fontWeight: '500', flexShrink: 1 }}>Nueva ronda · por enviar</Text>
-
-                </View>
-                <View pointerEvents={pendingSend ? 'none' : 'auto'} style={{ gap: 0, opacity: pendingSend ? 0.65 : 1 }}>
-                  {cartItems.map(item => renderOrderItem(item, true))}
-                </View>
-              </View>
-            ) : null}
-
-            {historicalItems.length > 0 ? (
-              <View style={{ marginBottom: 24 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.success, marginRight: 8 }} />
-                  <Text style={{ color: colors.ink, fontSize: 16, fontWeight: '600' }}>Productos registrados</Text>
-                </View>
-                <View>
-                  {historicalItems.map(item => renderOrderItem(item, false))}
-                </View>
-              </View>
-            ) : null}
-
-            <View style={{ paddingVertical: 12 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                <Receipt size={16} color={colors.ink} />
-                <Text style={{ marginLeft: 8, color: colors.ink, fontSize: 14, fontWeight: '600' }}>Notas generales de la cuenta</Text>
-              </View>
-              {showingCart || (isExpressOrder && currentExpressDraft) ? (
-                <TextInput
-                  editable={!pendingSend}
-                  value={orderNote}
-                  onChangeText={updateOrderNote}
-                  accessibilityLabel="Notas generales de la cuenta"
-                  placeholder="Ej. Entregar todo junto, mesa necesita periquera..."
-                  placeholderTextColor={colors.muted}
-                  multiline
-                  maxLength={120}
-                  style={{ minHeight: 60, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, borderRadius: 8, color: colors.ink, fontSize: 13, fontWeight: '600', padding: 16, ...softShadow }}
-                />
-              ) : (
-                <View style={{ minHeight: 60, backgroundColor: colors.field, borderRadius: 8, padding: 16 }}>
-                  <Text style={{ color: pedidoActual?.notas ? colors.ink : colors.muted, fontSize: 13, fontWeight: '600' }}>
-                    {pedidoActual?.notas || 'Sin notas registradas para esta cuenta.'}
-                  </Text>
-                </View>
-              )}
-            </View>
-          </View>
-          <View style={{ width: width >= 1000 ? 350 : '100%' }}>{renderTotals()}</View>
-          </View>
-        )}
-      </View>
-    );
-  };
-
-  const renderCustomAlertModal = () => {
-    if (!customAlert) return null;
+    const editingCustomer = isExpressOrder && currentExpressDraft && !selectedExpressPedidoId;
+    const openedAt = pedidoActual?.created_at ? new Date(pedidoActual.created_at).getTime() : null;
+    const elapsed = openedAt && serviceNow ? Math.max(0, Math.floor((Number(serviceNow) - openedAt) / 60000)) : null;
+    const minutes = elapsed == null || elapsed >= 24 * 60 ? null : elapsed < 60 ? `${elapsed}` : `${Math.floor(elapsed / 60)} h ${elapsed % 60}`;
+    const paid = pedidoActual?.estado_cobro === 'PAGADO';
+    const stamp = pendingSend ? 'EN COLA' : paid ? 'PAGADA' : pedidoActual ? 'ABIERTA' : null;
+    const stampColor = pendingSend ? colors.warning : paid ? colors.success : colors.ink;
+    const meta = isExpressOrder
+      ? `${pickupTypeLabel(currentPickupType)}${minutes != null ? ` · ${minutes} min` : ''}`
+      : [mesaActual?.ubicacion, mesaActual?.capacidad ? `${mesaActual.capacidad} plazas` : null, minutes != null ? `${minutes} min` : null].filter(Boolean).join(' · ') || 'Mesa';
+    const title = isExpressOrder
+      ? (pedidoActual ? pickupOrderLabel(pedidoActual) : expressInfo.nombre.trim() || 'Cliente sin nombre')
+      : pedidoActual ? `Cuenta #${pedidoActual.id}` : 'Cuenta nueva';
+    const subtitle = isExpressOrder
+      ? (pedidoActual ? pickupDetailLabel(pedidoActual) : pickupDraftDetail) || null
+      : `${totalItemsCount} ${totalItemsCount === 1 ? 'artículo' : 'artículos'}`;
+    const split = width >= 900;
 
     return (
-    <Modal visible transparent animationType="none" onRequestClose={() => setCustomAlert(null)}>
-      <View style={{ flex: 1, backgroundColor: isDark ? 'rgba(9, 14, 23, 0.75)' : 'rgba(15, 23, 42, 0.5)', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-        <View style={{ width: '100%', maxWidth: 320, backgroundColor: colors.surface, borderRadius: 8, padding: 24, borderWidth: 1, borderColor: colors.line, ...modernShadow }}>
-          <View style={{ width: 48, height: 48, borderRadius: 8, backgroundColor: colors.softOrange, alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-            <Info size={24} color={colors.brand} />
+      <TearAway tearing={tearing} style={{ padding: split ? 20 : bodyPad, paddingTop: 20, maxWidth: split ? undefined : 760, alignSelf: 'center', width: '100%' }}>
+        <ComandaHeader number={isExpressOrder ? null : activeOrderMesa.numero} meta={meta} title={title} subtitle={subtitle} stamp={stamp} stampColor={stampColor}>
+          {isExpressOrder && currentExpressDraft ? <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+            <CButton variant="ghost" onPress={() => setDraftListOpen(true)} accessibilityLabel="Cambiar borrador Express">Cambiar borrador</CButton>
+          </View> : null}
+        </ComandaHeader>
+
+        {editingCustomer ? (
+          <View pointerEvents={pendingSend ? 'none' : 'auto'} style={{ gap: 12, marginTop: 8, opacity: pendingSend ? 0.6 : 1 }}>
+            <CLabel>Canal</CLabel>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {['Para llevar', 'Delivery'].map((tipo) => <CChip key={tipo} selected={pickupType === tipo} onPress={() => setPickupType(tipo)} accessibilityLabel={`Canal: ${pickupTypeLabel(tipo)}`}>{pickupTypeLabel(tipo)}</CChip>)}
+            </View>
+            <CField label="Nombre del cliente" value={expressInfo.nombre} onChangeText={(nombre) => setExpressInfo((prev) => ({ ...prev, nombre }))} editable={!pendingSend} placeholder="Obligatorio" maxLength={120} autoCapitalize="words" accessibilityLabel="Nombre del cliente" />
+            <CField label={pickupType === 'Delivery' ? 'Plataforma o código' : 'Referencia'} value={expressInfo.dato} onChangeText={(dato) => setExpressInfo((prev) => ({ ...prev, dato }))} editable={!pendingSend} placeholder={pickupType === 'Delivery' ? 'Opcional' : 'Teléfono, placa u otro dato (opcional)'} maxLength={160} accessibilityLabel="Referencia del cliente" />
+            {pickupType === 'Delivery' ? <>
+              <CField label="Teléfono" value={expressInfo.telefono} onChangeText={(telefono) => setExpressInfo((prev) => ({ ...prev, telefono }))} editable={!pendingSend} keyboardType="phone-pad" textContentType="telephoneNumber" placeholder="Opcional" maxLength={40} accessibilityLabel="Teléfono de delivery" />
+              <CField label="Dirección" value={expressInfo.direccion} onChangeText={(direccion) => setExpressInfo((prev) => ({ ...prev, direccion }))} editable={!pendingSend} placeholder="Si contacta directo al local" maxLength={220} accessibilityLabel="Dirección de delivery" />
+              <CField label="Referencia de entrega" value={expressInfo.referencia} onChangeText={(referencia) => setExpressInfo((prev) => ({ ...prev, referencia }))} editable={!pendingSend} placeholder="App, repartidor o punto de referencia" maxLength={220} accessibilityLabel="Referencia de delivery" />
+            </> : null}
           </View>
-          <Text style={{ fontSize: 20, fontWeight: '600', color: colors.ink, marginBottom: 8 }}>{customAlert?.title}</Text>
-          <Text style={{ fontSize: 15, color: colors.muted, fontWeight: '600', lineHeight: 22, marginBottom: 24 }}>{customAlert?.message}</Text>
-          <TouchableOpacity onPress={() => setCustomAlert(null)} style={{ width: '100%', height: 48, borderRadius: 8, backgroundColor: colors.action || colors.brand, alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ color: colors.onAccent, fontSize: 15, fontWeight: '600' }}>Entendido</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
+        ) : null}
+
+        {cartItems.length || !pedidoActual ? <SectionLabel right={cartCount ? <CNum size={14} color={colors.muted}>{cartCount} art.</CNum> : null}>{pendingSend ? 'Ronda en cola · sin confirmar' : 'Ronda nueva'}</SectionLabel> : null}
+        {cartItems.length ? cartItems.map(item => renderOrderItem(item, true)) : pedidoActual ? null : (
+          <View style={{ paddingVertical: 20, borderWidth: 1.5, borderStyle: 'dashed', borderColor: colors.line, borderRadius: 6, alignItems: 'center', gap: 10 }}>
+            <CT size={15} color={colors.muted}>{catalog.editable ? 'Sin productos en esta ronda.' : 'Esta cuenta ya no admite rondas nuevas.'}</CT>
+            {catalog.editable && !split ? <CButton variant="primary" icon={Plus} onPress={() => setStep('productos')} style={{ alignSelf: 'center' }}>Elegir productos</CButton> : null}
+          </View>
+        )}
+        {cartItems.length && catalog.editable && !split ? <CButton variant="ghost" icon={Plus} onPress={() => setStep('productos')} style={{ marginTop: 8 }}>Añadir más</CButton> : null}
+
+        {showingCart || editingCustomer ? (
+          <CField label="Nota general" value={orderNote} onChangeText={updateOrderNote} editable={!pendingSend} placeholder="Ej. entregar todo junto, silla para bebé" multiline maxLength={120} style={{ marginTop: 16 }} accessibilityLabel="Notas generales de la cuenta" />
+        ) : pedidoActual?.notas ? <CT size={15} color={colors.muted} style={{ marginTop: 12 }}>Nota: {pedidoActual.notas}</CT> : null}
+
+        <TotalsBlock
+          rows={[
+            ...(showingCart ? [[`Ronda nueva`, subtotal]] : []),
+            ...(service > 0 ? [[showingCart ? `Servicio ${servicePercent}%` : 'Servicio incluido', service]] : []),
+            ...(showingCart && pedidoActual ? [['Ya en la cuenta', storedTotal]] : []),
+          ]}
+          grand={mesaDisplayTotal} grandLabel={isExpressOrder ? 'Total del pedido' : 'Total de la mesa'} />
+
+        {renderTotals()}
+
+        {pedidoActual ? <View style={{ marginTop: 24 }}><OrderServicePanel key={pedidoActual?.id || 'draft'} order={pedidoActual} now={serviceNow} colors={colors} alerts={serviceAlerts} /></View> : null}
+      </TearAway>
     );
   };
 
-  const renderNotifications = () => <WaiterNotifications colors={colors} alerts={serviceAlerts} activity={notificaciones} close={()=>setNotiOpen(false)} openOrder={openPedidoFromNotification} clearActivity={()=>setNotificaciones([])}/>;
+  const renderSendBar = () => (showingCart || pendingSend) ? <SendBar count={cartCount} amount={total} onPress={enviarCocina} sending={orderSending}
+    pending={!!pendingSend} offline={realtimeStatus !== 'connected'} disabled={!drafts.ready} /> : null;
+
+  const renderPedido = () => renderShell(renderPedidoBody(), true, renderSendBar());
+
+  const renderCustomAlertModal = () => (
+    // Comanda: avisos como hoja inferior (arrastrable), no modal centrado.
+    <NoticeSheet notice={customAlert} onClose={() => setCustomAlert(null)} />
+  );
+
+  // Salón: bandeja «Listo» (rondas listas con «Entregado», demoras y actividad).
+  const renderNotifications = () => <WaiterNotifications colors={colors} alerts={serviceAlerts} activity={notificaciones} close={()=>setNotiOpen(false)} openOrder={openPedidoFromNotification} clearActivity={()=>setNotificaciones([])}
+    ready={salonReady} onDeliver={salonEntregar} deliveringId={trayDelivering} now={serviceNow}/>;
 
   if ((loading && !dataLoaded.current) || !drafts.ready) {
     return (
@@ -2112,114 +1868,19 @@ export default function App() {
       {step === 'promociones' ? renderPromociones() : null}
       {step === 'pedido' ? renderPedido() : null}
 
-      {kitchenNotice ? (
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel={`${kitchenNotice.title}. ${kitchenNotice.action==='delay_summary'?'Ver demoras':'Abrir aviso'}`}
-          activeOpacity={0.92}
-          onPress={() => {
-            if (kitchenNotice.action === 'delay_summary') {setKitchenNotice(null);setNotiOpen(true);return;}
-            if (kitchenNotice.action === 'sync_error') {
-              setKitchenNotice(null);
-              scheduleLiveSync();
-              return;
-            }
-            openPedidoFromNotification(kitchenNotice);
-          }}
-          style={{
-            position: 'absolute',
-            left: isMobile ? bodyPad : undefined,
-            right: bodyPad,
-            bottom: BOTTOM_INSET + (addedNotice && cartCount > 0 && step !== 'pedido' ? 86 : 18),
-            zIndex: 10000,
-            elevation: 20,
-            width: isMobile ? undefined : 340,
-            maxWidth: isMobile ? undefined : 340,
-            minHeight: 44,
-            borderRadius: 8,
-            backgroundColor: colors.surface,
-            borderWidth: 1,
-            borderColor: ['sync_error','delay_summary'].includes(kitchenNotice.action) ? colors.warning : colors.success,
-            paddingHorizontal: 9,
-            paddingVertical: 7,
-            flexDirection: 'row',
-            alignItems: 'center',
-            ...modernShadow,
-          }}
-        >
-          <View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: ['sync_error','delay_summary'].includes(kitchenNotice.action) ? colors.warningSoft : colors.successSoft, alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
-            <Bell size={15} color={['sync_error','delay_summary'].includes(kitchenNotice.action) ? colors.warning : colors.success} />
-          </View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text accessibilityLiveRegion="polite" numberOfLines={1} style={{ color: colors.ink, fontSize: 12 }}>{kitchenNotice.title}</Text>
-            <Text numberOfLines={1} style={{ color: colors.muted, fontSize: 10, fontWeight: '600', marginTop: 1 }}>
-              {kitchenNotice.action === 'sync_error'
-                ? 'Tocar para reintentar'
-                : kitchenNotice.action === 'delay_summary' ? 'Ver demoras · aviso sin sonido' : unreadNotifications > 1 ? `${unreadNotifications} alertas pendientes` : 'Tocar para abrir'}
-            </Text>
-          </View>
-          <TouchableOpacity
-            onPress={(event) => {
-              event?.stopPropagation?.();
-              setKitchenNotice(null);
-            }}
-            accessibilityRole="button" accessibilityLabel="Descartar aviso" style={{ width: 44, height: 44, borderRadius: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.field, marginLeft: 6 }}
-          >
-            <X size={14} color={colors.muted} />
-          </TouchableOpacity>
-        </TouchableOpacity>
-      ) : null}
+      {/* Salón: el aviso flotante (kitchenNotice) se muestra como toast Comanda; ver el efecto junto a renderMesas. */}
 
-      {(addedNotice && cartCount > 0 && step === 'promociones') ? (
-        <View style={{
-          position: 'absolute',
-          left: isMobile ? bodyPad : undefined,
-          right: bodyPad,
-          bottom: BOTTOM_INSET + 18,
-          width: isMobile ? undefined : 390,
-          flexDirection: 'row',
-          alignItems: 'center',
-          backgroundColor: colors.surface,
-          paddingHorizontal: 10,
-          paddingVertical: 9,
-          borderRadius: 8,
-          borderWidth: 1,
-          borderColor: colors.line,
-          ...modernShadow,
-          zIndex: 9999,
-        }}>
-          <View style={{ width: 34, height: 34, borderRadius: 11, backgroundColor: colors.successSoft, alignItems: 'center', justifyContent: 'center', marginRight: 9 }}>
-            <CheckCircle2 size={19} color={colors.success} />
-          </View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text numberOfLines={1} style={{ color: colors.ink, fontSize: 14, fontWeight: '600' }}>{addedNotice.nombre} añadido</Text>
-            <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '500', marginTop: 2 }}>
-              {cartCount} {cartCount === 1 ? 'artículo' : 'artículos'} · {money(mesaDisplayTotal)}
-            </Text>
-          </View>
-          <TouchableOpacity
-            onPress={() => setStep('pedido')}
-            style={{ height: 34, borderRadius: 10, backgroundColor: colors.action || colors.brand, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', marginLeft: 8 }}
-          >
-            <Receipt size={15} color={colors.onAccent} />
-            {!isMobile ? <Text style={{ color: colors.onAccent, fontSize: 12, fontWeight: '600', marginLeft: 6 }}>Ver</Text> : null}
-          </TouchableOpacity>
-        </View>
-      ) : null}
+      {/* Menú: el aviso «añadido» ahora es un toast Comanda con «Ver comanda» (ver announceAdded). */}
 
-      <Modal visible={orderSending} transparent animationType="fade" onRequestClose={() => {}}>
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <View style={{ padding: 24, borderRadius: 8, backgroundColor: colors.surface, alignItems: 'center' }}>
-            <ActivityIndicator size="large" color={colors.brand} />
-            <Text style={{ marginTop: 12, color: colors.ink }}>Enviando pedido…</Text>
-          </View>
-        </View>
-      </Modal>
+      {/* Comanda: sin modal bloqueante; el estado «Enviando…» vive en la barra de envío. */}
+      <CStampBurst text="ENVIADA" visible={sentBurst} onDone={() => setSentBurst(false)} />
+      <PriceChangesSheet visible={!!priceReview} diffs={priceReview?.diffs} message={priceReview?.message} busy={priceAccepting}
+        onAccept={acceptPriceChanges} onClose={() => setPriceReview(null)} />
       {customAlert ? renderCustomAlertModal() : null}
       {transferOpen ? renderTransferModal() : null}
       {splitOpen ? renderSplitBillModal() : null}
       {notiOpen ? renderNotifications() : null}
-      {menuOpen ? renderSideMenu() : null}
+      {renderSideMenu()}
     </View>
   );
 }
