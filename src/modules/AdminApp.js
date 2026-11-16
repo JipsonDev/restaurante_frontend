@@ -39,7 +39,6 @@ function useAdminBrowserStyle(c) {
       [data-mm-admin] ::-webkit-scrollbar-thumb { background: ${c.lineStrong}; border-radius: 10px; border: 3px solid transparent; background-clip: padding-box; }
       [data-mm-admin] ::-webkit-scrollbar-track { background: transparent; }
       [data-mm-admin] { scrollbar-color: ${c.lineStrong} transparent; }
-      @media (prefers-reduced-motion: reduce) { [data-mm-admin] * { transition: none !important; } }
     `;
   }, [c]);
 }

@@ -28,7 +28,7 @@ El panel es una herramienta de trabajo: se juzga por lo rápido que se encuentra
 ## Movimiento
 Discreto y funcional: presión de botones (escala 0,98 en 90 ms), aparición de sección (160 ms), indicador de pestañas que se desliza (160 ms),
 filas nuevas que destellan en azul y se apagan (1,4 s), diálogos que entran en 180 ms y salen en 120 ms (hoja inferior en celular), temblor ante errores.
-Todo se desactiva con «reducir movimiento».
+Las animaciones se muestran siempre, aunque el sistema tenga activado «reducir movimiento» (decisión del producto).
 
 ## Kit (`src/components/admin/ui.js`)
 `PageHeader`, `Card` (title/actions/footer), `CardHeader`, `CardSection`, `Button` (primary · secondary · tertiary · plain · danger),
