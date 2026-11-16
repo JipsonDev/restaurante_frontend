@@ -1,4 +1,4 @@
-const CACHE_NAME = 'morena-mia-webapp-v2';
+const CACHE_NAME = 'morena-mia-webapp-v3';
 const APP_SHELL = ['/', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -24,6 +24,9 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
 
   if (request.method !== 'GET') return;
+  // Solo cachea la propia app: extensiones (chrome-extension://), otros dominios y el backend quedan fuera.
+  if (!url.protocol.startsWith('http')) return;
+  if (self.location && url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api') || url.pathname.includes('/socket.io')) return;
   // Metro reuses bundle URLs between edits; an offline fallback can show old UI.
   if (url.searchParams.get('dev') === 'true' || url.pathname.endsWith('.bundle') || url.pathname.startsWith('/@')) return;
@@ -33,7 +36,7 @@ self.addEventListener('fetch', (event) => {
       fetch(request)
         .then((response) => {
           const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put('/', copy));
+          caches.open(CACHE_NAME).then((cache) => cache.put('/', copy)).catch(() => {});
           return response;
         })
         .catch(() => caches.match('/'))
@@ -46,7 +49,7 @@ self.addEventListener('fetch', (event) => {
       .then((response) => {
         if (!response || response.status !== 200 || response.type === 'opaque') return response;
         const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)).catch(() => {});
         return response;
       })
       .catch(() => caches.match(request))

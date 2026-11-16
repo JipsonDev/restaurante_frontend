@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import axios from 'axios';
 import { BASE_URL, useAuth } from './AuthContext';
 import { REALTIME_EVENTS, getRealtimeSocket, subscribeRealtime } from '../services/realtime';
+import { addDays, dayOf, localStamp } from '../utils/reservationLogic.mjs';
 
 const AdminContext = createContext(null);
 const CLOSED_STATES = ['PAGADO', 'CANCELADO'];
@@ -31,6 +32,8 @@ export function AdminProvider({ children }) {
   const [caja, setCaja] = useState(null);
   const [configuracion, setConfiguracion] = useState(null);
   const [auditoria, setAuditoria] = useState([]);
+  const [reservas, setReservas] = useState([]);
+  const reservasRange = useRef(null);
   const [loading, setLoading] = useState(true);
   const [readError, setReadError] = useState('');
   const [syncStatus, setSyncStatus] = useState('connecting');
@@ -152,6 +155,29 @@ export function AdminProvider({ children }) {
     }
   }, [user?.rol]);
 
+  // Reservas: se mantiene una ventana alrededor de hoy y se amplía cuando el panel pide otros días.
+  const fetchReservas = useCallback(async (range) => {
+    const today = dayOf(localStamp());
+    const desde = range?.desde || reservasRange.current?.desde || addDays(today, -7);
+    const hasta = range?.hasta || reservasRange.current?.hasta || addDays(today, 60);
+    try {
+      const res = await axios.get(`${BASE_URL}/reservas`, { params: { desde, hasta } });
+      const inRange = r => dayOf(r.fecha_hora) >= desde && dayOf(r.fecha_hora) <= hasta;
+      setReservas(current => [...current.filter(r => !inRange(r)), ...res.data].sort((a, b) => a.fecha_hora.localeCompare(b.fecha_hora) || a.id - b.id));
+      const known = reservasRange.current;
+      reservasRange.current = { desde: !known || desde < known.desde ? desde : known.desde, hasta: !known || hasta > known.hasta ? hasta : known.hasta };
+      return res.data;
+    } catch (error) {
+      if (error.response?.status !== 404) setReadError('No se pudieron actualizar algunos datos. Se conserva la última información recibida.');
+      return [];
+    }
+  }, []);
+  const putReserva = useCallback(reserva => setReservas(current => upsertById(current, reserva).sort((a, b) => a.fecha_hora.localeCompare(b.fecha_hora) || a.id - b.id)), []);
+  const createReserva = async payload => { const { data } = await axios.post(`${BASE_URL}/reservas`, payload); putReserva(data); return data; };
+  const updateReserva = async (id, payload) => { const { data } = await axios.put(`${BASE_URL}/reservas/${id}`, payload); putReserva(data); return data; };
+  const setReservaEstado = async (id, estado) => { const { data } = await axios.put(`${BASE_URL}/reservas/${id}/estado`, { estado }); putReserva(data); return data; };
+  const deleteReserva = async id => { await axios.delete(`${BASE_URL}/reservas/${id}`); setReservas(current => current.filter(r => Number(r.id) !== Number(id))); };
+
   const refreshAll = useCallback(async () => {
     setReadError('');
     await Promise.all([
@@ -166,8 +192,9 @@ export function AdminProvider({ children }) {
       fetchExtras(),
       fetchConfiguracion(),
       fetchAuditoria(),
+      fetchReservas(),
     ]);
-  }, [fetchPedidos, fetchProductos, fetchCategorias, fetchMesas, fetchUbicaciones, fetchTrabajadores, fetchCaja, fetchInventario, fetchExtras, fetchConfiguracion, fetchAuditoria]);
+  }, [fetchPedidos, fetchProductos, fetchCategorias, fetchMesas, fetchUbicaciones, fetchTrabajadores, fetchCaja, fetchInventario, fetchExtras, fetchConfiguracion, fetchAuditoria, fetchReservas]);
 
   useEffect(() => {
     (async () => {
@@ -252,6 +279,11 @@ export function AdminProvider({ children }) {
       subscribeRealtime(REALTIME_EVENTS.TABLE_OCCUPIED, applyTable),
       subscribeRealtime(REALTIME_EVENTS.TABLE_FREED, applyTable),
       subscribeRealtime(REALTIME_EVENTS.TABLE_UPDATED, applyTable),
+      subscribeRealtime(REALTIME_EVENTS.RESERVATION_UPDATED, (payload = {}) => {
+        if (!payload.reserva) { fetchReservas(); return; }
+        if (payload.action === 'eliminada') setReservas(current => current.filter(r => Number(r.id) !== Number(payload.reserva.id)));
+        else putReserva(payload.reserva);
+      }),
     ];
 
     return () => {
@@ -260,7 +292,7 @@ export function AdminProvider({ children }) {
       socket.off('connect_error', handleError);
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, [fetchCaja, fetchMesas, fetchPedidos, fetchInventario, fetchProductos, refreshAll]);
+  }, [fetchCaja, fetchMesas, fetchPedidos, fetchInventario, fetchProductos, fetchReservas, putReserva, refreshAll]);
 
   const createProducto = async (payload) => {
     const res = await axios.post(`${BASE_URL}/productos`, payload);
@@ -438,6 +470,7 @@ export function AdminProvider({ children }) {
         caja,
         configuracion,
         auditoria,
+        reservas,
         loading,
         syncStatus,
         readError,
@@ -452,6 +485,11 @@ export function AdminProvider({ children }) {
         fetchExtras,
         fetchConfiguracion,
         fetchAuditoria,
+        fetchReservas,
+        createReserva,
+        updateReserva,
+        setReservaEstado,
+        deleteReserva,
         refreshAll,
         createProducto,
         updateProducto,
