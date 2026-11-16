@@ -134,29 +134,51 @@ export function ThemeProvider({ children, defaultMode = 'light' }) {
 
 export const useTheme = () => useContext(ThemeContext);
 
+// Panel de administración: azul noche + dorado (la marca del inicio de sesión).
+// Neutros fríos teñidos de azul; el dorado se reserva para acción primaria,
+// selección y foco. Contrastes AA verificados para texto (>= 4.5:1).
+export const adminPalette = {
+  light: {
+    bg: '#F3F5F8', surface: '#FFFFFF', surfaceAlt: '#F7F8FA', soft: '#EDF0F4', softer: '#E2E6EC',
+    line: '#E1E5EB', lineStrong: '#C9D0DA',
+    text: '#0E1726', muted: '#4A5568', faint: '#667085',
+    primary: '#F6B325', primaryHover: '#E9A513', primaryPressed: '#D99A0B', primaryText: '#8A5A00', primarySoft: '#FEF4DC', onPrimary: '#0E1726',
+    ink: '#0E1726', onInk: '#FFFFFF', navigationActive: '#EEF1F6', accent: '#F6B325', accentSoft: '#FEF4DC',
+    gold: '#F6B325', goldHover: '#E9A513', onGold: '#0E1726',
+    green: '#137535', greenBright: '#22A35A', greenSoft: '#E6F4EB',
+    amber: '#94570A', amberBright: '#E9A513', amberSoft: '#FDF1DB',
+    red: '#C0261C', redBright: '#E5484D', redSoft: '#FCEBEA',
+    sky: '#1F5FBF', skyBright: '#3B82F6', skySoft: '#E7EFFB',
+    purple: '#6B3FD1', purpleSoft: '#EFEAFB', pink: '#B4235F', pinkSoft: '#FBE9F0',
+    focus: 'rgba(246,179,37,0.55)', overlay: 'rgba(14,23,38,0.42)', shadow: 'rgba(14,23,38,0.08)',
+    error: '#C0261C', paper: '#FFFFFF',
+  },
+  dark: {
+    bg: '#0B1220', surface: '#111B2D', surfaceAlt: '#16233A', soft: '#1A2740', softer: '#22324A',
+    line: '#1F2E45', lineStrong: '#2E4260',
+    text: '#F3F1EA', muted: '#A8B3C7', faint: '#8E9FB7',
+    primary: '#F6B325', primaryHover: '#FFC54F', primaryPressed: '#E9A513', primaryText: '#F6B325', primarySoft: 'rgba(246,179,37,0.12)', onPrimary: '#111827',
+    ink: '#F3F1EA', onInk: '#0B1220', navigationActive: '#16233A', accent: '#F6B325', accentSoft: 'rgba(246,179,37,0.12)',
+    gold: '#F6B325', goldHover: '#FFC54F', onGold: '#111827',
+    green: '#4ADE80', greenBright: '#22C55E', greenSoft: 'rgba(74,222,128,0.12)',
+    amber: '#FBBF24', amberBright: '#F59E0B', amberSoft: 'rgba(251,191,36,0.12)',
+    red: '#FF8A85', redBright: '#EF4444', redSoft: 'rgba(255,138,133,0.12)',
+    sky: '#7DB4FF', skyBright: '#3B82F6', skySoft: 'rgba(125,180,255,0.12)',
+    purple: '#B79AFF', purpleSoft: 'rgba(183,154,255,0.12)', pink: '#F49AC1', pinkSoft: 'rgba(244,154,193,0.12)',
+    focus: 'rgba(246,179,37,0.6)', overlay: 'rgba(3,7,15,0.7)', shadow: 'rgba(0,0,0,0.35)',
+    error: '#FF8A85', paper: '#111B2D',
+  },
+};
+
 // Scope administration styling without changing the operational modules.
 export function AdminAppearance({ children }) {
   const theme = useTheme();
-  const c = { ...theme.c, admin: true,
-    ...(theme.isDark ? {
-      surface: '#111B2D', surfaceAlt: '#17243A', soft: '#1A2740', line: '#263950', faint: '#91A0B5',
-    } : {
-      bg: '#F7F8FA', surface: '#FFFFFF', surfaceAlt: '#F1F3F6', soft: '#E9EDF3', line: '#DCE2EA',
-      text: '#142238', muted: '#64748B', faint: '#74849A',
-      primary: '#F6B325', primaryHover: '#D99A1F', primaryText: '#8A5B08', primarySoft: '#FFF4D6', onPrimary: '#142238',
-      navigationActive: '#FFF7E1', accent: '#D99A1F', accentSoft: '#FFF4D6',
-      green: '#15803D', greenBright: '#22C55E', greenSoft: '#DCFCE7',
-      amber: '#A16207', amberBright: '#F59E0B', amberSoft: '#FEF3C7',
-      red: '#DC2626', redBright: '#EF4444', redSoft: '#FEE2E2',
-      sky: '#2563EB', skyBright: '#3B82F6', skySoft: '#DBEAFE',
-      pink: '#BE185D', pinkSoft: '#FCE7F3', purple: '#7C3AED', purpleSoft: '#EDE9FE',
-    }),
-  };
+  const c = { ...theme.c, ...adminPalette[theme.isDark ? 'dark' : 'light'], admin: true, isDark: theme.isDark };
   return <ThemeContext.Provider value={{ ...theme, c }}>{children}</ThemeContext.Provider>;
 }
 
 export const softShadow = (c, level = 1) => {
-  if (c.admin) return Platform.OS === 'web' ? { boxShadow: c.isDark ? 'none' : '0 2px 8px rgba(15,23,42,0.03)' } : { elevation: 0 };
+  if (c.admin) return Platform.OS === 'web' ? { boxShadow: c.isDark ? 'none' : `0 ${level}px ${3 * level}px ${c.shadow}` } : { elevation: 0 };
   if (Platform.OS === 'web') {
     const a = c.isDark ? 0.4 : 0.08 + level * 0.02;
     return { boxShadow: `0 ${2 * level}px ${8 * level}px rgba(0,0,0,${a})` };

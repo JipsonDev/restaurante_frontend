@@ -1,168 +1,263 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
-import Svg, { Circle, Defs, LinearGradient, Line, Path, Stop } from 'react-native-svg';
-import { AlertTriangle, ArrowUpRight, CalendarDays, ChefHat, ChevronRight, CircleDollarSign, Clock3, CreditCard, Package, ReceiptText, RefreshCw, ShoppingBag, TrendingDown, TrendingUp, WalletCards } from 'lucide-react-native';
+import { Animated, Platform, Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
+import { AlertTriangle, ArrowRight, ChefHat, ClipboardList, Package, Wallet } from 'lucide-react-native';
 import axios from 'axios';
 import { BASE_URL } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
 import { useAdmin } from '../context/AdminContext';
 import { useTheme } from '../theme';
 import { bestHour, completeTimeline, percentage, shortDate } from '../utils/reportLogic.mjs';
+import { ago, AnimatedNumber, Button, Card, EASE_OUT, EmptyState, FadeIn, Metric, PageHeader, Press, Segmented, Skeleton, Status, money, radius, reduceMotion, space, toneColors, type } from '../components/admin/ui';
 
-const row = { flexDirection: 'row', alignItems: 'center' };
-const money = value => `$${Number(value || 0).toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const integer = value => Number(value || 0).toLocaleString('es-EC', { maximumFractionDigits: 0 });
-const stateLabels = { PENDIENTE: 'Pendientes', PREPARANDO: 'En cocina', LISTO: 'Listos', ENTREGADO: 'Entregados' };
-const orderLocation = order => order.mesa_id ? `Mesa ${order.mesa_numero || order.mesa_id}` : order.tipo === 'Delivery' ? 'Delivery' : 'Para llevar';
+const WEB = Platform.OS === 'web';
+const OPEN = o => !['PAGADO', 'CANCELADO'].includes(String(o.estado).toUpperCase());
+const target = o => o.mesa_id ? `Mesa ${o.mesa_numero || o.mesa_id}` : o.tipo === 'Delivery' ? `Delivery #${o.id}` : `Para llevar #${o.id}`;
 const stockOf = item => Number(item.stock_disponible ?? item.inventario_stock ?? item.stock ?? 0);
+const minutesSince = v => Math.max(0, Math.round((Date.now() - new Date(String(v).replace(' ', 'T')).getTime()) / 60000));
+const ORDER_STATE = { PENDIENTE: ['Pendiente', 'neutral'], PREPARANDO: ['En cocina', 'amber'], LISTO: ['Listo', 'green'], ENTREGADO: ['Entregado', 'sky'] };
+const TABLE_STATE = { Libre: ['Libre', 'green'], Ocupada: ['Ocupada', 'amber'], Cuenta: ['Por cobrar', 'red'], Reservada: ['Reservada', 'purple'] };
+const PERIODS = [{ value: 1, label: 'Hoy' }, { value: 7, label: '7 días' }, { value: 30, label: '30 días' }, { value: 90, label: '90 días' }];
 
-function Link({ children, onPress, icon: Icon = ChevronRight, label }) {
-  const { c } = useTheme();
-  return <Pressable accessibilityRole="button" accessibilityLabel={label || children} onPress={onPress} style={({ hovered }) => [row, { minHeight: 40, paddingHorizontal: 8, gap: 5, opacity: hovered ? 0.65 : 1 }]}><Text style={{ color: c.primaryText, fontSize: 11, fontWeight: '700' }}>{children}</Text><Icon size={14} color={c.primaryText} /></Pressable>;
+function greeting(name) {
+  const h = new Date().getHours();
+  const first = String(name || '').split(' ')[0];
+  return `${h < 12 ? 'Buenos días' : h < 19 ? 'Buenas tardes' : 'Buenas noches'}${first ? `, ${first}` : ''}`;
 }
 
-function Panel({ title, subtitle, icon: Icon, action, children, style }) {
+// Barras de ventas: crecen al cargar, se resaltan al pasar el cursor y muestran el valor.
+function SalesBars({ data, labelOf, valueOf, height = 168 }) {
   const { c } = useTheme();
-  return <View style={[{ backgroundColor: c.surface, borderWidth: 1, borderColor: c.line, borderRadius: 10, overflow: 'hidden' }, style]}>
-    <View style={[row, { minHeight: 65, paddingHorizontal: 17, paddingVertical: 12, gap: 10, borderBottomWidth: 1, borderBottomColor: c.line }]}>
-      {Icon && <View style={{ width: 34, height: 34, borderRadius: 8, backgroundColor: c.primarySoft, alignItems: 'center', justifyContent: 'center' }}><Icon size={17} color={c.primaryText} /></View>}
-      <View style={{ flex: 1, minWidth: 0 }}><Text style={{ color: c.text, fontSize: 14, fontWeight: '700' }}>{title}</Text>{subtitle && <Text numberOfLines={1} style={{ color: c.muted, fontSize: 10, marginTop: 4 }}>{subtitle}</Text>}</View>
-      {action}
+  const [hover, setHover] = useState(null);
+  const grow = useRef(new Animated.Value(0)).current;
+  const max = Math.max(...data.map(valueOf), 1);
+  useEffect(() => {
+    grow.setValue(reduceMotion() ? 1 : 0);
+    if (!reduceMotion()) Animated.timing(grow, { toValue: 1, duration: 520, easing: EASE_OUT, useNativeDriver: false }).start();
+  }, [data.length, max]);
+  const step = data.length > 31 ? Math.ceil(data.length / 8) : data.length > 14 ? 3 : 1;
+  return <View>
+    <View style={{ height, flexDirection: 'row', alignItems: 'flex-end', gap: data.length > 40 ? 2 : 6 }}>
+      {[0.25, 0.5, 0.75, 1].map(l => <View key={l} pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, bottom: height * l, height: 1, backgroundColor: c.line, opacity: 0.7 }} />)}
+      {data.map((d, i) => {
+        const v = valueOf(d); const h = Math.max(v > 0 ? 3 : 0, (v / max) * (height - 28));
+        const active = hover === i; const dim = hover != null && !active;
+        return <Pressable key={i} accessibilityLabel={`${labelOf(d, true)}: ${money(v)}`} onHoverIn={() => setHover(i)} onHoverOut={() => setHover(null)} onPressIn={() => setHover(i)} onPressOut={() => setHover(null)}
+          style={{ flex: 1, height: '100%', justifyContent: 'flex-end', alignItems: 'center' }}>
+          {active ? <View pointerEvents="none" style={{ position: 'absolute', bottom: h + 8, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: c.isDark ? c.softer : '#0E1726', zIndex: 2, minWidth: 74, alignItems: 'center' }}>
+            <Text style={[type.micro, type.num, { color: '#F3F1EA', fontWeight: '700' }]}>{money(v)}</Text>
+            <Text numberOfLines={1} style={[type.micro, { color: '#A8B3C7', fontSize: 11 }]}>{labelOf(d, true)}</Text>
+          </View> : null}
+          <Animated.View style={{ width: '100%', maxWidth: 34, height: grow.interpolate({ inputRange: [0, 1], outputRange: [0, h] }), borderTopLeftRadius: 5, borderTopRightRadius: 5,
+            backgroundColor: active ? c.primary : c.isDark ? '#2E4260' : '#C9D3E2', opacity: dim ? 0.55 : 1, ...(WEB ? { transition: 'background-color 120ms, opacity 120ms' } : {}) }} />
+        </Pressable>;
+      })}
     </View>
-    {children}
-  </View>;
-}
-
-function Metric({ label, value, hint, icon: Icon, color, soft, width, trend, loading }) {
-  const { c } = useTheme();
-  const Trend = Number(trend) >= 0 ? TrendingUp : TrendingDown;
-  return <View style={{ width, flexGrow: 1, minWidth: 0, minHeight: 108, padding: 14, backgroundColor: c.surface, borderWidth: 1, borderColor: c.line, borderRadius: 9 }}>
-    <View style={[row, { justifyContent: 'space-between', gap: 8 }]}><Text style={{ flex: 1, color: c.muted, fontSize: 10, fontWeight: '700', letterSpacing: 0.25 }}>{label.toUpperCase()}</Text><View style={{ width: 29, height: 29, borderRadius: 7, backgroundColor: soft, alignItems: 'center', justifyContent: 'center' }}><Icon size={15} color={color} /></View></View>
-    {loading ? <ActivityIndicator color={c.primary} style={{ alignSelf: 'flex-start', marginTop: 15 }} /> : <Text adjustsFontSizeToFit numberOfLines={1} style={{ color: c.text, fontSize: 23, fontWeight: '700', letterSpacing: -0.6, marginTop: 8, fontVariant: ['tabular-nums'] }}>{value}</Text>}
-    {!loading && <View style={[row, { gap: 5, marginTop: 6 }]}>{trend != null && <Trend size={11} color={Number(trend) >= 0 ? c.green : c.red} />}<Text numberOfLines={1} style={{ flex: 1, color: trend == null ? c.faint : Number(trend) >= 0 ? c.green : c.red, fontSize: 9, fontWeight: '600' }}>{trend == null ? hint : `${Math.abs(Number(trend)).toFixed(1)}% ${hint}`}</Text></View>}
-  </View>;
-}
-
-function TrendChart({ data, days }) {
-  const { c } = useTheme();
-  const [width, setWidth] = useState(0);
-  const height = 192, bottom = 164, top = 13;
-  const chartWidth = Math.max(width, 280);
-  const max = Math.max(...data.map(item => Number(item.ventas || 0)), 1);
-  const points = data.map((item, index) => ({ ...item, x: data.length === 1 ? chartWidth / 2 : 10 + index * ((chartWidth - 20) / Math.max(1, data.length - 1)), y: bottom - Number(item.ventas || 0) / max * (bottom - top) }));
-  const line = points.map((point, index) => `${index ? 'L' : 'M'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ');
-  const area = points.length ? `${line} L ${points.at(-1).x.toFixed(1)} ${bottom} L ${points[0].x.toFixed(1)} ${bottom} Z` : '';
-  const labels = [...new Set([0, Math.floor((data.length - 1) / 2), data.length - 1])];
-  return <View accessibilityLabel={`Tendencia de ventas de ${days} días`} style={{ padding: 16, paddingTop: 12 }}>
-    <View onLayout={event => setWidth(event.nativeEvent.layout.width)} style={{ height }}>
-      {!!width && <Svg width={width} height={height} viewBox={`0 0 ${chartWidth} ${height}`}>
-        <Defs><LinearGradient id="dashboardSales" x1="0" y1="0" x2="0" y2="1"><Stop offset="0" stopColor={c.primary} stopOpacity="0.3" /><Stop offset="1" stopColor={c.primary} stopOpacity="0.015" /></LinearGradient></Defs>
-        {[0, 0.34, 0.67, 1].map(level => <Line key={level} x1="0" y1={top + level * (bottom - top)} x2={chartWidth} y2={top + level * (bottom - top)} stroke={c.line} strokeWidth="1" />)}
-        <Path d={area} fill="url(#dashboardSales)" />
-        <Path d={line} fill="none" stroke={c.primary} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-        {points.length <= 30 && points.map(point => <Circle key={point.fecha} cx={point.x} cy={point.y} r="3" fill={c.surface} stroke={c.primary} strokeWidth="2" />)}
-      </Svg>}
+    <View style={{ flexDirection: 'row', marginTop: space.sm, gap: data.length > 40 ? 2 : 6 }}>
+      {data.map((d, i) => <Text key={i} numberOfLines={1} style={[type.micro, { flex: 1, textAlign: 'center', color: hover === i ? c.text : c.faint, fontSize: 11 }]}>{i % step === 0 || i === data.length - 1 ? labelOf(d) : ''}</Text>)}
     </View>
-    <View style={[row, { justifyContent: 'space-between', marginTop: -18 }]}>{labels.map(index => <Text key={data[index]?.fecha || index} style={{ color: c.faint, fontSize: 9 }}>{shortDate(data[index]?.fecha, days)}</Text>)}</View>
   </View>;
 }
 
-function PaymentMix({ methods, total }) {
+function AttentionRow({ icon: Icon, tone, title, detail, action, onPress }) {
   const { c } = useTheme();
-  const colors = [c.primary, c.sky, c.green, c.purple || '#7C3AED'];
-  const circumference = 2 * Math.PI * 41;
-  let offset = 0;
-  return <View style={{ padding: 16, gap: 16 }}><View style={[row, { justifyContent: 'center', gap: 20, flexWrap: 'wrap' }]}>
-    <View style={{ width: 112, height: 112, alignItems: 'center', justifyContent: 'center' }}>
-      <Svg width="112" height="112" viewBox="0 0 112 112" style={{ position: 'absolute' }}><Circle cx="56" cy="56" r="41" fill="none" stroke={c.soft} strokeWidth="12" />{methods.map((item, index) => { const length = percentage(item.total, total) / 100 * circumference; const dashOffset = -offset; offset += length; return <Circle key={item.nombre} cx="56" cy="56" r="41" fill="none" stroke={colors[index % colors.length]} strokeWidth="12" strokeDasharray={`${length} ${circumference - length}`} strokeDashoffset={dashOffset} transform="rotate(-90 56 56)" />; })}</Svg>
-      <Text style={{ color: c.text, fontSize: 15, fontWeight: '700' }}>{money(total)}</Text><Text style={{ color: c.faint, fontSize: 8, marginTop: 3 }}>COBRADO</Text>
+  const [, fg] = toneColors(c, tone);
+  return <Press accessibilityRole="button" onPress={onPress} scaleTo={0.99}
+    style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: 10, paddingHorizontal: space.md, marginHorizontal: -space.md, borderRadius: radius.md }}
+    hoverStyle={{ backgroundColor: c.surfaceAlt }}>
+    {({ hovered }) => <>
+      <Icon size={17} color={fg} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text numberOfLines={1} style={[type.small, { color: c.text, fontWeight: '600' }]}>{title}</Text>
+        <Text numberOfLines={1} style={[type.micro, { color: c.faint }]}>{detail}</Text>
+      </View>
+      {action ? <Text style={[type.micro, type.num, { color: c.text, fontWeight: '600' }]}>{action}</Text> : null}
+      <View style={{ transform: [{ translateX: hovered ? 2 : 0 }], ...(WEB ? { transition: 'transform 150ms' } : {}) }}><ArrowRight size={14} color={hovered ? c.text : c.faint} /></View>
+    </>}
+  </Press>;
+}
+
+function FloorMini({ mesas, onOpen }) {
+  const { c } = useTheme();
+  const active = mesas.filter(m => Number(m.activo) === 1).sort((a, b) => Number(a.numero) - Number(b.numero));
+  const counts = Object.keys(TABLE_STATE).map(k => [k, active.filter(m => m.estado === k).length]);
+  const busy = active.filter(m => ['Ocupada', 'Cuenta'].includes(m.estado)).length;
+  return <Card>
+    <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: space.lg }}>
+      <Text style={[type.h2, { color: c.text }]}>Salón ahora</Text>
+      <Text style={[type.small, type.num, { color: c.muted }]}>{busy} de {active.length} ocupadas</Text>
     </View>
-    <View style={{ flex: 1, minWidth: 150, gap: 10 }}>{methods.length ? methods.slice(0, 4).map((item, index) => <View key={item.nombre} style={[row, { gap: 7 }]}><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors[index % colors.length] }} /><Text numberOfLines={1} style={{ flex: 1, color: c.muted, fontSize: 10 }}>{item.nombre}</Text><Text style={{ color: c.text, fontSize: 10, fontWeight: '700' }}>{percentage(item.total, total).toFixed(0)}%</Text></View>) : <Text style={{ color: c.muted, fontSize: 10, lineHeight: 16 }}>Sin cobros en este período.</Text>}</View>
-  </View></View>;
+    {active.length ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+      {active.map(m => { const [label, tone] = TABLE_STATE[m.estado] || TABLE_STATE.Libre; const [bg, fg, dot] = toneColors(c, tone);
+        return <Press key={m.id} accessibilityRole="button" accessibilityLabel={`Mesa ${m.numero}, ${label}`} onPress={onOpen} scaleTo={0.94}
+          {...(WEB ? { title: `Mesa ${m.numero} · ${label}${m.ubicacion_nombre ? ' · ' + m.ubicacion_nombre : ''}` } : {})}
+          style={{ width: 48, height: 48, borderRadius: 10, backgroundColor: m.estado === 'Libre' ? c.surface : bg, borderWidth: 1, borderColor: m.estado === 'Libre' ? c.line : 'transparent', alignItems: 'center', justifyContent: 'center' }}
+          hoverStyle={{ borderColor: dot }}>
+          <Text style={[type.small, type.num, { color: m.estado === 'Libre' ? c.muted : fg, fontWeight: '700' }]}>{m.numero}</Text>
+          {m.estado !== 'Libre' ? <View style={{ position: 'absolute', top: 6, right: 6, width: 6, height: 6, borderRadius: 3, backgroundColor: dot }} /> : null}
+        </Press>; })}
+    </View> : <Text style={[type.small, { color: c.muted }]}>Aún no hay mesas activas.</Text>}
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.lg, marginTop: space.lg }}>
+      {counts.map(([k, n]) => <Status key={k} tone={TABLE_STATE[k][1]}>{`${TABLE_STATE[k][0]} · ${n}`}</Status>)}
+    </View>
+  </Card>;
 }
 
-function Operation({ active, tables, caja, inventoryAlerts, navigate }) {
+function OpenAccounts({ orders, onOpen }) {
   const { c } = useTheme();
-  const states = ['PENDIENTE', 'PREPARANDO', 'LISTO', 'ENTREGADO'];
-  const occupied = tables.filter(table => ['Ocupada', 'Cuenta'].includes(table.estado)).length;
-  const occupancy = tables.length ? occupied / tables.length * 100 : 0;
-  const colors = { PENDIENTE: c.faint, PREPARANDO: c.amber, LISTO: c.green, ENTREGADO: c.sky };
-  return <View style={{ padding: 16, gap: 17 }}>
-    <View><View style={[row, { justifyContent: 'space-between', marginBottom: 10 }]}><Text style={{ color: c.muted, fontSize: 10 }}>Flujo de pedidos</Text><Text style={{ color: c.text, fontSize: 11, fontWeight: '700' }}>{active.length} abiertos</Text></View><View style={[row, { gap: 5 }]}>{states.map(state => { const count = active.filter(order => String(order.estado).toUpperCase() === state).length; return <View key={state} accessibilityLabel={`${stateLabels[state]}: ${count}`} style={{ flex: 1, minWidth: 0, padding: 9, borderRadius: 7, backgroundColor: c.surfaceAlt, gap: 7 }}><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors[state] }} /><Text style={{ color: c.text, fontSize: 15, fontWeight: '700' }}>{count}</Text><Text numberOfLines={1} style={{ color: c.faint, fontSize: 8 }}>{stateLabels[state]}</Text></View>; })}</View></View>
-    <View><View style={[row, { justifyContent: 'space-between', marginBottom: 8 }]}><Text style={{ color: c.muted, fontSize: 10 }}>Ocupación del salón</Text><Text style={{ color: c.text, fontSize: 11, fontWeight: '700' }}>{occupied} / {tables.length}</Text></View><View style={{ height: 6, borderRadius: 3, overflow: 'hidden', backgroundColor: c.soft }}><View style={{ height: 6, width: `${Math.min(100, occupancy)}%`, borderRadius: 3, backgroundColor: c.primary }} /></View></View>
-    <Pressable accessibilityRole="button" onPress={() => navigate('caja')} style={({ hovered }) => [row, { padding: 11, gap: 10, borderRadius: 8, backgroundColor: hovered ? c.soft : c.surfaceAlt }]}><View style={{ width: 31, height: 31, borderRadius: 7, backgroundColor: caja?.caja ? c.greenSoft : c.soft, alignItems: 'center', justifyContent: 'center' }}><WalletCards size={16} color={caja?.caja ? c.green : c.muted} /></View><View style={{ flex: 1 }}><Text style={{ color: c.text, fontSize: 11, fontWeight: '700' }}>{caja?.caja ? `Caja #${caja.caja.id} abierta` : 'Caja cerrada'}</Text><Text style={{ color: c.muted, fontSize: 9, marginTop: 3 }}>{caja?.caja ? 'Turno de cobros activo' : 'Requiere apertura para cobrar'}</Text></View><ChevronRight size={15} color={c.faint} /></Pressable>
-    <Pressable accessibilityRole="button" onPress={() => navigate('inventario')} style={({ hovered }) => [row, { gap: 9, opacity: hovered ? 0.7 : 1 }]}>{inventoryAlerts.length ? <AlertTriangle size={15} color={c.amber} /> : <Package size={15} color={c.green} />}<Text style={{ flex: 1, color: inventoryAlerts.length ? c.amber : c.muted, fontSize: 10 }}>{inventoryAlerts.length ? `${inventoryAlerts.length} alertas de inventario` : 'Inventario sin alertas'}</Text><ChevronRight size={14} color={c.faint} /></Pressable>
-  </View>;
+  return <Card padded={false}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: space.xl, paddingBottom: space.md }}>
+      <Text style={[type.h2, { color: c.text }]}>Cuentas abiertas</Text>
+      <Button size="sm" variant="ghost" iconRight={ArrowRight} onPress={onOpen}>Ver pedidos</Button>
+    </View>
+    {orders.length ? orders.map((o, i) => { const [label, tone] = ORDER_STATE[String(o.estado).toUpperCase()] || ['Abierta', 'neutral'];
+      const pending = Math.max(0, Number(o.total || 0) - Number(o.abonado || 0));
+      return <Press key={o.id} accessibilityRole="button" onPress={onOpen} scaleTo={0.995}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.xl, paddingVertical: 12, borderTopWidth: 1, borderTopColor: c.line }}
+        hoverStyle={{ backgroundColor: c.surfaceAlt }}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text numberOfLines={1} style={[type.small, { color: c.text, fontWeight: '600' }]}>{target(o)}</Text>
+          <Text numberOfLines={1} style={[type.micro, { color: c.faint }]}>{o.mesero_nombre || 'Sin mesero'} · {ago(o.created_at)}</Text>
+        </View>
+        <View style={{ width: 100 }}><Status tone={tone}>{label}</Status></View>
+        <Text style={[type.small, type.num, { color: c.text, fontWeight: '600', width: 84, textAlign: 'right' }]}>{money(pending)}</Text>
+      </Press>; })
+      : <EmptyState compact icon={ClipboardList} title="Sin cuentas abiertas" description="Cuando un mesero envíe un pedido aparecerá aquí." />}
+  </Card>;
+}
+
+function Ranking({ title, rows, valueOf, labelOf, format, empty }) {
+  const { c } = useTheme();
+  const max = Math.max(...rows.map(valueOf), 1);
+  return <Card style={{ flex: 1, minWidth: 280 }}>
+    <Text style={[type.h2, { color: c.text, marginBottom: space.lg }]}>{title}</Text>
+    {rows.length ? <View style={{ gap: space.md }}>
+      {rows.map((r, i) => <View key={i} style={{ gap: 6 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: space.md }}>
+          <Text numberOfLines={1} style={[type.small, { color: c.text, flex: 1 }]}>{labelOf(r)}</Text>
+          <Text style={[type.small, type.num, { color: c.muted }]}>{format(r)}</Text>
+        </View>
+        <View style={{ height: 6, borderRadius: 3, backgroundColor: c.soft, overflow: 'hidden' }}>
+          <FadeIn delay={i * 40} offset={0} style={{ height: 6 }}><View style={{ height: 6, width: `${Math.max(3, valueOf(r) / max * 100)}%`, borderRadius: 3, backgroundColor: i === 0 ? c.primary : c.isDark ? '#2E4260' : '#C9D3E2' }} /></FadeIn>
+        </View>
+      </View>)}
+    </View> : <Text style={[type.small, { color: c.muted }]}>{empty}</Text>}
+  </Card>;
+}
+
+function PaymentSplit({ methods }) {
+  const { c } = useTheme();
+  const total = methods.reduce((s, m) => s + Number(m.total || 0), 0);
+  const tones = [c.text, c.primary, c.sky, c.purple, c.green];
+  return <Card style={{ flex: 1, minWidth: 280 }}>
+    <Text style={[type.h2, { color: c.text, marginBottom: space.lg }]}>Cómo pagan</Text>
+    {methods.length ? <>
+      <View style={{ flexDirection: 'row', height: 12, borderRadius: 6, overflow: 'hidden', gap: 2, marginBottom: space.lg }}>
+        {methods.map((m, i) => <View key={m.nombre} style={{ flex: Number(m.total) || 0.0001, backgroundColor: tones[i % tones.length] }} />)}
+      </View>
+      <View style={{ gap: space.md }}>
+        {methods.map((m, i) => <View key={m.nombre} style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+          <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: tones[i % tones.length] }} />
+          <Text style={[type.small, { color: c.text, flex: 1 }]}>{m.nombre}</Text>
+          <Text style={[type.small, type.num, { color: c.muted, width: 48, textAlign: 'right' }]}>{Math.round(percentage(m.total, total))}%</Text>
+          <Text style={[type.small, type.num, { color: c.text, width: 96, textAlign: 'right', fontWeight: '600' }]}>{money(m.total)}</Text>
+        </View>)}
+      </View>
+    </> : <Text style={[type.small, { color: c.muted }]}>Sin cobros en este período.</Text>}
+  </Card>;
 }
 
 export default function DashboardScreen({ setActiveTab }) {
-  const { pedidos, productos, mesas, inventario, caja, loading, refreshAll } = useAdmin();
+  const { pedidos, productos, mesas, inventario, caja } = useAdmin();
+  const { user } = useAuth();
   const { c } = useTheme();
   const { width } = useWindowDimensions();
-  const phone = width < 700, wide = width >= 1120;
+  const wide = width >= 1180, phone = width < 700;
   const [days, setDays] = useState(7);
   const [report, setReport] = useState(null);
-  const [reportLoading, setReportLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [retry, setRetry] = useState(0);
   const requestRef = useRef(0);
-  const navigate = tab => setActiveTab?.(tab);
+  const go = tab => setActiveTab?.(tab);
 
   useEffect(() => {
-    const request = ++requestRef.current;
-    const controller = new AbortController();
-    setReportLoading(true); setError('');
+    const request = ++requestRef.current; const controller = new AbortController();
+    setLoading(true); setError('');
     axios.get(`${BASE_URL}/dashboard/reports`, { params: { days }, signal: controller.signal, timeout: 15000 })
       .then(({ data }) => { if (request === requestRef.current) setReport(data); })
-      .catch(error => { if (request === requestRef.current && error.code !== 'ERR_CANCELED') setError(error.response?.data?.message || 'No se pudieron cargar los indicadores financieros.'); })
-      .finally(() => { if (request === requestRef.current) setReportLoading(false); });
+      .catch(e => { if (request === requestRef.current && e.code !== 'ERR_CANCELED') setError(e.response?.data?.message || 'No se pudieron cargar las ventas.'); })
+      .finally(() => { if (request === requestRef.current) setLoading(false); });
     return () => controller.abort();
-  }, [days, refreshKey]);
+  }, [days, retry]);
 
-  const active = pedidos.filter(order => !['PAGADO', 'CANCELADO'].includes(String(order.estado).toUpperCase()));
-  const pendingBalance = active.reduce((sum, order) => sum + Math.max(0, Number(order.total || 0) - Number(order.abonado || 0)), 0);
-  const activeTables = mesas.filter(table => Number(table.activo) === 1);
-  const lowInventory = inventario.filter(item => stockOf(item) <= Number(item.stock_minimo || 0));
-  const unavailable = productos.filter(item => Number(item.disponible) === 1 && stockOf(item) <= 0);
-  const inventoryAlerts = [...lowInventory, ...unavailable];
-  const recent = [...active].sort((a, b) => Number(b.id) - Number(a.id)).slice(0, 5);
+  const open = pedidos.filter(OPEN).sort((a, b) => Number(b.id) - Number(a.id));
+  const pendingBalance = open.reduce((s, o) => s + Math.max(0, Number(o.total || 0) - Number(o.abonado || 0)), 0);
+  const toCharge = open.filter(o => o.cuenta_solicitada_at || String(o.estado).toUpperCase() === 'ENTREGADO');
+  const kitchen = open.filter(o => ['PENDIENTE', 'PREPARANDO'].includes(String(o.estado).toUpperCase()));
+  const slow = kitchen.filter(o => minutesSince(o.created_at) > 20);
+  const lowStock = inventario.filter(i => Number(i.stock_minimo) > 0 && stockOf(i) <= Number(i.stock_minimo));
   const summary = report?.summary || {};
   const timeline = useMemo(() => completeTimeline(report?.timeline, days), [report?.timeline, days]);
+  const hours = useMemo(() => { const map = new Map((report?.hours || []).map(h => [Number(h.hora), Number(h.total || 0)])); return Array.from({ length: 16 }, (_, i) => ({ hora: i + 7, total: map.get(i + 7) || 0 })); }, [report?.hours]);
   const peak = bestHour(report?.hours || []);
-  const totalMethods = (report?.methods || []).reduce((sum, item) => sum + Number(item.total || 0), 0);
+  const change = Number(summary.change_percent || 0);
   const today = new Date().toLocaleDateString('es-EC', { weekday: 'long', day: 'numeric', month: 'long' });
-  const refresh = () => { refreshAll(); setRefreshKey(value => value + 1); };
 
-  return <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 16, paddingBottom: 28 }}>
-    <View style={{ flexDirection: phone ? 'column' : 'row', alignItems: phone ? 'stretch' : 'center', justifyContent: 'space-between', gap: 14 }}>
-      <View style={{ flex: 1, minWidth: 0 }}><Text style={{ color: c.primaryText, fontSize: 10, fontWeight: '700', letterSpacing: 1.5 }}>VISIÓN GENERAL</Text><Text accessibilityRole="header" style={{ color: c.text, fontSize: phone ? 25 : 30, fontWeight: '700', letterSpacing: -0.7, marginTop: 6 }}>Resumen ejecutivo</Text><View style={[row, { gap: 7, marginTop: 8 }]}><CalendarDays size={13} color={c.muted} /><Text style={{ color: c.muted, fontSize: 11 }}>{today}</Text><View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: error ? c.red : c.green, marginLeft: 6 }} /><Text style={{ color: c.faint, fontSize: 10 }}>{error ? 'Sin conexión analítica' : 'Datos actualizados'}</Text></View></View>
-      <View style={[row, { gap: 7, alignSelf: phone ? 'flex-start' : 'center' }]}><Pressable accessibilityRole="button" accessibilityLabel="Actualizar resumen" disabled={reportLoading} onPress={refresh} style={({ hovered }) => [row, { minHeight: 42, paddingHorizontal: 12, gap: 7, borderRadius: 8, borderWidth: 1, borderColor: c.line, backgroundColor: hovered ? c.soft : c.surface, opacity: reportLoading ? 0.6 : 1 }]}><RefreshCw size={15} color={c.primaryText} /><Text style={{ color: c.text, fontSize: 11, fontWeight: '700' }}>Actualizar</Text></Pressable><Pressable accessibilityRole="button" onPress={() => navigate('reportes')} style={({ hovered }) => [row, { minHeight: 42, paddingHorizontal: 13, gap: 7, borderRadius: 8, backgroundColor: hovered ? c.primaryHover : c.primary }]}><Text style={{ color: c.onPrimary, fontSize: 11, fontWeight: '700' }}>Ver reportes</Text><ArrowUpRight size={14} color={c.onPrimary} /></Pressable></View>
+  const attention = [
+    ...slow.map(o => ({ id: `s${o.id}`, icon: AlertTriangle, tone: 'red', title: `${target(o)} espera hace ${minutesSince(o.created_at)} min`, detail: `En cocina · ${o.mesero_nombre || 'sin mesero'}`, go: 'pedidos' })),
+    ...(toCharge.length ? [{ id: 'charge', icon: Wallet, tone: 'amber', title: `${toCharge.length} ${toCharge.length === 1 ? 'cuenta lista' : 'cuentas listas'} para cobrar`, detail: toCharge.slice(0, 3).map(target).join(', '), action: money(toCharge.reduce((s, o) => s + Math.max(0, Number(o.total) - Number(o.abonado || 0)), 0)), go: 'caja' }] : []),
+    ...(kitchen.length ? [{ id: 'kitchen', icon: ChefHat, tone: 'neutral', title: `${kitchen.length} en cocina`, detail: kitchen.slice(0, 3).map(target).join(', '), go: 'pedidos' }] : []),
+    ...lowStock.slice(0, 3).map(i => ({ id: `i${i.id}`, icon: Package, tone: 'amber', title: `Queda poco ${i.nombre.toLowerCase()}`, detail: `${stockOf(i)} ${i.unidad || ''} · mínimo ${Number(i.stock_minimo)}`, go: 'inventario' })),
+    ...(!caja?.caja ? [{ id: 'cash', icon: Wallet, tone: 'red', title: 'La caja está cerrada', detail: 'Ábrela para poder cobrar', go: 'caja' }] : []),
+  ];
+
+  const salesCard = <Card style={{ flex: wide ? 2 : undefined }}>
+    <View style={{ flexDirection: phone ? 'column' : 'row', justifyContent: 'space-between', gap: space.xl, marginBottom: space.xl }}>
+      {loading && !report ? <View style={{ gap: 10 }}><Skeleton width={110} height={14} /><Skeleton width={190} height={40} /><Skeleton width={150} height={12} /></View>
+        : <Metric size="lg" label={days === 1 ? 'Ventas de hoy' : `Ventas de los últimos ${days} días`} value={Number(summary.net_sales || 0)} format={v => money(v)}
+          note={change === 0 ? 'Igual que el período anterior' : `${change > 0 ? '▲' : '▼'} ${Math.abs(change)}% frente al período anterior`} noteTone={change > 0 ? 'green' : change < 0 ? 'red' : null} />}
+      <View style={{ flexDirection: 'row', gap: phone ? space.xl : space.x3, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <Metric size="sm" label="Pedidos cobrados" value={Number(summary.paid_orders || 0)} />
+        <Metric size="sm" label="Ticket promedio" value={Number(summary.average_ticket || 0)} format={v => money(v)} />
+        <Metric size="sm" label="Por cobrar ahora" value={pendingBalance} format={v => money(v)} />
+      </View>
     </View>
+    {error ? <View style={{ height: 168, alignItems: 'center', justifyContent: 'center', gap: space.md }}>
+      <Text style={[type.small, { color: c.red }]}>{error}</Text><Button size="sm" onPress={() => setRetry(r => r + 1)}>Reintentar</Button>
+    </View> : loading && !report ? <Skeleton height={190} radius={10} />
+      : days === 1 ? <SalesBars data={hours} valueOf={h => h.total} labelOf={(h, long) => long ? `${h.hora}:00 – ${h.hora + 1}:00` : `${h.hora}h`} />
+        : <SalesBars data={timeline} valueOf={d => d.ventas} labelOf={(d, long) => long ? new Date(`${d.fecha}T12:00:00`).toLocaleDateString('es-EC', { weekday: 'long', day: 'numeric', month: 'short' }) : shortDate(d.fecha, days)} />}
+    {peak && !loading ? <Text style={[type.micro, { color: c.faint, marginTop: space.md }]}>La hora más fuerte del período es de {peak.hora}:00 a {Number(peak.hora) + 1}:00.</Text> : null}
+  </Card>;
 
-    <View style={[row, { minHeight: 50, paddingHorizontal: 10, gap: 8, backgroundColor: c.surface, borderWidth: 1, borderColor: c.line, borderRadius: 9 }]}><Clock3 size={15} color={c.muted} /><Text style={{ color: c.muted, fontSize: 10 }}>Período</Text>{[7, 30, 90].map(period => <Pressable key={period} accessibilityRole="button" accessibilityState={{ selected: days === period }} onPress={() => setDays(period)} style={{ minHeight: 32, justifyContent: 'center', paddingHorizontal: 12, borderRadius: 7, backgroundColor: days === period ? c.primary : 'transparent' }}><Text style={{ color: days === period ? c.onPrimary : c.muted, fontSize: 10, fontWeight: days === period ? '700' : '500' }}>{period} días</Text></Pressable>)}<View style={{ flex: 1 }} />{!phone && peak && <Text style={{ color: c.faint, fontSize: 10 }}>Hora de mayor venta: <Text style={{ color: c.text, fontWeight: '700' }}>{String(peak.hora).padStart(2, '0')}:00</Text></Text>}</View>
-
-    {!!error && <View accessibilityRole="alert" style={[row, { padding: 12, gap: 9, borderRadius: 8, backgroundColor: c.redSoft }]}><AlertTriangle size={16} color={c.red} /><Text style={{ flex: 1, color: c.red, fontSize: 10 }}>{error}</Text><Link onPress={() => setRefreshKey(value => value + 1)}>Reintentar</Link></View>}
-
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-      <Metric width={phone ? '47%' : '23%'} label="Ventas netas" value={money(summary.net_sales)} hint="vs. período anterior" trend={summary.change_percent} icon={CircleDollarSign} color={c.green} soft={c.greenSoft} loading={reportLoading && !report} />
-      <Metric width={phone ? '47%' : '23%'} label="Pedidos cobrados" value={integer(summary.paid_orders)} hint={`${integer(summary.payments)} transacciones`} icon={ShoppingBag} color={c.primaryText} soft={c.primarySoft} loading={reportLoading && !report} />
-      <Metric width={phone ? '47%' : '23%'} label="Ticket promedio" value={money(summary.average_ticket)} hint="por pedido cobrado" icon={ReceiptText} color={c.sky} soft={c.skySoft} loading={reportLoading && !report} />
-      <Metric width={phone ? '47%' : '23%'} label="Por cobrar" value={money(pendingBalance)} hint={`${active.length} cuentas abiertas`} icon={CreditCard} color={c.pink || c.red} soft={c.pinkSoft || c.redSoft} loading={loading} />
+  const attentionCard = <Card style={{ flex: wide ? 1 : undefined, minWidth: 0 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: space.sm }}>
+      <Text style={[type.h2, { color: c.text }]}>Necesita atención</Text>
+      {attention.length ? <View style={{ minWidth: 24, height: 24, paddingHorizontal: 7, borderRadius: 12, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={[type.micro, type.num, { color: c.onPrimary, fontWeight: '700' }]}>{attention.length}</Text></View> : null}
     </View>
-
-    <View style={{ flexDirection: wide ? 'row' : 'column', gap: 16 }}>
-      <Panel style={{ flex: wide ? 1.65 : undefined, minWidth: 0 }} title="Rendimiento de ventas" subtitle={`Cobros netos de los últimos ${days} días`} icon={TrendingUp} action={<Text style={{ color: c.green, fontSize: 13, fontWeight: '700' }}>{money(summary.net_sales)}</Text>}><TrendChart data={timeline} days={days} /><View style={[row, { justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 11, borderTopWidth: 1, borderColor: c.line }]}><Text style={{ color: c.faint, fontSize: 9 }}>Solo pagos activos; excluye anulaciones y devoluciones</Text><Link onPress={() => navigate('reportes')}>Analizar</Link></View></Panel>
-      <Panel style={{ flex: wide ? 1 : undefined, minWidth: 0 }} title="Operación en vivo" subtitle="Salón, cocina, caja e inventario" icon={ChefHat} action={<View style={[row, { gap: 5 }]}><View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.green }} /><Text style={{ color: c.green, fontSize: 9, fontWeight: '700' }}>EN VIVO</Text></View>}><Operation active={active} tables={activeTables} caja={caja} inventoryAlerts={inventoryAlerts} navigate={navigate} /></Panel>
+    {attention.length ? attention.slice(0, 7).map((a, i) => <FadeIn key={a.id} delay={i * 35}><AttentionRow {...a} onPress={() => go(a.go)} /></FadeIn>)
+      : <EmptyState compact icon={ClipboardList} title="Todo en orden" description="Nada espera en cocina, caja ni inventario." />}
+    <View style={{ marginTop: 'auto', paddingTop: space.lg, borderTopWidth: 1, borderTopColor: c.line, flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+      <Status tone={caja?.caja ? 'green' : 'red'}>{caja?.caja ? `Caja abierta · ${money(caja?.total_cobrado ?? caja?.totales_turno?.total ?? 0)} cobrados` : 'Caja cerrada'}</Status>
     </View>
+  </Card>;
 
-    <View style={{ flexDirection: wide ? 'row' : 'column', gap: 16 }}>
-      <Panel style={{ flex: wide ? 1.55 : undefined, minWidth: 0 }} title="Cuentas abiertas recientes" subtitle="Pendientes de completar o cobrar" icon={ShoppingBag} action={<Link onPress={() => navigate('pedidos')}>Ver pedidos</Link>}>
-        {!phone && <View style={[row, { paddingHorizontal: 16, paddingVertical: 8, backgroundColor: c.surfaceAlt }]}><Text style={{ flex: 1, color: c.faint, fontSize: 8, fontWeight: '700' }}>PEDIDO / DESTINO</Text><Text style={{ width: 105, color: c.faint, fontSize: 8, fontWeight: '700' }}>ESTADO</Text><Text style={{ width: 82, textAlign: 'right', color: c.faint, fontSize: 8, fontWeight: '700' }}>SALDO</Text></View>}
-        {recent.map((order, index) => { const state = String(order.estado).toUpperCase(); const balance = Math.max(0, Number(order.total || 0) - Number(order.abonado || 0)); const stateColor = { PENDIENTE: c.faint, PREPARANDO: c.amber, LISTO: c.green, ENTREGADO: c.sky }[state] || c.muted; return <Pressable key={order.id} accessibilityRole="button" onPress={() => navigate('pedidos')} style={({ hovered }) => [row, { minHeight: 57, paddingHorizontal: 16, paddingVertical: 9, gap: 10, borderTopWidth: index || phone ? 1 : 0, borderColor: c.line, backgroundColor: hovered ? c.surfaceAlt : c.surface }]}><View style={{ width: 30, height: 30, borderRadius: 7, backgroundColor: c.primarySoft, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: c.primaryText, fontSize: 10, fontWeight: '700' }}>#{order.id}</Text></View><View style={{ flex: 1, minWidth: 0 }}><Text numberOfLines={1} style={{ color: c.text, fontSize: 11, fontWeight: '700' }}>{orderLocation(order)}</Text><Text numberOfLines={1} style={{ color: c.muted, fontSize: 9, marginTop: 3 }}>{order.cliente_nombre || order.mesero_nombre || 'Servicio del restaurante'}</Text>{phone && <Text style={{ color: stateColor, fontSize: 9, marginTop: 4 }}>{stateLabels[state] || state}</Text>}</View>{!phone && <View style={[row, { width: 105, gap: 5 }]}><View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: stateColor }} /><Text style={{ color: stateColor, fontSize: 9 }}>{stateLabels[state] || state}</Text></View>}<Text style={{ width: 82, textAlign: 'right', color: c.text, fontSize: 11, fontWeight: '700' }}>{money(balance)}</Text></Pressable>; })}
-        {!recent.length && <View style={{ minHeight: 150, alignItems: 'center', justifyContent: 'center', gap: 8 }}><ShoppingBag size={25} color={c.faint} /><Text style={{ color: c.muted, fontSize: 11 }}>No hay cuentas abiertas.</Text></View>}
-      </Panel>
-      <Panel style={{ flex: wide ? 1 : undefined, minWidth: 0 }} title="Composición de cobros" subtitle={`Métodos usados en ${days} días`} icon={CreditCard}><PaymentMix methods={report?.methods || []} total={totalMethods} />{(report?.products || []).length > 0 && <View style={{ borderTopWidth: 1, borderColor: c.line, padding: 14, gap: 9 }}><Text style={{ color: c.faint, fontSize: 8, fontWeight: '700', letterSpacing: 0.7 }}>PRODUCTOS DESTACADOS</Text>{report.products.slice(0, 3).map((product, index) => <View key={product.id} style={[row, { gap: 8 }]}><Text style={{ width: 18, color: index === 0 ? c.primaryText : c.faint, fontSize: 10, fontWeight: '700' }}>{index + 1}</Text><Text numberOfLines={1} style={{ flex: 1, color: c.muted, fontSize: 10 }}>{product.nombre}</Text><Text style={{ color: c.text, fontSize: 10, fontWeight: '700' }}>{Number(product.unidades).toLocaleString('es-EC', { maximumFractionDigits: 2 })} u.</Text></View>)}</View>}</Panel>
+  return <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: space.x3 }}>
+    <PageHeader title={greeting(user?.nombre)} description={`${today.charAt(0).toUpperCase() + today.slice(1)} · ${open.length} ${open.length === 1 ? 'cuenta abierta' : 'cuentas abiertas'}`}
+      actions={<Segmented options={PERIODS} value={days} onChange={setDays} accessibilityLabel="Período" />} />
+    <View style={{ flexDirection: wide ? 'row' : 'column', gap: space.lg }}>
+      {salesCard}
+      {attentionCard}
     </View>
-
-    <View style={[row, { justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', paddingHorizontal: 2 }]}><Text style={{ color: c.faint, fontSize: 9 }}>Fuente financiera: pagos activos registrados en caja.</Text><Text style={{ color: c.faint, fontSize: 9 }}>{report?.generated_at ? `Actualizado ${new Date(report.generated_at).toLocaleString('es-EC')}` : ''}</Text></View>
+    <View style={{ flexDirection: wide ? 'row' : 'column', gap: space.lg, marginTop: space.lg }}>
+      <View style={{ flex: wide ? 1 : undefined }}><FloorMini mesas={mesas} onOpen={() => go('mesas')} /></View>
+      <View style={{ flex: wide ? 2 : undefined }}><OpenAccounts orders={open.slice(0, 6)} onOpen={() => go('pedidos')} /></View>
+    </View>
+    <View style={{ flexDirection: phone ? 'column' : 'row', flexWrap: 'wrap', gap: space.lg, marginTop: space.lg }}>
+      <Ranking title="Lo más vendido" rows={(report?.products || []).slice(0, 5)} valueOf={r => Number(r.unidades || 0)} labelOf={r => r.nombre}
+        format={r => `${Number(r.unidades || 0)} u · ${money(r.total)}`} empty="Sin ventas en este período." />
+      <PaymentSplit methods={report?.methods || []} />
+    </View>
   </ScrollView>;
 }

@@ -4,6 +4,7 @@ import { ArrowDownLeft, ArrowRight, ArrowUpRight, ArrowDownUp, Check, CircleAler
 import { useAdmin } from '../context/AdminContext';
 import { useTheme } from '../theme';
 import { MenuButton, MenuChip, MenuField, MenuModal, MenuNotice } from '../components/MenuUI';
+import { Button, DataTable, EmptyState, FadeIn, IconButton, PageHeader, SearchField, Segmented, Skeleton, Status, space, type, useToast } from '../components/admin/ui';
 import { inventoryMovement, inventoryPayload, inventoryStock } from '../utils/inventoryLogic.mjs';
 
 const row = { flexDirection: 'row', alignItems: 'center' };
@@ -17,6 +18,18 @@ const STATES = {
   empty: { title: 'Sin disponible', icon: PackageX, tone: 'red', label: 'Sin disponible' },
 };
 const MOVES = { Entrada: { icon: ArrowDownLeft, hint: 'Suma unidades al stock físico. Úsalo al recibir una compra.' }, Salida: { icon: ArrowUpRight, hint: 'Resta unidades disponibles. Úsalo para mermas o retiros.' }, Ajuste: { icon: SlidersHorizontal, hint: 'Reemplaza el stock físico por la cantidad contada. No se suma ni se resta.' } };
+
+// Barra de nivel: disponible frente al doble del mínimo, con marca del mínimo.
+const unitLabel = u => (u === 'l' ? 'L' : u);
+function Meter({ item, c, width }) {
+  const min = Number(item.stock_minimo || 0), avail = Math.max(0, Number(item.levels.available || 0));
+  const scale = Math.max(min * 2, avail, 1);
+  const tone = { ok: c.green, low: c.amberBright || c.amber, empty: c.red }[item.levels.status] || c.muted;
+  return <View style={{ height: 6, borderRadius: 3, backgroundColor: c.soft, width: width || '100%', maxWidth: 260 }}>
+    <View style={{ height: 6, borderRadius: 3, width: `${Math.min(100, avail / scale * 100)}%`, backgroundColor: tone }} />
+    {min > 0 ? <View style={{ position: 'absolute', top: -3, height: 12, width: 2, borderRadius: 1, left: `${Math.min(100, min / scale * 100)}%`, backgroundColor: c.text, opacity: 0.55 }} /> : null}
+  </View>;
+}
 
 export default function InventoryScreen() {
   const { c } = useTheme();
@@ -34,7 +47,9 @@ export default function InventoryScreen() {
   const busyRef = useRef(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const money = n => `${configuracion?.simbolo_moneda || '$'}${Number(n || 0).toFixed(2)}`;
+  const toast = useToast();
+  React.useEffect(() => { if (notice) { toast.show(notice); setNotice(''); } }, [notice]);
+  const money = n => `${configuracion?.simbolo_moneda || '$'}${Number(n || 0).toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const card = { backgroundColor: c.surface, borderWidth: 1, borderColor: c.line, borderRadius: 10, overflow: 'hidden' };
   const items = useMemo(() => inventario.map(item => ({ ...item, levels: inventoryStock(item) })), [inventario]);
   const categories = useMemo(() => [...new Set(items.map(i => i.categoria || 'Sin categoría'))].sort((a, b) => a.localeCompare(b, 'es')), [items]);
@@ -82,39 +97,44 @@ export default function InventoryScreen() {
   const identity = item => <View style={[row, { gap: 10, flex: 1 }]}><View style={{ padding: 9, borderRadius: 9, backgroundColor: c.soft }}><Package size={19} color={c.primaryText} /></View><View style={{ flex: 1, gap: 4 }}><Text style={{ color: c.text, fontWeight: '600', fontSize: 14 }}>{item.nombre}</Text><Text style={{ color: c.muted, fontSize: 11 }}>{item.categoria || 'Sin categoría'} · {item.unidad}</Text><Text style={{ color: c.faint, fontSize: 11 }}>{item.proveedor || 'Sin proveedor'}</Text></View></View>;
   const actions = item => <View style={[row, { gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }]}><MenuButton icon={ArrowDownUp} label={`Registrar movimiento de ${item.nombre}`} onPress={() => open('movement', item)}>Movimiento</MenuButton><MenuButton icon={Edit3} label={`Editar ${item.nombre}`} onPress={() => open('edit', item)} /><MenuButton icon={Trash2} label={`Eliminar ${item.nombre}`} onPress={() => open('delete', item)} /></View>;
   const stat = (label, value, tone = c.text) => <View style={{ flex: 1, gap: 5 }}><Text style={{ color: c.muted, fontSize: 10 }}>{label}</Text><Text style={{ color: tone, fontSize: 15, fontWeight: '600', fontVariant: ['tabular-nums'] }}>{quantity(value)}</Text></View>;
+  const levelStatus = item => { const meta = STATES[item.levels.status]; return <Status tone={meta.tone === 'primary' ? 'neutral' : meta.tone}>{item.levels.shortage > 0 ? `Faltan ${quantity(item.levels.shortage)}` : meta.label}</Status>; };
   const fieldsRow = { flexDirection: compact ? 'column' : 'row', gap: 14 };
   const field = (key, label, props = {}) => <MenuField containerStyle={{ flex: 1 }} label={label} value={form[key]} onChangeText={v => change(key, v)} editable={!busy} {...props} />;
   const title = dialog?.kind === 'movement' ? 'Registrar movimiento' : dialog?.kind === 'delete' ? 'Eliminar insumo' : dialog?.item ? 'Editar insumo' : 'Nuevo insumo';
 
   return <View style={{ flex: 1 }} onLayout={e => setWidth(e.nativeEvent.layout.width)}>
-    <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 18, paddingBottom: 24 }}>
-      <View style={[row, { justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }]}><View style={{ gap: 6, flexShrink: 1 }}><Text style={{ color: c.primaryText, fontSize: 10, fontWeight: '700', letterSpacing: 1.4 }}>CONTROL DE EXISTENCIAS</Text><Text accessibilityRole="header" style={{ color: c.text, fontSize: compact ? 26 : 30, fontWeight: '700', letterSpacing: -0.6 }}>Inventario</Text><Text style={{ color: c.muted, fontSize: 13, lineHeight: 20 }}>Todo lo que necesitas para seguir sirviendo.</Text></View><MenuButton primary icon={Plus} onPress={() => open('edit')}>Nuevo insumo</MenuButton></View>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>{Object.entries(STATES).map(([key, meta]) => {
-        const Icon = meta.icon; const selected = key === status;
-        return <Pressable key={key} accessibilityRole="button" accessibilityLabel={`Filtrar ${meta.title}`} accessibilityState={{ selected }} onPress={() => setStatus(key)} style={({ hovered }) => [card, { flexBasis: compact ? '45%' : '22%', flexGrow: 1, padding: 13, gap: 12, backgroundColor: selected ? c.primarySoft : hovered ? c.surfaceAlt : c.surface, borderColor: selected ? c.primary : c.line }]}><View style={[row, { justifyContent: 'space-between' }]}><Icon size={20} color={key === 'all' ? c.primaryText : c[meta.tone]} /><Text style={{ color: c.text, fontSize: 22, fontWeight: '600' }}>{key === 'all' ? items.length : items.filter(i => i.levels.status === key).length}</Text></View><Text style={{ color: c.muted, fontSize: 12, fontWeight: '600' }}>{meta.title}</Text></Pressable>;
-      })}</View>
-      {!!notice && <View style={[row, { padding: 10, backgroundColor: c.greenSoft, borderRadius: 8, gap: 8 }]}><Check size={17} color={c.green} /><Text accessibilityLiveRegion="polite" style={{ flex: 1, color: c.green, fontSize: 12 }}>{notice}</Text><MenuButton icon={X} label="Cerrar aviso" onPress={() => setNotice('')} /></View>}
-      <View style={card}>
-        <View style={{ padding: compact ? 14 : 18, gap: 12 }}>
-          <View style={[row, { gap: 10, flexWrap: 'wrap' }]}><View style={[row, { flex: 1, minWidth: 190, paddingHorizontal: 12, gap: 8, backgroundColor: c.surfaceAlt, borderWidth: 1, borderColor: c.line, borderRadius: 8 }]}><Search size={18} color={c.muted} /><TextInput accessibilityLabel="Buscar inventario" value={query} onChangeText={setQuery} placeholder="Buscar insumo, categoría o proveedor…" placeholderTextColor={c.muted} style={{ flex: 1, minWidth: 0, minHeight: 44, fontSize: 13, color: c.text }} />{!!query && <Pressable accessibilityRole="button" accessibilityLabel="Limpiar búsqueda" onPress={() => setQuery('')} style={{ padding: 8 }}><X size={16} color={c.muted} /></Pressable>}</View><MenuButton icon={ArrowDownUp} onPress={() => setUrgentFirst(v => !v)}>{urgentFirst ? 'Prioridad de stock' : 'Orden alfabético'}</MenuButton></View>
-          {categories.length > 0 && <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}><MenuChip selected={!category} onPress={() => setCategory(null)}>Todas las categorías</MenuChip>{categories.map(cat => <MenuChip key={cat} selected={category === cat} onPress={() => setCategory(cat)}>{cat}</MenuChip>)}</ScrollView>}
-          <View style={[row, { justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }]}><Text style={{ color: c.muted, fontSize: 12 }}>{filtered.length} de {items.length} insumos</Text><Text style={{ color: c.faint, fontSize: 11 }}>Disponible = físico − reservado</Text></View>
-        </View>
-        {!compact && <View style={[row, { backgroundColor: c.surfaceAlt, paddingHorizontal: 18, paddingVertical: 11, borderTopWidth: 1, borderBottomWidth: 1, borderColor: c.line }]}>{[['INSUMO', 2.1], ['EXISTENCIAS', 2], ['DISPONIBLE', 1.3], ['COSTO / UD.', 0.9]].map(([label, flex]) => <Text key={label} style={{ flex, color: c.faint, fontSize: 10, fontWeight: '600', letterSpacing: 0.5 }}>{label}</Text>)}<Text style={{ width: 212, textAlign: 'right', color: c.faint, fontSize: 10, fontWeight: '600' }}>ACCIONES</Text></View>}
-        {loading && !items.length ? <ActivityIndicator color={c.primary} style={{ padding: 30 }} /> : filtered.map((item, index) => <View key={item.id} style={{ padding: compact ? 14 : 18, borderTopWidth: index || compact ? 1 : 0, borderColor: c.line, gap: 12 }}>
-          {compact ? <><View style={[row, { gap: 8 }]}>{identity(item)}{badge(item)}</View><View style={[row, { padding: 12, borderRadius: 8, backgroundColor: c.surfaceAlt, gap: 8 }]}>{stat('Físico', item.levels.physical)}{stat('Reservado', item.levels.reserved)}{stat('Disponible', item.levels.available, c[STATES[item.levels.status].tone])}</View><View style={[row, { justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }]}><Text style={{ color: c.muted, fontSize: 11 }}>Mínimo: {quantity(item.stock_minimo)} · Costo: {money(item.costo_unitario)}</Text>{actions(item)}</View></> : <View style={row}>
-            <View style={{ flex: 2.1, paddingRight: 12 }}>{identity(item)}</View>
-            <View style={{ flex: 2, gap: 7, paddingRight: 12 }}><Text style={{ color: c.text, fontSize: 12 }}>Físico {quantity(item.levels.physical)} · Reserva {quantity(item.levels.reserved)}</Text><Text style={{ color: c.faint, fontSize: 11 }}>Mínimo: {quantity(item.stock_minimo)} {item.unidad}</Text></View>
-            <View style={{ flex: 1.3, gap: 6 }}><Text style={{ color: c.text, fontSize: 18, fontWeight: '600', fontVariant: ['tabular-nums'] }}>{quantity(item.levels.available)}</Text>{badge(item)}</View><Text style={{ flex: 0.9, color: c.text, fontSize: 13, fontWeight: '600' }}>{money(item.costo_unitario)}</Text><View style={{ width: 212 }}>{actions(item)}</View>
-          </View>}
-          {item.levels.shortage > 0 && <Text style={{ color: c.red, fontSize: 12 }}>Faltan {quantity(item.levels.shortage)} {item.unidad} para cubrir pedidos ya confirmados.</Text>}
-        </View>)}
-        {!loading && !filtered.length && <View style={{ padding: 32, alignItems: 'center', gap: 12 }}><Package size={32} color={c.muted} /><Text style={{ color: c.text, fontSize: 16, fontWeight: '600' }}>{items.length ? 'No hay insumos con estos filtros' : 'Tu almacén comienza aquí'}</Text><Text style={{ color: c.muted, fontSize: 12, textAlign: 'center' }}>{items.length ? 'Prueba con otra búsqueda o revisa todas las categorías.' : 'Registra tus insumos, sus unidades y el mínimo que necesitas mantener.'}</Text><MenuButton onPress={items.length ? () => { setQuery(''); setStatus('all'); setCategory(null); } : () => open('edit')}>{items.length ? 'Limpiar filtros' : 'Crear primer insumo'}</MenuButton></View>}
+    <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: space.x3 }}>
+      <PageHeader title="Inventario" description={`${items.length} insumos · ${items.filter(i => i.levels.status === 'low').length} por reponer · ${items.filter(i => i.levels.status === 'empty').length} sin disponible. Disponible = físico − reservado por pedidos.`}
+        actions={<Button variant="primary" icon={Plus} onPress={() => open('edit')}>Nuevo insumo</Button>} />
+      <View style={{ flexDirection: compact ? 'column' : 'row', gap: space.md, marginBottom: space.md, alignItems: compact ? 'stretch' : 'center' }}>
+        <SearchField value={query} onChangeText={setQuery} placeholder="Buscar insumo, categoría o proveedor…" style={compact ? null : { flex: 1, minWidth: 260, maxWidth: 380 }} />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}><Segmented size="sm" value={status} onChange={setStatus} accessibilityLabel="Estado"
+          options={Object.entries(STATES).map(([key, meta]) => ({ value: key, label: key === 'all' ? 'Todos' : meta.title, count: key === 'all' ? items.length : items.filter(i => i.levels.status === key).length }))} /></ScrollView>
+        <Button size="sm" variant="ghost" icon={ArrowDownUp} onPress={() => setUrgentFirst(v => !v)}>{urgentFirst ? 'Urgentes primero' : 'A–Z'}</Button>
       </View>
+      {categories.length > 1 ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.sm, paddingBottom: space.lg }}>
+        <MenuChip selected={!category} onPress={() => setCategory(null)}>Todas</MenuChip>{categories.map(cat => <MenuChip key={cat} selected={category === cat} onPress={() => setCategory(cat)}>{cat}</MenuChip>)}
+      </ScrollView> : <View style={{ height: space.sm }} />}
+      {loading && !items.length ? <View style={{ gap: space.sm }}>{[0, 1, 2, 3].map(i => <Skeleton key={i} height={60} radius={10} />)}</View>
+        : <FadeIn trigger={`${status}-${category}`} duration={180} offset={4}><DataTable selectedKey={dialog?.item?.id} rows={filtered} onRowPress={item => open('movement', item)}
+          columns={compact ? [
+            { key: 'n', label: 'Insumo', flex: 1, render: i => <View style={{ gap: 6, minWidth: 0 }}><Text numberOfLines={1} style={[type.body, { color: c.text, fontWeight: '600' }]}>{i.nombre}</Text><Meter item={i} c={c} width={96} /></View> },
+            { key: 'q', label: 'Disponible', width: 100, align: 'right', render: i => <View style={{ alignItems: 'flex-end', gap: 4 }}><Text style={[type.body, type.num, { color: c.text, fontWeight: '600' }]}>{quantity(i.levels.available)} <Text style={{ color: c.faint, fontWeight: '400' }}>{unitLabel(i.unidad)}</Text></Text>{levelStatus(i)}</View> },
+          ] : [
+            { key: 'n', label: 'Insumo', flex: 2.2, sortValue: i => i.nombre, render: i => <View style={{ minWidth: 0 }}><Text numberOfLines={1} style={[type.body, { color: c.text, fontWeight: '600' }]}>{i.nombre}</Text><Text numberOfLines={1} style={[type.micro, { color: c.faint }]}>{i.categoria || 'Sin categoría'} · {i.proveedor || 'Sin proveedor'}</Text></View> },
+            { key: 'm', label: 'Nivel frente al mínimo', flex: 2.2, render: i => <View style={{ gap: 4, width: '100%', paddingRight: space.lg }}><Meter item={i} c={c} /><Text style={[type.micro, type.num, { color: c.faint }]}>Mínimo {quantity(i.stock_minimo)} {unitLabel(i.unidad)}{Number(i.levels.reserved) ? ` · reservado ${quantity(i.levels.reserved)}` : ''}</Text></View> },
+            { key: 'q', label: 'Disponible', width: 120, sortValue: i => Number(i.levels.available), align: 'right', render: i => <Text style={[type.body, type.num, { color: c.text, fontWeight: '600' }]}>{quantity(i.levels.available)} <Text style={{ color: c.faint, fontWeight: '400' }}>{unitLabel(i.unidad)}</Text></Text> },
+            { key: 's', label: 'Estado', width: 130, sortValue: i => ({ empty: 0, low: 1, ok: 2 })[i.levels.status], render: i => levelStatus(i) },
+            { key: 'c', label: 'Costo / ud.', width: 96, sortValue: i => Number(i.costo_unitario), align: 'right', render: i => <Text style={[type.small, type.num, { color: c.muted }]}>{money(i.costo_unitario)}</Text> },
+            { key: 'a', label: '', width: 92, actions: true, align: 'right', render: i => <View style={{ flexDirection: 'row' }}><IconButton icon={Edit3} label={`Editar ${i.nombre}`} onPress={() => open('edit', i)} /><IconButton icon={Trash2} tone="danger" label={`Eliminar ${i.nombre}`} onPress={() => open('delete', i)} /></View> },
+          ]}
+          empty={<EmptyState icon={Package} title={items.length ? 'No hay insumos con estos filtros' : 'Tu almacén comienza aquí'} description={items.length ? 'Prueba otra búsqueda o revisa todas las categorías.' : 'Registra tus insumos, sus unidades y el mínimo que necesitas mantener.'}
+            action={<Button onPress={items.length ? () => { setQuery(''); setStatus('all'); setCategory(null); } : () => open('edit')}>{items.length ? 'Quitar filtros' : 'Crear primer insumo'}</Button>} />} /></FadeIn>}
+      <Text style={[type.micro, { color: c.faint, marginTop: space.md }]}>Toca un insumo para registrar una entrada, salida o ajuste.</Text>
     </ScrollView>
     <MenuModal visible={!!dialog} title={title} subtitle={dialog?.kind === 'edit' ? 'Configura los datos y niveles de reposición.' : current?.nombre} maxWidth={650} close={close} busy={busy} footer={<View style={[row, { justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8 }]}><MenuButton disabled={busy} onPress={close}>Cancelar</MenuButton><MenuButton busy={busy} danger={dialog?.kind === 'delete'} primary={dialog?.kind !== 'delete'} onPress={submit}>{dialog?.kind === 'movement' ? 'Registrar movimiento' : dialog?.kind === 'delete' ? 'Eliminar insumo' : 'Guardar insumo'}</MenuButton></View>}>
       {!!error && <MenuNotice danger>{error}</MenuNotice>}
-      {dialog?.kind === 'delete' ? <MenuNotice>Se eliminará permanentemente este insumo. El sistema impide borrar insumos vinculados a productos, recetas, reservas o movimientos.</MenuNotice> : dialog?.kind === 'movement' ? <>
+      {dialog?.kind === 'delete' ? <MenuNotice>Si lo usan productos, recetas o movimientos, el sistema no dejará borrarlo.</MenuNotice> : dialog?.kind === 'movement' ? <>
         <View style={[row, { padding: 14, borderRadius: 8, backgroundColor: c.surfaceAlt, gap: 10 }]}>{stat(`Físico (${current.unidad})`, inventoryStock(current).physical)}{stat('Reservado', inventoryStock(current).reserved)}{stat('Disponible', inventoryStock(current).available)}</View>
         <View style={{ gap: 10 }}><View style={[row, { flexWrap: 'wrap', gap: 8 }]}>{Object.entries(MOVES).map(([type, meta]) => <MenuButton key={type} icon={meta.icon} disabled={busy} onPress={() => setMovement(m => ({ ...m, tipo: type }))} style={movement.tipo === type ? { backgroundColor: c.primarySoft, borderColor: c.primary } : null}>{type}</MenuButton>)}</View><Text style={{ color: c.muted, fontSize: 12, lineHeight: 19 }}>{MOVES[movement.tipo].hint}</Text></View>
         <MenuField label={movement.tipo === 'Ajuste' ? `Conteo físico final (${current.unidad})` : `Cantidad (${current.unidad})`} value={movement.cantidad} editable={!busy} onChangeText={v => setMovement(m => ({ ...m, cantidad: v }))} keyboardType="decimal-pad" placeholder="0" hint="Admite hasta 3 decimales." />

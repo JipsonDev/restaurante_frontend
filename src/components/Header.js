@@ -1,166 +1,167 @@
-import React, { useMemo, useState } from 'react';
-import { Modal, ScrollView, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import {
-  AlertTriangle,
-  Bell,
-  CalendarCheck,
-  ClipboardList,
-  Moon,
-  RefreshCw,
-  Sun,
-  Wifi,
-  WifiOff,
-  X,
-} from 'lucide-react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Modal, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { AlertTriangle, ArrowRight, Bell, CalendarClock, ClipboardList, CornerDownLeft, Moon, Search, Sun, UtensilsCrossed, X } from 'lucide-react-native';
 import { useAdmin } from '../context/AdminContext';
 import { useTheme } from '../theme';
-import AdminSearch from './AdminSearch';
+import { EASE_OUT, IconButton, Press, Status, font, money, radius, reduceMotion, space, type } from './admin/ui';
+import { NAV, navItem } from './admin/nav';
+import Logo from './Logo';
 
-function isPickupOrder(order) {
-  return !order?.mesa_id || ['Delivery', 'Para llevar', 'Express'].includes(order?.tipo);
+const WEB = Platform.OS === 'web';
+const normalize = value => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const isPickup = order => !order?.mesa_id || ['Delivery', 'Para llevar', 'Express'].includes(order?.tipo);
+const orderTarget = order => isPickup(order) ? `${order.tipo === 'Delivery' ? 'Delivery' : 'Para llevar'} #${order.id}` : `Mesa ${order.mesa_numero || order.mesa_id}`;
+const OPEN = order => !['PAGADO', 'CANCELADO'].includes(String(order.estado || '').toUpperCase());
+
+// Panel que aparece con escala y opacidad (paleta y alertas).
+function Popover({ visible, onClose, children, width = 560, align = 'center' }) {
+  const { c } = useTheme();
+  const v = useRef(new Animated.Value(0)).current;
+  useEffect(() => { if (visible) { v.setValue(0); Animated.timing(v, { toValue: 1, duration: reduceMotion() ? 0 : 180, easing: EASE_OUT, useNativeDriver: !WEB }).start(); } }, [visible]);
+  return <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+    <Pressable accessibilityLabel="Cerrar" onPress={onClose} style={{ flex: 1, backgroundColor: c.overlay, alignItems: align === 'right' ? 'flex-end' : 'center', paddingTop: '10%', paddingHorizontal: 16 }}>
+      <Animated.View onStartShouldSetResponder={() => true} style={{ width: '100%', maxWidth: width, maxHeight: '78%', borderRadius: radius.lg, overflow: 'hidden', backgroundColor: c.surface, borderWidth: 1, borderColor: c.line,
+        opacity: v, transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) }, { translateY: v.interpolate({ inputRange: [0, 1], outputRange: [-6, 0] }) }],
+        ...(WEB ? { boxShadow: '0 24px 64px rgba(14,23,38,0.24)' } : {}) }}>
+        {children}
+      </Animated.View>
+    </Pressable>
+  </Modal>;
 }
 
-function orderTargetLabel(order) {
-  if (!order) return 'Pedido';
-  if (isPickupOrder(order)) {
-    const prefix = order.tipo === 'Delivery' ? 'Delivery' : 'Para llevar';
-    return `${prefix} #${order.id || '-'}`;
-  }
-  return `Mesa ${order.mesa_numero || order.mesa_id || '-'}`;
+// Paleta de comandos: secciones, productos y cuentas abiertas. Ctrl/⌘+K o "/".
+function CommandPalette({ open, onClose, onNavigate }) {
+  const { c } = useTheme();
+  const { productos, pedidos } = useAdmin();
+  const [query, setQuery] = useState('');
+  const [index, setIndex] = useState(0);
+  useEffect(() => { if (open) { setQuery(''); setIndex(0); } }, [open]);
+  const results = useMemo(() => {
+    const q = normalize(query.trim());
+    const sections = NAV.filter(n => !q || normalize(`${n.label} ${n.description}`).includes(q)).map(n => ({ id: `s-${n.key}`, group: 'Secciones', icon: n.icon, title: n.label, subtitle: n.description, run: () => onNavigate(n.key) }));
+    if (!q) return sections;
+    const products = productos.filter(p => normalize(`${p.nombre} ${p.categoria_nombre}`).includes(q)).slice(0, 5)
+      .map(p => ({ id: `p-${p.id}`, group: 'Productos', icon: UtensilsCrossed, title: p.nombre, subtitle: `${p.categoria_nombre || 'Sin categoría'} · ${money(p.precio)}`, run: () => onNavigate('menu') }));
+    const orders = pedidos.filter(OPEN).filter(o => normalize(`${o.id} ${orderTarget(o)} ${o.mesero_nombre} ${o.cliente_nombre}`).includes(q)).slice(0, 5)
+      .map(o => ({ id: `o-${o.id}`, group: 'Cuentas abiertas', icon: ClipboardList, title: `${orderTarget(o)} · #${o.id}`, subtitle: `${o.mesero_nombre || 'Sin mesero'} · ${money(o.total)}`, run: () => onNavigate('pedidos') }));
+    return [...sections, ...orders, ...products];
+  }, [query, productos, pedidos]);
+  const choose = r => { onClose(); r?.run(); };
+  const onKey = e => {
+    const key = e.nativeEvent?.key;
+    if (key === 'ArrowDown') { e.preventDefault?.(); setIndex(i => Math.min(results.length - 1, i + 1)); }
+    if (key === 'ArrowUp') { e.preventDefault?.(); setIndex(i => Math.max(0, i - 1)); }
+    if (key === 'Escape') onClose();
+  };
+  let lastGroup = null;
+  return <Popover visible={open} onClose={onClose}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.lg, height: 56, borderBottomWidth: 1, borderBottomColor: c.line }}>
+      <Search size={18} color={c.muted} />
+      <TextInput autoFocus value={query} onChangeText={t => { setQuery(t); setIndex(0); }} onKeyPress={onKey} onSubmitEditing={() => choose(results[index])}
+        placeholder="Ir a una sección, buscar un producto o una cuenta…" placeholderTextColor={c.faint} accessibilityLabel="Buscar en el panel"
+        style={[type.body, { flex: 1, fontSize: 15, color: c.text, height: 54, ...(WEB ? { outlineStyle: 'none' } : {}) }]} />
+      <IconButton icon={X} label="Cerrar búsqueda" size={30} onPress={onClose} />
+    </View>
+    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: space.sm }}>
+      {results.map((r, i) => {
+        const header = r.group !== lastGroup ? r.group : null; lastGroup = r.group;
+        const Icon = r.icon; const active = i === index;
+        return <View key={r.id}>
+          {header ? <Text style={[type.micro, { color: c.faint, paddingHorizontal: space.md, paddingTop: i ? space.md : space.xs, paddingBottom: space.xs }]}>{header}</Text> : null}
+          <Pressable accessibilityRole="button" onPress={() => choose(r)} onHoverIn={() => setIndex(i)}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.md, height: 48, borderRadius: radius.md, backgroundColor: active ? c.soft : 'transparent' }}>
+            <View style={{ width: 30, height: 30, borderRadius: 8, borderWidth: 1, borderColor: c.line, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surface }}><Icon size={15} color={c.muted} /></View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text numberOfLines={1} style={[type.small, { color: c.text, fontWeight: '600' }]}>{r.title}</Text>
+              <Text numberOfLines={1} style={[type.micro, { color: c.faint }]}>{r.subtitle}</Text>
+            </View>
+            {active ? <CornerDownLeft size={15} color={c.faint} /> : null}
+          </Pressable>
+        </View>;
+      })}
+      {!results.length ? <Text style={[type.small, { color: c.muted, textAlign: 'center', paddingVertical: space.x3 }]}>Nada coincide con “{query}”.</Text> : null}
+    </ScrollView>
+    {WEB ? <View style={{ flexDirection: 'row', gap: space.lg, paddingHorizontal: space.lg, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.line, backgroundColor: c.surfaceAlt }}>
+      {[['↑↓', 'moverse'], ['Enter', 'abrir'], ['Esc', 'cerrar']].map(([k, l]) => <View key={k} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <View style={{ paddingHorizontal: 6, height: 20, borderRadius: 4, borderWidth: 1, borderColor: c.line, justifyContent: 'center', backgroundColor: c.surface }}><Text style={[type.micro, { color: c.muted }]}>{k}</Text></View>
+        <Text style={[type.micro, { color: c.faint }]}>{l}</Text>
+      </View>)}
+    </View> : null}
+  </Popover>;
 }
 
-const TITLES = {
-  dashboard: ['Vista general', 'El pulso de tu restaurante'],
-  pedidos: ['Pedidos', 'Seguimiento de comandas y estados'],
-  caja: ['Caja', 'Cobros, cortes y pagos recientes'],
-  menu: ['Menú', 'Productos, categorias y recetas'],
-  extras: ['Extras', 'Modificadores para pedidos'],
-  mesas: ['Mesas', 'Salon, estados y ubicaciones'],
-  trabajadores: ['Equipo', 'Usuarios y roles del sistema'],
-  inventario: ['Inventario', 'Stock, costos y movimientos'],
-  reportes: ['Reportes', 'Indicadores del dia'],
-  auditoria: ['Auditoría', 'Usuarios, ventas y acciones críticas'],
-  ubicaciones: ['Ubicaciones', 'Zonas del restaurante'],
-  configuracion: ['Ajustes', 'Conexion y parametros'],
-};
+function Alerts({ open, onClose, items, onNavigate }) {
+  const { c } = useTheme();
+  return <Popover visible={open} onClose={onClose} width={440}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: space.lg, height: 56, borderBottomWidth: 1, borderBottomColor: c.line }}>
+      <Text style={[type.h3, { color: c.text }]}>Necesita atención</Text>
+      <IconButton icon={X} label="Cerrar alertas" size={30} onPress={onClose} />
+    </View>
+    <ScrollView contentContainerStyle={{ padding: space.sm }}>
+      {items.length ? items.map(n => { const Icon = n.icon; return <Press key={n.id} accessibilityRole="button" onPress={() => { onClose(); onNavigate(n.target); }} scaleTo={0.99}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.md, borderRadius: radius.md }} hoverStyle={{ backgroundColor: c.soft }}>
+        <Icon size={17} color={n.tone === 'red' ? c.red : n.tone === 'amber' ? c.amber : c.muted} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text numberOfLines={1} style={[type.small, { color: c.text, fontWeight: '600' }]}>{n.title}</Text>
+          <Text numberOfLines={1} style={[type.micro, { color: c.faint }]}>{n.body}</Text>
+        </View>
+        <ArrowRight size={15} color={c.faint} />
+      </Press>; })
+        : <Text style={[type.small, { color: c.muted, textAlign: 'center', paddingVertical: space.x3 }]}>Todo en orden. No hay nada pendiente.</Text>}
+    </ScrollView>
+  </Popover>;
+}
 
 export default function Header({ activeTab, onNavigate }) {
-  const [title, subtitle] = TITLES[activeTab] || [activeTab, 'Panel administrativo'];
-  const { refreshAll, pedidos, productos, mesas, syncStatus } = useAdmin();
+  const { pedidos, productos, mesas, inventario, syncStatus } = useAdmin();
   const { c, isDark, toggle } = useTheme();
-  const [open, setOpen] = useState(false);
   const { width } = useWindowDimensions();
-  const compact = width < 760;
-
-  const notifications = useMemo(() => {
-    const activeOrders = pedidos.filter((p) => !['PAGADO', 'CANCELADO'].includes(String(p.estado || '').toUpperCase()));
-    const lowStock = productos.filter((p) => Number(p.stock_disponible ?? p.stock ?? 0) <= 3 || Number(p.disponible) === 0);
-    const reserved = mesas.filter((m) => m.estado === 'Reservada');
+  const compact = width < 1024;
+  const [palette, setPalette] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const item = navItem(activeTab);
+  useEffect(() => {
+    if (!WEB || typeof document === 'undefined') return;
+    const onKey = e => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette(true); }
+      else if (e.key === '/' && !/input|textarea/i.test(document.activeElement?.tagName || '') && !document.activeElement?.isContentEditable) { e.preventDefault(); setPalette(true); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+  const alerts = useMemo(() => {
+    const now = Date.now();
+    const toCharge = pedidos.filter(p => OPEN(p) && (p.cuenta_solicitada_at || p.estado === 'ENTREGADO'));
+    const slow = pedidos.filter(p => OPEN(p) && ['PENDIENTE', 'PREPARANDO'].includes(String(p.estado).toUpperCase()) && now - new Date(String(p.created_at).replace(' ', 'T')).getTime() > 20 * 60000);
+    const lowStock = (inventario || []).filter(i => Number(i.stock_minimo) > 0 && Number(i.stock_disponible ?? i.stock) <= Number(i.stock_minimo));
+    const reserved = mesas.filter(m => m.estado === 'Reservada');
     return [
-      ...activeOrders.map((p) => ({
-        id: `p-${p.id}`,
-        title: `Pedido #${p.id}`,
-        body: `${orderTargetLabel(p)} esta ${p.estado}.`,
-        icon: ClipboardList,
-      })),
-      ...reserved.map((m) => ({
-        id: `m-${m.id}`,
-        title: `Mesa ${m.numero} reservada`,
-        body: `${m.ubicacion_nombre || 'Salon'} - ${m.capacidad} personas.`,
-        icon: CalendarCheck,
-      })),
-      ...lowStock.map((p) => ({
-        id: `s-${p.id}`,
-        title: `Stock bajo: ${p.nombre}`,
-        body: `Stock actual: ${p.stock_disponible ?? p.stock ?? 0}.`,
-        icon: AlertTriangle,
-      })),
+      ...slow.map(p => ({ id: `w-${p.id}`, tone: 'red', icon: AlertTriangle, title: `${orderTarget(p)} lleva más de 20 min`, body: `Pedido #${p.id} · ${String(p.estado).toLowerCase()}`, target: 'pedidos' })),
+      ...toCharge.map(p => ({ id: `c-${p.id}`, tone: 'amber', icon: ClipboardList, title: `${orderTarget(p)} por cobrar`, body: `${money(Number(p.total) - Number(p.abonado || 0))} pendientes`, target: 'caja' })),
+      ...lowStock.map(i => ({ id: `s-${i.id}`, tone: 'amber', icon: AlertTriangle, title: `Stock bajo: ${i.nombre}`, body: `Quedan ${Number(i.stock_disponible ?? i.stock)} ${i.unidad || ''} (mínimo ${Number(i.stock_minimo)})`, target: 'inventario' })),
+      ...reserved.map(m => ({ id: `m-${m.id}`, tone: 'neutral', icon: CalendarClock, title: `Mesa ${m.numero} reservada`, body: `${m.ubicacion_nombre || 'Salón'} · ${m.capacidad} personas`, target: 'mesas' })),
     ];
-  }, [pedidos, productos, mesas]);
+  }, [pedidos, productos, mesas, inventario]);
 
-  const connected = syncStatus === 'connected';
-  const iconBtn = {
-    width: compact ? 38 : 40,
-    height: compact ? 38 : 40,
-    borderRadius: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-  };
-
-  return (
-    <View style={{ minHeight: compact ? 60 : 70, paddingHorizontal: compact ? 12 : 20, paddingVertical: compact ? 8 : 10, backgroundColor: c.surface, borderBottomWidth: 1, borderBottomColor: c.line }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: compact ? 8 : 16 }}>
-        <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 18 }}>
-          {compact ? (
-            <Text style={{ color: c.text, fontSize: 16, fontWeight: '700', flex: 1 }} numberOfLines={1}>{title}</Text>
-          ) : (
-            <View style={{ width: 150, minWidth: 150 }}>
-              <Text style={{ color: c.primaryText, fontSize: 9, fontWeight: '700', letterSpacing: 1.25 }}>ADMINISTRACIÓN</Text>
-              <Text style={{ color: c.text, fontSize: 15, fontWeight: '700', marginTop: 3 }} numberOfLines={1}>{title}</Text>
-              <Text style={{ color: c.faint, fontSize: 9, marginTop: 2 }} numberOfLines={1}>{subtitle}</Text>
-            </View>
-          )}
-          <AdminSearch onNavigate={onNavigate} compact={compact} />
-        </View>
-
-        {!compact ? (
-          <View style={{ height: 36, borderRadius: 9, paddingHorizontal: 12, backgroundColor: connected ? c.greenSoft : c.amberSoft, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: connected ? `${c.green}35` : `${c.amber}35` }}>
-            {connected ? <Wifi size={17} color={c.green} /> : <WifiOff size={17} color={c.amber} />}
-            <Text style={{ marginLeft: 7, color: connected ? c.green : c.amber, fontSize: 11, fontWeight: '700' }}>
-              {connected ? 'En vivo' : 'Reconectando'}
-            </Text>
-          </View>
-        ) : null}
-
-        <View style={{ flexDirection: 'row', alignItems: 'center', padding: 3, borderRadius: 12, backgroundColor: c.surfaceAlt, borderWidth: 1, borderColor: c.line }}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel={isDark ? "Usar modo claro" : "Usar modo oscuro"} onPress={toggle} style={iconBtn}>
-            {isDark ? <Sun size={18} color={c.amber} /> : <Moon size={18} color={c.muted} />}
-          </TouchableOpacity>
-          <View style={{ width: 1, height: 21, backgroundColor: c.line }} />
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Actualizar datos" onPress={refreshAll} style={iconBtn}>
-            <RefreshCw size={18} color={c.muted} />
-          </TouchableOpacity>
-          <View style={{ width: 1, height: 21, backgroundColor: c.line }} />
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Ver alertas" onPress={() => setOpen(true)} style={iconBtn}>
-            <Bell size={18} color={c.muted} />
-            {!!notifications.length && (
-              <View style={{ position: 'absolute', top: -5, right: -3, minWidth: 19, height: 19, borderRadius: 10, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary, borderWidth: 2, borderColor: c.surfaceAlt }}>
-                <Text style={{ color: c.onPrimary, fontSize: 9, fontWeight: '900' }}>{notifications.length > 99 ? '99+' : notifications.length}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20, backgroundColor: c.overlay }}>
-          <View style={{ width: '100%', maxWidth: 480, maxHeight: '82%', borderRadius: 10, overflow: 'hidden', backgroundColor: c.surface }}>
-            <View style={{ paddingHorizontal: 18, paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: c.line, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={{ color: c.text, fontSize: 18, fontWeight: '900' }}>Alertas operativas</Text>
-              <TouchableOpacity onPress={() => setOpen(false)}><X size={20} color={c.text} /></TouchableOpacity>
-            </View>
-            <ScrollView contentContainerStyle={{ paddingHorizontal: 18, paddingVertical: 8 }}>
-              {notifications.length ? notifications.map((n) => {
-                const Icon = n.icon;
-                return (
-                  <View key={n.id} style={{ flexDirection: 'row', paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: c.line }}>
-                    <View style={{ width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginRight: 12, backgroundColor: c.primarySoft }}>
-                      <Icon size={18} color={c.primaryText} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: c.text, fontWeight: '900' }}>{n.title}</Text>
-                      <Text style={{ color: c.muted, fontSize: 13, marginTop: 3, fontWeight: '700' }}>{n.body}</Text>
-                    </View>
-                  </View>
-                );
-              }) : (
-                <Text style={{ color: c.faint, fontWeight: '800', textAlign: 'center', paddingVertical: 32 }}>No hay alertas pendientes.</Text>
-              )}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-    </View>
-  );
+  return <View style={{ height: compact ? 56 : 64, paddingHorizontal: compact ? 12 : 24, flexDirection: 'row', alignItems: 'center', gap: space.md, backgroundColor: c.surface, borderBottomWidth: 1, borderBottomColor: c.line }}>
+    {compact ? <View style={{ flex: 1 }}><Logo width={104} dark={c.isDark} style={!c.isDark ? { tintColor: c.text } : undefined} /></View> : null}
+    <Press accessibilityRole="button" accessibilityLabel="Buscar en el panel" onPress={() => setPalette(true)} scaleTo={0.99}
+      style={compact ? { width: 40, height: 40, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' }
+        : { flex: 1, maxWidth: 440, height: 40, borderRadius: radius.md, borderWidth: 1, borderColor: c.line, backgroundColor: c.surfaceAlt, flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: 12 }}
+      hoverStyle={{ borderColor: c.lineStrong, backgroundColor: compact ? c.soft : c.surface }}>
+      <Search size={16} color={c.muted} />
+      {!compact ? <>
+        <Text numberOfLines={1} style={[type.small, { color: c.faint, flex: 1 }]}>Buscar secciones, productos o cuentas…</Text>
+        {WEB ? <View style={{ paddingHorizontal: 6, height: 22, borderRadius: 5, borderWidth: 1, borderColor: c.line, justifyContent: 'center', backgroundColor: c.surface }}><Text style={[type.micro, { color: c.muted }]}>Ctrl K</Text></View> : null}
+      </> : null}
+    </Press>
+    {!compact ? <View style={{ flex: 1 }} /> : null}
+    {syncStatus === 'disconnected' || syncStatus === 'error' ? <View accessibilityLiveRegion="polite" style={{ paddingHorizontal: compact ? 4 : 10 }}>
+      <Status tone="amber">{compact ? '' : 'Sin conexión, reintentando…'}</Status>
+    </View> : null}
+    <IconButton icon={isDark ? Sun : Moon} label={isDark ? 'Usar modo claro' : 'Usar modo oscuro'} onPress={toggle} />
+    <IconButton icon={Bell} label="Ver lo que necesita atención" onPress={() => setAlertsOpen(true)} badge={alerts.length || null} />
+    <CommandPalette open={palette} onClose={() => setPalette(false)} onNavigate={onNavigate} />
+    <Alerts open={alertsOpen} onClose={() => setAlertsOpen(false)} items={alerts} onNavigate={onNavigate} />
+  </View>;
 }
