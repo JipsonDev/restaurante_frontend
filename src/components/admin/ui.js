@@ -3,7 +3,7 @@
 // las acciones de tabla son secundarias; los estados son insignias con texto; el azul marca enlaces, foco y selección.
 // Movimiento discreto: presión de botones, aparición corta, filas nuevas que destellan y avisos. Respeta "reducir movimiento".
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { AccessibilityInfo, ActivityIndicator, Animated, Easing, Modal, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Animated, Easing, Modal, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { AlertCircle, AlertTriangle, Check, CheckCircle2, ChevronLeft, ChevronRight, Info, Minus, MoreHorizontal, Search, X } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 
@@ -31,14 +31,9 @@ const inputBorder = c => (c.isDark ? '#5C5C5C' : '#8A8A8A');
 const cardShadow = c => (WEB ? { boxShadow: c.isDark ? `0 0 0 1px ${c.line}` : '0 1px 0 0 rgba(26,26,26,0.07), inset 0 1px 0 0 rgba(204,204,204,0.5), inset 0 -1px 0 0 rgba(0,0,0,0.17), inset -1px 0 0 0 rgba(0,0,0,0.13), inset 1px 0 0 0 rgba(0,0,0,0.13)' } : { borderWidth: 1, borderColor: c.line });
 
 // ── Movimiento ──────────────────────────────────────────────────────────────
-let reduceMotionCache = false;
-AccessibilityInfo.isReduceMotionEnabled?.().then(v => { reduceMotionCache = !!v; }).catch(() => {});
-if (WEB && typeof window !== 'undefined' && window.matchMedia) {
-  const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-  reduceMotionCache = mq.matches;
-  mq.addEventListener?.('change', e => { reduceMotionCache = e.matches; });
-}
-export const reduceMotion = () => reduceMotionCache;
+// Las animaciones se muestran siempre (decisión del producto): no se desactivan aunque el sistema
+// operativo tenga activado «reducir movimiento».
+export const reduceMotion = () => false;
 export function useMotionValue(initial = 0) { return useRef(new Animated.Value(initial)).current; }
 
 // Aparición corta al montar o cuando cambia `trigger`.

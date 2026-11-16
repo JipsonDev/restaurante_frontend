@@ -24,7 +24,6 @@ export default function PinPad({ value, onChange, onComplete, disabled, errorKey
   useEffect(() => {
     if (!errorKey) return;
     hasError.current = true;
-    if (reduceMotion.current) return;
     shake.setValue(0);
     Animated.sequence([12, -10, 7, -4, 0].map(toValue => Animated.timing(shake, { toValue, duration: 50, useNativeDriver: Platform.OS !== 'web' }))).start();
   }, [errorKey, shake]);
