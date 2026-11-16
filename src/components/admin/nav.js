@@ -1,4 +1,4 @@
-import { Banknote, ChartNoAxesCombined, CirclePlus, LayoutDashboard, LayoutGrid, MapPin, Package, ScrollText, Settings2, ShoppingBag, UsersRound, UtensilsCrossed } from 'lucide-react-native';
+import { Banknote, CalendarClock, ChartNoAxesCombined, CirclePlus, LayoutDashboard, LayoutGrid, MapPin, Package, ScrollText, Settings2, ShoppingBag, UsersRound, UtensilsCrossed } from 'lucide-react-native';
 
 // Navegación del panel: una sola fuente para barra lateral, barra inferior y buscador.
 export const NAV_GROUPS = [
@@ -7,6 +7,7 @@ export const NAV_GROUPS = [
     { key: 'pedidos', label: 'Pedidos', icon: ShoppingBag, description: 'Cuentas abiertas, cocina y entregas' },
     { key: 'caja', label: 'Caja', icon: Banknote, description: 'Turno, cobros y cierres' },
     { key: 'mesas', label: 'Mesas', icon: LayoutGrid, description: 'Salón, estados y capacidad' },
+    { key: 'reservas', label: 'Reservas', icon: CalendarClock, description: 'Agenda de mesas por día' },
   ] },
   { title: 'Catálogo', items: [
     { key: 'menu', label: 'Menú', icon: UtensilsCrossed, description: 'Productos, precios y categorías' },

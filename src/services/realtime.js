@@ -14,6 +14,7 @@ export const REALTIME_EVENTS = {
   TABLE_UPDATED: 'TABLE_UPDATED',
   PAYMENT_CREATED: 'payment:created',
   CASH_UPDATED: 'cash:updated',
+  RESERVATION_UPDATED: 'reservation:updated',
   PRINT_COMANDA: 'print:comanda',
   PRINT_PRECUENTA: 'print:precuenta',
 };
