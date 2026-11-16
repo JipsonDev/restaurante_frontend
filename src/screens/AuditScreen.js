@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import { ChevronDown, ScrollText } from 'lucide-react-native';
-import { Button, EmptyState, FadeIn, PageHeader, Press, SearchField, Segmented, Skeleton, Tabs, space, type, radius } from '../components/admin/ui';
+import { Badge, Button, Card, EmptyState, FadeIn, PageHeader, Press, SearchField, Segmented, Skeleton, Tabs, money as fmtMoney, space, type, radius } from '../components/admin/ui';
 import { useAdmin } from '../context/AdminContext';
 import { useTheme } from '../theme';
 import {
@@ -95,7 +95,10 @@ function detailLines(record) {
 }
 
 const hhmm = v => { const d = new Date(v || 0); return Number.isNaN(d.getTime()) ? '' : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
-const GROUP_TONE = { VENTAS: 'green', PEDIDOS: 'sky', CAJA: 'amber', CATALOGO: 'gold', ADMIN: 'neutral', REVERSOS: 'red' };
+const RESERVATION_ACTIONS = { 'reserva.creada': 'Reserva creada', 'reserva.actualizada': 'Reserva modificada', 'reserva.estado': 'Cambio de estado de reserva', 'reserva.eliminada': 'Reserva eliminada' };
+const actionLabel = accion => RESERVATION_ACTIONS[accion] || auditActionLabel(accion);
+const GROUP_TONE = { VENTAS: 'green', PEDIDOS: 'sky', CAJA: 'amber', CATALOGO: 'neutral', ADMIN: 'neutral', REVERSOS: 'red' };
+const GROUP_LABEL = { VENTAS: 'Venta', PEDIDOS: 'Pedido', CAJA: 'Caja', CATALOGO: 'Catálogo', ADMIN: 'Administración', REVERSOS: 'Anulación' };
 
 function dayLabel(value) {
   const d = new Date(value || 0);
@@ -108,40 +111,36 @@ function dayLabel(value) {
   return capitalize(d.toLocaleDateString('es-EC', { weekday: 'long', day: 'numeric', month: 'long' }));
 }
 
-// Un evento en la línea de tiempo: punto del grupo, hora, acción y quién; se expande para ver el detalle.
-function Event({ record, c, last }) {
+// Fila de la bitácora: hora, tipo, acción y responsable; se expande para ver el detalle completo.
+function Event({ record, c, phone, first }) {
   const [open, setOpen] = useState(false);
   const when = dateParts(record.created_at);
-  const action = auditActionLabel(record.accion);
-  const tone = GROUP_TONE[auditGroup(record)] || 'neutral';
-  const dot = { green: c.green, sky: c.sky, amber: c.amber, gold: c.primary, red: c.red, neutral: c.faint }[tone];
+  const action = actionLabel(record.accion);
+  const group = auditGroup(record);
   const people = actorLines(record);
   const refs = referenceLines(record);
   const details = detailLines(record);
   const amount = record.metadata?.monto;
-  return <View style={{ flexDirection: 'row' }}>
-    <View style={{ width: 48, paddingTop: 13 }}><Text numberOfLines={1} style={[type.small, type.num, { color: c.faint }]}>{hhmm(record.created_at)}</Text></View>
-    <View style={{ width: 20, alignItems: 'center' }}>
-      <View style={{ width: 1, flex: 1, backgroundColor: c.line, position: 'absolute', top: 0, bottom: last ? '60%' : 0 }} />
-      <View style={{ marginTop: 17, width: 9, height: 9, borderRadius: 5, backgroundColor: dot, borderWidth: 2, borderColor: c.bg }} />
-    </View>
-    <Press scaleTo={0.995} onPress={() => setOpen(v => !v)} accessibilityLabel={`${action}. ${open ? 'Ocultar' : 'Ver'} detalle`} accessibilityState={{ expanded: open }}
-      style={({ hovered }) => ({ flex: 1, minWidth: 0, marginLeft: space.sm, marginVertical: 2, paddingHorizontal: space.md, paddingVertical: 10, borderRadius: radius.md, backgroundColor: open ? c.surface : hovered ? c.surfaceAlt : 'transparent', borderWidth: 1, borderColor: open ? c.line : 'transparent' })}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text numberOfLines={open ? undefined : 1} style={[type.body, { color: c.text, fontWeight: '600' }]}>{action}</Text>
-          <Text numberOfLines={1} style={[type.small, { color: c.muted }]}>{people[0].label} · {refs.join(' · ')}</Text>
-        </View>
-        {amount !== undefined && amount !== null ? <Text style={[type.body, type.num, { color: tone === 'red' ? c.red : c.text, fontWeight: '600' }]}>{tone === 'red' ? '−' : ''}{money(amount)}</Text> : null}
-        <View style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}><ChevronDown size={16} color={c.faint} /></View>
+  const reversal = group === 'REVERSOS';
+  return <View style={{ borderTopWidth: first ? 0 : 1, borderTopColor: c.line, backgroundColor: open ? c.surfaceAlt : c.surface }}>
+    <Press scaleTo={1} onPress={() => setOpen(v => !v)} accessibilityRole="button" accessibilityLabel={`${action}. ${open ? 'Ocultar' : 'Ver'} detalle`} accessibilityState={{ expanded: open }}
+      style={{ flexDirection: 'row', alignItems: phone ? 'flex-start' : 'center', gap: space.md, paddingHorizontal: space.md, minHeight: 48, paddingVertical: 8 }}
+      hoverStyle={{ backgroundColor: c.surfaceAlt }}>
+      <Text numberOfLines={1} style={[type.body, type.num, { color: c.muted, width: 44 }]}>{hhmm(record.created_at)}</Text>
+      {!phone ? <View style={{ width: 120 }}><Badge tone={GROUP_TONE[group] || 'neutral'}>{GROUP_LABEL[group] || 'Otro'}</Badge></View> : null}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text numberOfLines={open ? undefined : 1} style={[type.body, { color: c.text, fontWeight: '600' }]}>{action}</Text>
+        <Text numberOfLines={1} style={[type.body, { color: c.muted }]}>{people[0].label} · {refs.join(' · ')}</Text>
       </View>
-      {open ? <FadeIn trigger="open" duration={160} offset={3}><View style={{ marginTop: space.md, paddingTop: space.md, borderTopWidth: 1, borderTopColor: c.line, gap: space.sm }}>
-        {!!record.descripcion && record.descripcion !== action ? <Text style={[type.small, { color: c.text }]}>{record.descripcion}</Text> : null}
-        {[['Responsable', people.map(p => `${p.label} (${p.detail})`).join(' · ')], ['Cliente', customerLines(record).join(' · ')], ['Referencia', refs.join(' · ')], ['Detalle', details.join(' · ')], ['Fecha', `${when.date}, ${when.time}`]]
-          .filter(([, v]) => v && v !== '—' && v !== 'No aplica').map(([k, v]) => <View key={k} style={{ flexDirection: 'row', gap: space.md }}>
-            <Text style={[type.small, { color: c.faint, width: 92 }]}>{k}</Text><Text style={[type.small, { color: c.text, flex: 1 }]}>{v}</Text></View>)}
-      </View></FadeIn> : null}
+      {amount !== undefined && amount !== null ? <Text style={[type.body, type.num, { color: reversal ? c.red : c.text, fontWeight: '600' }]}>{reversal ? '−' : ''}{fmtMoney(amount)}</Text> : null}
+      <View style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}><ChevronDown size={16} color={c.muted} /></View>
     </Press>
+    {open ? <FadeIn duration={140} offset={2}><View style={{ paddingLeft: phone ? space.md : space.md + 44 + space.md, paddingRight: space.md, paddingBottom: space.md, gap: 6 }}>
+      {!!record.descripcion && record.descripcion !== action ? <Text style={[type.body, { color: c.text }]}>{record.descripcion}</Text> : null}
+      {[['Responsable', people.map(p => `${p.label} (${p.detail})`).join(' · ')], ['Cliente', customerLines(record).join(' · ')], ['Referencia', refs.join(' · ')], ['Detalle', details.join(' · ')], ['Fecha', `${when.date}, ${when.time}`]]
+        .filter(([, v]) => v && v !== '—' && v !== 'No aplica').map(([k, v]) => <View key={k} style={{ flexDirection: 'row', gap: space.md }}>
+          <Text style={[type.body, { color: c.muted, width: 96 }]}>{k}</Text><Text style={[type.body, { color: c.text, flex: 1 }]}>{v}</Text></View>)}
+    </View></FadeIn> : null}
   </View>;
 }
 
@@ -149,13 +148,14 @@ export default function AuditScreen() {
   const { c } = useTheme();
   const { width } = useWindowDimensions();
   const compact = width < 820;
+  const phone = width < 600;
   const { auditoria, loading } = useAdmin();
   const [range, setRange] = useState('TODO');
   const [group, setGroup] = useState('TODOS');
   const [query, setQuery] = useState('');
-  const [visibleLimit, setVisibleLimit] = useState(40);
+  const [visibleLimit, setVisibleLimit] = useState(50);
 
-  useEffect(() => setVisibleLimit(40), [range, group, query]);
+  useEffect(() => setVisibleLimit(50), [range, group, query]);
 
   const rows = useMemo(() => filterAuditRows(auditoria, { range, group, query }), [auditoria, range, group, query]);
   const stats = useMemo(() => auditStats(rows), [rows]);
@@ -171,23 +171,29 @@ export default function AuditScreen() {
 
   return <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: space.x3 }}>
     <PageHeader title="Auditoría" description={`${stats.events} movimientos · ${money(stats.sales)} en cobros · ${stats.users} responsables · ${stats.reversals} anulaciones o devoluciones`} />
-    <Tabs value={group} onChange={setGroup} style={{ marginBottom: space.lg }} options={AUDIT_FILTERS.map(f => ({ value: f.key, label: f.label }))} />
-    <View style={{ flexDirection: compact ? 'column' : 'row', gap: space.md, marginBottom: space.lg, alignItems: compact ? 'stretch' : 'center' }}>
-      <SearchField value={query} onChangeText={setQuery} placeholder="Buscar usuario, cliente, pedido o acción…" style={compact ? null : { flex: 1, minWidth: 260, maxWidth: 420 }} />
-      <Segmented size="sm" value={range} onChange={setRange} accessibilityLabel="Periodo" options={RANGE_FILTERS.map(r => ({ value: r.key, label: r.label }))} />
-    </View>
-    {loading && !auditoria.length ? <View style={{ gap: space.sm }}>{[0, 1, 2, 3, 4].map(i => <Skeleton key={i} height={52} radius={10} />)}</View>
-      : !rows.length ? <EmptyState icon={ScrollText} title="No hay movimientos con estos filtros" description="Prueba otro periodo o quita el texto de búsqueda."
-        action={<Button onPress={() => { setQuery(''); setRange('TODO'); setGroup('TODOS'); }}>Quitar filtros</Button>} />
-      : <FadeIn trigger={`${range}-${group}`} duration={180} offset={4}><View style={{ maxWidth: 920 }}>
-        {days.map(day => <View key={day.label} style={{ marginBottom: space.lg }}>
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: space.sm, marginBottom: space.xs }}>
-            <Text style={[type.h3, { color: c.text }]}>{day.label}</Text>
-            <Text style={[type.small, { color: c.faint }]}>{day.items.length} {day.items.length === 1 ? 'movimiento' : 'movimientos'}</Text>
-          </View>
-          {day.items.map((r, i) => <Event key={r.id} record={r} c={c} last={i === day.items.length - 1} />)}
-        </View>)}
-        {rows.length > visibleLimit ? <Button variant="ghost" onPress={() => setVisibleLimit(v => v + 40)}>Mostrar {Math.min(40, rows.length - visibleLimit)} más de {rows.length - visibleLimit} restantes</Button> : null}
-      </View></FadeIn>}
+    <Card padded={false}>
+      <View style={{ padding: space.sm, gap: space.sm, borderBottomWidth: 1, borderBottomColor: c.line }}>
+        <Tabs value={group} onChange={setGroup} options={AUDIT_FILTERS.map(f => ({ value: f.key, label: f.label }))} />
+        <View style={{ flexDirection: compact ? 'column' : 'row', gap: space.sm, alignItems: compact ? 'stretch' : 'center' }}>
+          <SearchField value={query} onChangeText={setQuery} placeholder="Buscar usuario, cliente, pedido o acción" style={compact ? null : { flex: 1, maxWidth: 420 }} />
+          <Segmented value={range} onChange={setRange} accessibilityLabel="Periodo" options={RANGE_FILTERS.map(r => ({ value: r.key, label: r.label }))} />
+        </View>
+      </View>
+      {loading && !auditoria.length ? <View style={{ gap: space.sm, padding: space.lg }}>{[0, 1, 2, 3, 4].map(i => <Skeleton key={i} height={40} radius={8} />)}</View>
+        : !rows.length ? <EmptyState icon={ScrollText} title="No hay movimientos con estos filtros" description="Prueba otro periodo o quita el texto de búsqueda."
+          action={<Button onPress={() => { setQuery(''); setRange('TODO'); setGroup('TODOS'); }}>Quitar filtros</Button>} />
+        : <FadeIn trigger={`${range}-${group}`}>
+          {days.map((day, di) => <View key={day.label}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.md, height: 36, backgroundColor: c.surfaceAlt, borderTopWidth: di ? 1 : 0, borderBottomWidth: 1, borderColor: c.line }}>
+              <Text style={[type.body, { color: c.text, fontWeight: '600' }]}>{day.label}</Text>
+              <Text style={[type.body, { color: c.muted }]}>{day.items.length} {day.items.length === 1 ? 'movimiento' : 'movimientos'}</Text>
+            </View>
+            {day.items.map((r, i) => <Event key={r.id} record={r} c={c} phone={phone} first={i === 0} />)}
+          </View>)}
+          {rows.length > visibleLimit ? <View style={{ padding: space.md, borderTopWidth: 1, borderTopColor: c.line, alignItems: 'center' }}>
+            <Button variant="plain" onPress={() => setVisibleLimit(v => v + 50)}>{`Mostrar ${Math.min(50, rows.length - visibleLimit)} más · quedan ${rows.length - visibleLimit}`}</Button>
+          </View> : null}
+        </FadeIn>}
+    </Card>
   </ScrollView>;
 }

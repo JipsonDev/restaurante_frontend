@@ -7,14 +7,14 @@ import { Alert } from '../utils/adminAlert';
 import { assetUrl, BASE_URL } from '../context/AuthContext';
 import { useAdmin } from '../context/AdminContext';
 import { useTheme } from '../theme';
-import { Button, DataTable, EmptyState, FadeIn, IconButton, PageHeader, Press, SearchField, Segmented, Skeleton, Status, Switch as Toggle, Tabs, money as fmtMoney, radius, space, type, useToast } from '../components/admin/ui';
+import { ActionMenu, Badge, Button, Card, DataTable, EmptyState, FadeIn, IconButton, PageHeader, Press, SearchField, Segmented, Skeleton, Status, Switch as Toggle, Tabs, money as fmtMoney, radius, space, type, useToast } from '../components/admin/ui';
 import { MenuButton, MenuChip, MenuField, MenuModal, MenuNotice, MenuSection } from '../components/MenuUI';
 import { normalizeCatalogText as normalize, productPayload, productStatus, productStock, recipeEstimate, stockMode } from '../utils/menuLogic.mjs';
 
 const money = value => `$${Number(value || 0).toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const EMPTY = { id: null, nombre: '', descripcion: '', precio: '', stock: '0', categoria_id: null, disponible: true, imagen_url: null, imageAsset: null, inventario_item_id: null, receta: [], mode: 'own' };
 const EMPTY_CATEGORY = { id: null, nombre: '', icono: '', activo: true };
-const STATUS = { available: 'Disponible', empty: 'Agotado', hidden: 'Oculto' };
+const STATUS = { available: 'Activo', empty: 'Agotado', hidden: 'Oculto' };
 const MODES = { own: 'Stock propio', linked: 'Insumo vinculado', recipe: 'Por receta' };
 const PAGE_SIZE = 24;
 const errorText = error => error?.response?.data?.message || error?.response?.data?.error || error?.message || 'No se pudo completar la operación.';
@@ -25,7 +25,7 @@ function ProductImage({ uri, height = 132, style }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [uri]);
   return <View style={[{ height, backgroundColor: c.surfaceAlt, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }, style]}>
-    {uri && !failed ? <Image source={{ uri: assetUrl(uri) }} resizeMode="cover" onError={() => setFailed(true)} style={{ width: '100%', height: '100%' }} /> : <View style={{ alignItems: 'center', gap: 8 }}><Utensils size={28} color={c.faint} /><Text style={{ color: c.muted, fontSize: 10 }}>{failed ? 'Imagen no disponible' : 'Sin fotografía'}</Text></View>}
+    {uri && !failed ? <Image source={{ uri: assetUrl(uri) }} resizeMode="cover" onError={() => setFailed(true)} style={{ width: '100%', height: '100%' }} /> : <View style={{ alignItems: 'center', gap: 8 }}><Utensils size={28} color={c.faint} /><Text style={{ color: c.muted, fontSize: 12 }}>{failed ? 'Imagen no disponible' : 'Sin fotografía'}</Text></View>}
   </View>;
 }
 function StatusBadge({ product }) {
@@ -166,60 +166,58 @@ export default function MenuScreen() {
   const thumb = (product, size = 44) => <View style={{ width: size, height: size, borderRadius: 10, overflow: 'hidden', backgroundColor: c.surfaceAlt, borderWidth: 1, borderColor: c.line, alignItems: 'center', justifyContent: 'center' }}>
     {product.imagen_url ? <Image source={{ uri: assetUrl(product.imagen_url) }} resizeMode="cover" style={{ width: '100%', height: '100%' }} /> : <Utensils size={Math.round(size * 0.4)} color={c.faint} />}
   </View>;
-  const publish = product => <Toggle label={`${Number(product.disponible) === 1 ? 'Ocultar' : 'Publicar'} ${product.nombre}`} showLabel={false} value={Number(product.disponible) === 1} disabled={pending.includes(product.id)} onValueChange={() => toggleProduct(product)} />;
+  // Publicar / ocultar varios a la vez, con «Deshacer».
+  const setVisibility = async (rows, visible) => {
+    const target = rows.filter(p => (Number(p.disponible) === 1) !== visible);
+    if (!target.length) { toast.show(visible ? 'Ya estaban publicados.' : 'Ya estaban ocultos.'); return; }
+    try {
+      for (const p of target) await updateProducto(p.id, { disponible: visible ? 1 : 0 });
+      toast.show(`${target.length === 1 ? target[0].nombre : `${target.length} productos`} ${visible ? (target.length === 1 ? 'publicado' : 'publicados') : (target.length === 1 ? 'oculto' : 'ocultos')}`, 'green', 5000,
+        { label: 'Deshacer', onPress: async () => { try { for (const p of target) await updateProducto(p.id, { disponible: visible ? 0 : 1 }); } catch (e) { toast.show(errorText(e), 'red'); } } });
+    } catch (error) { toast.show(errorText(error), 'red'); }
+  };
+  const stockLabel = p => { const n = productStock(p); return productStatus(p) === 'hidden' ? '—' : `${n} ${String(n) === '1' ? 'disponible' : 'disponibles'}`; };
+  const rowMenu = p => <ActionMenu label={`Acciones de ${p.nombre}`} actions={[
+    { label: 'Editar', icon: Edit3, onPress: () => openEdit(p) },
+    Number(p.disponible) === 1 ? { label: 'Ocultar del menú', icon: EyeOff, onPress: () => toggleProduct(p) } : { label: 'Publicar en el menú', icon: Eye, onPress: () => toggleProduct(p) },
+  ]} />;
   const listColumns = phone ? [
-    { key: 'n', label: 'Producto', flex: 1, render: p => <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, minWidth: 0 }}>{thumb(p, 40)}<View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+    { key: 'n', label: 'Producto', flex: 1, render: p => <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, minWidth: 0 }}>{thumb(p, 40)}<View style={{ flex: 1, minWidth: 0, gap: 2 }}>
       <Text numberOfLines={1} style={[type.body, { color: c.text, fontWeight: '600' }]}>{p.nombre}</Text>
-      <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'center' }}><Text style={[type.small, type.num, { color: c.text }]}>{money(p.precio)}</Text><StatusBadge product={p} /></View></View></View> },
-    { key: 'v', label: '', width: 46, align: 'right', render: publish },
+      <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'center' }}><StatusBadge product={p} /><Text style={[type.body, { color: c.muted }]}>{stockLabel(p)}</Text></View></View></View> },
+    { key: 'price', label: 'Precio', width: 72, align: 'right', render: p => <Text style={[type.body, type.num, { color: c.text }]}>{money(p.precio)}</Text> },
   ] : [
-    { key: 'n', label: 'Producto', flex: 3, sortValue: p => p.nombre, render: p => <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, minWidth: 0 }}>{thumb(p)}<View style={{ flex: 1, minWidth: 0 }}>
-      <Text numberOfLines={1} style={[type.body, { color: c.text, fontWeight: '600' }]}>{p.nombre}{promo(p) ? <Text style={{ color: c.purple, fontWeight: '600' }}>{'  · Promo'}</Text> : null}</Text>
-      <Text numberOfLines={1} style={[type.micro, { color: c.faint }]}>{p.descripcion || 'Sin descripción'}</Text></View></View> },
-    { key: 'cat', label: 'Categoría', flex: 1.2, sortValue: p => p.categoria_nombre || '', render: p => <Text numberOfLines={1} style={[type.small, { color: c.muted }]}>{p.categoria_nombre || 'Sin categoría'}</Text> },
-    { key: 'stock', label: 'Para vender', flex: 1.1, render: p => <View><Text style={[type.small, type.num, { color: productStatus(p) === 'empty' ? c.amber : c.text }]}>{productStock(p)}</Text><Text style={[type.micro, { color: c.faint }]}>{MODES[stockMode(p)]}</Text></View> },
-    { key: 'st', label: 'Estado', flex: 1, render: p => <StatusBadge product={p} /> },
-    { key: 'price', label: 'Precio', width: 96, sortValue: p => Number(p.precio), align: 'right', render: p => <Text style={[type.body, type.num, { color: c.text, fontWeight: '600' }]}>{money(p.precio)}</Text> },
-    { key: 'v', label: 'Visible', width: 64, align: 'center', render: publish },
+    { key: 'n', label: 'Producto', flex: 3, sortValue: p => p.nombre, render: p => <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, minWidth: 0 }}>{thumb(p, 40)}
+      <Text numberOfLines={1} style={[type.body, { color: c.text, fontWeight: '600', flexShrink: 1 }]}>{p.nombre}</Text>{promo(p) ? <Badge tone="info">Promo</Badge> : null}</View> },
+    { key: 'st', label: 'Estado', width: 110, sortValue: p => ({ available: 0, empty: 1, hidden: 2 })[productStatus(p)], render: p => <StatusBadge product={p} /> },
+    { key: 'stock', label: 'Inventario', flex: 1.3, sortValue: p => Number(productStock(p)) || 0, render: p => <View><Text numberOfLines={1} style={[type.body, type.num, { color: productStatus(p) === 'empty' ? c.red : c.text }]}>{stockLabel(p)}</Text>
+      <Text numberOfLines={1} style={[type.body, { color: c.muted }]}>{MODES[stockMode(p)]}</Text></View> },
+    { key: 'cat', label: 'Categoría', flex: 1.2, sortValue: p => p.categoria_nombre || '', render: p => <Text numberOfLines={1} style={[type.body, { color: c.text }]}>{p.categoria_nombre || 'Sin categoría'}</Text> },
+    { key: 'price', label: 'Precio', width: 96, sortValue: p => Number(p.precio), align: 'right', render: p => <Text style={[type.body, type.num, { color: c.text }]}>{money(p.precio)}</Text> },
+    { key: 'a', label: '', width: 40, align: 'right', actions: true, render: rowMenu },
   ];
-  const statusOptions = [{ value: 'all', label: 'Todos', count: productos.length }, { value: 'available', label: 'Disponibles', count: counts.available }, { value: 'empty', label: 'Agotados', count: counts.empty }, { value: 'hidden', label: 'Ocultos', count: counts.hidden }];
+  const statusTabs = [{ value: 'all', label: 'Todos', count: productos.length }, { value: 'available', label: 'Activos', count: counts.available }, { value: 'empty', label: 'Agotados', count: counts.empty }, { value: 'hidden', label: 'Ocultos', count: counts.hidden }];
+  const toolbar = <View style={{ padding: space.sm, gap: space.sm }}>
+    <Tabs value={status} onChange={setStatus} options={statusTabs} />
+    <View style={{ flexDirection: phone ? 'column' : 'row', gap: space.sm, alignItems: phone ? 'stretch' : 'center' }}>
+      <SearchField value={query} onChangeText={setQuery} placeholder="Buscar productos" style={phone ? null : { flex: 1 }} />
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, flexShrink: 1 }} contentContainerStyle={{ gap: space.xs }}>
+        <MenuChip selected={category === 'all'} onPress={() => setCategory('all')}>Todas las categorías</MenuChip>
+        {categorias.map(item => <MenuChip key={item.id} selected={String(category) === String(item.id)} onPress={() => setCategory(String(item.id))}>{`${item.nombre}${Number(item.activo) === 0 ? ' (inactiva)' : ''}`}</MenuChip>)}
+      </ScrollView>
+    </View>
+  </View>;
   return <View style={{ flex: 1 }}>
     <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: space.x3 }}>
-      <PageHeader title="Menú" description={`${productos.length} productos · ${counts.available} a la venta${counts.empty ? ` · ${counts.empty} agotados` : ''}${counts.hidden ? ` · ${counts.hidden} ocultos` : ''}`}
-        actions={<><Button icon={Utensils} onPress={() => startCategory()}>Categorías</Button><Button icon={BadgePercent} onPress={() => openNew(true)}>Promoción</Button><Button variant="primary" icon={Plus} onPress={() => openNew()}>Nuevo producto</Button></>} />
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: space.lg }}>
-        <Tabs value={category === 'all' ? 'all' : String(category)} onChange={v => setCategory(v === 'all' ? 'all' : v)}
-          options={[{ value: 'all', label: 'Todo', count: productos.length }, ...categorias.map(item => ({ value: String(item.id), label: `${item.nombre}${Number(item.activo) === 0 ? ' (inactiva)' : ''}`, count: categoryCount(item) }))]} />
-      </ScrollView>
-      <View style={{ flexDirection: phone ? 'column' : 'row', gap: space.md, marginBottom: space.lg, alignItems: phone ? 'stretch' : 'center' }}>
-        <SearchField value={query} onChangeText={setQuery} placeholder="Buscar por nombre, descripción o código…" style={phone ? null : { flex: 1, minWidth: 260, maxWidth: 420 }} />
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}><Segmented size="sm" value={status} onChange={setStatus} options={statusOptions} accessibilityLabel="Estado" /></ScrollView>
-        <View style={{ flexDirection: 'row', gap: space.xs, marginLeft: phone ? 0 : 'auto' }}>
-          <Button size="sm" variant="ghost" icon={ArrowDownUp} onPress={() => setSort(previous => ({ name: 'price', price: 'stock', stock: 'name' })[previous])}>{{ name: 'A–Z', price: 'Precio', stock: 'Stock' }[sort]}</Button>
-          <Segmented size="sm" value={layout} onChange={setLayout} accessibilityLabel="Vista" options={[{ value: 'list', label: 'Lista', icon: List }, { value: 'grid', label: 'Tarjetas', icon: LayoutGrid }]} />
-        </View>
-      </View>
-      {loading && !productos.length ? <View style={{ gap: space.sm }}>{[0, 1, 2, 3, 4].map(i => <Skeleton key={i} height={60} radius={10} />)}</View>
-        : !filtered.length ? <EmptyState icon={Search} title={productos.length ? 'No encontramos coincidencias' : 'Tu menú empieza aquí'} description={productos.length ? 'Prueba otra búsqueda o quita los filtros.' : 'Crea una categoría y agrega tu primer producto.'}
-          action={<Button onPress={productos.length ? resetFilters : () => openNew()}>{productos.length ? 'Quitar filtros' : 'Agregar producto'}</Button>} />
-        : <FadeIn trigger={`${layout}-${category}-${status}`} duration={180} offset={4}>{layout === 'list'
-          ? <DataTable columns={listColumns} rows={filtered.slice(0, limit)} onRowPress={openEdit} rowStyle={p => loadingEdit === p.id ? { opacity: 0.6 } : null} />
-          : <View onLayout={event => setContentWidth(event.nativeEvent.layout.width)} style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.md }}>
-            {filtered.slice(0, limit).map(product => <Press key={product.id} accessibilityRole="button" accessibilityLabel={`Editar ${product.nombre}`} onPress={() => openEdit(product)} scaleTo={0.985}
-              style={{ width: cardWidth, backgroundColor: c.surface, borderWidth: 1, borderColor: c.line, borderRadius: radius.lg, overflow: 'hidden', opacity: loadingEdit === product.id ? 0.6 : 1 }}
-              hoverStyle={{ borderColor: c.lineStrong }}>
-              <ProductImage uri={product.imagen_url} height={120} />
-              <View style={{ padding: space.lg, gap: space.sm }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: space.sm }}>
-                  <Text numberOfLines={2} style={[type.body, { color: c.text, fontWeight: '600', flex: 1 }]}>{product.nombre}</Text>
-                  <Text style={[type.body, type.num, { color: c.text, fontWeight: '600' }]}>{money(product.precio)}</Text>
-                </View>
-                <Text numberOfLines={1} style={[type.micro, { color: c.faint }]}>{product.categoria_nombre || 'Sin categoría'} · {productStock(product)} para vender</Text>
-                <StatusBadge product={product} />
-              </View>
-            </Press>)}
-          </View>}</FadeIn>}
-      {filtered.length > limit && <View style={{ marginTop: space.lg }}><Button onPress={() => setLimit(previous => previous + PAGE_SIZE)}>{`Ver más (${filtered.length - limit} restantes)`}</Button></View>}
+      <PageHeader title="Menú"
+        actions={phone ? <><ActionMenu label="Más acciones" actions={[{ label: 'Categorías', icon: Utensils, onPress: () => startCategory() }, { label: 'Crear promoción', icon: BadgePercent, onPress: () => openNew(true) }]} /><Button variant="primary" onPress={() => openNew()}>Agregar producto</Button></>
+          : <><Button onPress={() => startCategory()}>Categorías</Button><Button onPress={() => openNew(true)}>Crear promoción</Button><Button variant="primary" onPress={() => openNew()}>Agregar producto</Button></>} />
+      {loading && !productos.length ? <Card padded={false}><View style={{ padding: space.lg, gap: space.md }}>{[0, 1, 2, 3, 4].map(i => <Skeleton key={i} height={40} />)}</View></Card>
+        : !productos.length ? <Card><EmptyState icon={Utensils} title="Agrega tu primer producto" description="Crea una categoría y luego los productos que verá el mesero al tomar pedidos."
+          action={<Button variant="primary" onPress={() => openNew()}>Agregar producto</Button>} /></Card>
+        : <DataTable toolbar={toolbar} columns={listColumns} rows={filtered} onRowPress={openEdit} rowStyle={p => loadingEdit === p.id ? { opacity: 0.6 } : null}
+          selectable={!phone} bulkActions={[{ label: 'Publicar', onPress: rows => setVisibility(rows, true) }, { label: 'Ocultar', onPress: rows => setVisibility(rows, false) }]}
+          empty={<EmptyState compact icon={Search} title="Sin coincidencias" description="Prueba otra búsqueda o quita los filtros." action={<Button onPress={resetFilters}>Quitar filtros</Button>} />} />}
     </ScrollView>
     <MenuModal visible={modalOpen} title={form.id ? 'Editar producto' : 'Nuevo producto'} subtitle="Así lo verá el mesero al tomar el pedido." close={closeForm}
       tabs={<Tabs value={formTab} onChange={setFormTab} style={{ paddingHorizontal: space.xl }} options={[{ value: 'info', label: 'Información' }, { value: 'stock', label: 'Existencias y receta' }, { value: 'image', label: 'Fotografía' }]} />}
@@ -230,7 +228,7 @@ export default function MenuScreen() {
         <MenuField label="Precio de venta" value={form.precio} onChangeText={value => setField('precio', value)} keyboardType="decimal-pad" placeholder="0,00" hint="Admite hasta dos decimales. Se conservan los precios de pedidos ya confirmados." editable={!saving} />
         {form.precio.trim() && Number(form.precio.replace(',', '.')) === 0 ? <MenuNotice>Precio cero: este producto se registrará sin importe. Verifica que sea intencional.</MenuNotice> : null}
         <View style={{ gap: 8 }}><Text style={{ color: c.text, fontSize: 12, fontWeight: '600' }}>Categoría</Text>{!categorias.length && <MenuNotice>No hay categorías registradas. Crea una desde Categorías antes de guardar el producto.</MenuNotice>}<View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>{categorias.filter(item => Number(item.activo) !== 0 || Number(item.id) === Number(form.categoria_id)).map(item => <MenuChip key={item.id} selected={Number(form.categoria_id) === Number(item.id)} onPress={() => !saving && Number(item.activo) !== 0 && setField('categoria_id', item.id)}>{`${item.nombre}${Number(item.activo) === 0 ? ' · Inactiva' : ''}`}</MenuChip>)}</View></View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, padding: 14, borderWidth: 1, borderColor: c.line, backgroundColor: c.surfaceAlt, borderRadius: 8 }}><View style={{ flex: 1 }}><Text style={{ color: c.text, fontSize: 13, fontWeight: '600' }}>Publicado en el menú</Text><Text style={{ color: c.muted, fontSize: 11, lineHeight: 17, marginTop: 5 }}>Ocultarlo impide nuevas ventas y conserva su historial. Agotado significa que está publicado, pero sin existencias.</Text></View><Toggle showLabel={false} label="Publicado en el menú" disabled={saving} value={form.disponible} onValueChange={value => value && Number(formCategory?.activo) === 0 ? setFormError('Activa la categoría o selecciona otra antes de publicar.') : setField('disponible', value)} /></View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, padding: 14, borderWidth: 1, borderColor: c.line, backgroundColor: c.surfaceAlt, borderRadius: 8 }}><View style={{ flex: 1 }}><Text style={{ color: c.text, fontSize: 13, fontWeight: '600' }}>Publicado en el menú</Text><Text style={{ color: c.muted, fontSize: 12, lineHeight: 17, marginTop: 5 }}>Ocultarlo impide nuevas ventas y conserva su historial. Agotado significa que está publicado, pero sin existencias.</Text></View><Toggle showLabel={false} label="Publicado en el menú" disabled={saving} value={form.disponible} onValueChange={value => value && Number(formCategory?.activo) === 0 ? setFormError('Activa la categoría o selecciona otra antes de publicar.') : setField('disponible', value)} /></View>
         {form.id && <View style={{ alignItems: 'flex-start', paddingTop: 6 }}><MenuButton danger icon={Trash2} disabled={saving} onPress={deleteCurrent}>Eliminar producto sin historial</MenuButton></View>}
       </MenuSection>}
       {formTab === 'stock' && <MenuSection title="Control de existencias" subtitle="Elige una fuente. El sistema reserva unidades al confirmar el pedido y descuenta el consumo al preparar.">
@@ -243,13 +241,13 @@ export default function MenuScreen() {
           <MenuField label="Buscar insumo" value={ingredientQuery} onChangeText={setIngredientQuery} placeholder="Nombre del insumo" />
           <View style={{ maxHeight: 160, borderWidth: 1, borderColor: c.line, borderRadius: 8 }}><ScrollView keyboardShouldPersistTaps="handled">{ingredientResults.map(item => {
             const selected = form.mode === 'linked' ? Number(item.id) === Number(form.inventario_item_id) : form.receta.some(line => Number(line.inventario_item_id) === Number(item.id));
-            return <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={`${form.mode === 'linked' ? 'Vincular' : 'Agregar'} ${item.nombre}`} accessibilityState={{ selected }} disabled={saving} onPress={() => form.mode === 'linked' ? setField('inventario_item_id', item.id) : addIngredient(item)} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, backgroundColor: selected ? c.primarySoft : c.surface, borderBottomWidth: 1, borderBottomColor: c.line }}><View style={{ flex: 1 }}><Text style={{ color: c.text, fontSize: 12, fontWeight: '600' }}>{item.nombre}</Text><Text style={{ color: c.muted, fontSize: 11, marginTop: 4 }}>{Math.max(0, Number(item.stock || 0) - Number(item.stock_reservado || 0)).toLocaleString('es-EC')} {item.unidad} libres</Text></View>{selected ? <Check size={17} color={c.primaryText} /> : <Plus size={17} color={c.muted} />}</Pressable>;
+            return <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={`${form.mode === 'linked' ? 'Vincular' : 'Agregar'} ${item.nombre}`} accessibilityState={{ selected }} disabled={saving} onPress={() => form.mode === 'linked' ? setField('inventario_item_id', item.id) : addIngredient(item)} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, backgroundColor: selected ? c.primarySoft : c.surface, borderBottomWidth: 1, borderBottomColor: c.line }}><View style={{ flex: 1 }}><Text style={{ color: c.text, fontSize: 12, fontWeight: '600' }}>{item.nombre}</Text><Text style={{ color: c.muted, fontSize: 12, marginTop: 4 }}>{Math.max(0, Number(item.stock || 0) - Number(item.stock_reservado || 0)).toLocaleString('es-EC')} {item.unidad} libres</Text></View>{selected ? <Check size={17} color={c.primaryText} /> : <Plus size={17} color={c.muted} />}</Pressable>;
           })}{!ingredientResults.length && <Text style={{ color: c.muted, padding: 18, fontSize: 12 }}>{activeInventory.length ? 'No hay coincidencias.' : 'No hay insumos activos. Regístralos primero en Inventario.'}</Text>}</ScrollView></View>
           {form.mode === 'recipe' && form.receta.map(line => {
             const item = inventario.find(item => Number(item.id) === Number(line.inventario_item_id));
             return <View key={line.inventario_item_id} style={{ padding: 12, borderRadius: 8, borderWidth: 1, borderColor: c.line, gap: 10 }}><Text style={{ color: c.text, fontSize: 13, fontWeight: '600' }}>{item?.nombre || `Insumo no disponible #${line.inventario_item_id}`}</Text><View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><MenuField containerStyle={{ flex: 1 }} label={`Cantidad de ${item?.nombre || 'insumo'}`} value={line.cantidad} keyboardType="decimal-pad" onChangeText={value => updateRecipe(line.inventario_item_id, value)} editable={!saving} /><Text style={{ color: c.muted, fontSize: 12, paddingTop: 18 }}>{item?.unidad || line.unidad}</Text><MenuButton icon={Trash2} danger label={`Quitar ${item?.nombre || 'insumo'} de receta`} disabled={saving} onPress={() => setForm(previous => ({ ...previous, receta: previous.receta.filter(row => row.inventario_item_id !== line.inventario_item_id) }))} /></View></View>;
           })}
-          {estimate && <View style={{ backgroundColor: c.surfaceAlt, padding: 14, borderRadius: 8, gap: 7 }}><Text style={{ color: c.text, fontSize: 14, fontWeight: '600' }}>{estimate.portions} unidades elaborables ahora</Text><Text style={{ color: c.muted, fontSize: 12 }}>Costo de insumos por unidad: {estimate.completeCost ? money(estimate.cost) : 'incompleto; revisa los costos del inventario'}.</Text><Text style={{ color: c.muted, fontSize: 11 }}>Estimación de materiales; no incluye personal, impuestos ni otros gastos.</Text>{estimate.completeCost && Number(form.precio.replace(',', '.')) > 0 && estimate.cost >= Number(form.precio.replace(',', '.')) && <MenuNotice>El costo de insumos alcanza o supera el precio de venta.</MenuNotice>}</View>}
+          {estimate && <View style={{ backgroundColor: c.surfaceAlt, padding: 14, borderRadius: 8, gap: 7 }}><Text style={{ color: c.text, fontSize: 14, fontWeight: '600' }}>{estimate.portions} unidades elaborables ahora</Text><Text style={{ color: c.muted, fontSize: 12 }}>Costo de insumos por unidad: {estimate.completeCost ? money(estimate.cost) : 'incompleto; revisa los costos del inventario'}.</Text><Text style={{ color: c.muted, fontSize: 12 }}>Estimación de materiales; no incluye personal, impuestos ni otros gastos.</Text>{estimate.completeCost && Number(form.precio.replace(',', '.')) > 0 && estimate.cost >= Number(form.precio.replace(',', '.')) && <MenuNotice>El costo de insumos alcanza o supera el precio de venta.</MenuNotice>}</View>}
         </>}
         {form.id && form.originalMode !== form.mode && <MenuNotice>El cambio se aplica a los próximos pedidos. Las reservas ya confirmadas conservan sus insumos originales.</MenuNotice>}
       </MenuSection>}
@@ -264,12 +262,12 @@ export default function MenuScreen() {
       <MenuSection title={categoryForm.id ? 'Editar categoría' : 'Nueva categoría'}>
         <MenuField label="Nombre de categoría" maxLength={80} value={categoryForm.nombre} onChangeText={value => setCategoryForm(previous => ({ ...previous, nombre: value }))} placeholder="Ej. Cafetería" editable={!categorySaving} />
         <MenuField label="Clave de icono (opcional)" maxLength={30} value={categoryForm.icono} onChangeText={value => setCategoryForm(previous => ({ ...previous, icono: value }))} placeholder="cafe, bebida, postre…" editable={!categorySaving} />
-        <View style={{ flexDirection: 'row', gap: 14, alignItems: 'center' }}><View style={{ flex: 1 }}><Text style={{ color: c.text, fontSize: 13, fontWeight: '600' }}>Categoría activa</Text><Text style={{ color: c.muted, fontSize: 11, lineHeight: 17, marginTop: 5 }}>Al desactivarla se ocultan sus productos para nuevas ventas. Los pedidos e historial se conservan.</Text></View><Toggle showLabel={false} label="Categoría activa" value={categoryForm.activo} disabled={categorySaving} onValueChange={value => setCategoryForm(previous => ({ ...previous, activo: value }))} /></View>
+        <View style={{ flexDirection: 'row', gap: 14, alignItems: 'center' }}><View style={{ flex: 1 }}><Text style={{ color: c.text, fontSize: 13, fontWeight: '600' }}>Categoría activa</Text><Text style={{ color: c.muted, fontSize: 12, lineHeight: 17, marginTop: 5 }}>Al desactivarla se ocultan sus productos para nuevas ventas. Los pedidos e historial se conservan.</Text></View><Toggle showLabel={false} label="Categoría activa" value={categoryForm.activo} disabled={categorySaving} onValueChange={value => setCategoryForm(previous => ({ ...previous, activo: value }))} /></View>
         <View style={{ flexDirection: 'row', gap: 8 }}><MenuButton disabled={categorySaving} onPress={() => {
           if (JSON.stringify(categoryForm) !== categoryBaseline.current) confirmAction('Cambios sin guardar', '¿Descartar los cambios de esta categoría?', () => startCategory()); else startCategory();
         }}>Nueva / limpiar</MenuButton><MenuButton primary busy={categorySaving} onPress={saveCategory}>{categoryForm.id ? 'Guardar categoría' : 'Crear categoría'}</MenuButton></View>
       </MenuSection>
-      <View style={{ borderTopWidth: 1, borderTopColor: c.line, paddingTop: 16 }}><Text style={{ color: c.text, fontSize: 14, fontWeight: '600', marginBottom: 8 }}>{categorias.length} categorías registradas</Text>{categorias.map(item => <View key={item.id} style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: c.line, flexDirection: 'row', alignItems: 'center', gap: 8 }}><View style={{ flex: 1 }}><Text style={{ color: c.text, fontSize: 13, fontWeight: '600' }}>{item.nombre}</Text><Text style={{ color: c.muted, fontSize: 11, marginTop: 4 }}>{categoryCount(item)} productos · {Number(item.activo) !== 0 ? 'Activa' : 'Inactiva'}</Text></View><MenuButton icon={Edit3} label={`Editar categoría ${item.nombre}`} disabled={categorySaving} onPress={() => {
+      <View style={{ borderTopWidth: 1, borderTopColor: c.line, paddingTop: 16 }}><Text style={{ color: c.text, fontSize: 14, fontWeight: '600', marginBottom: 8 }}>{categorias.length} categorías registradas</Text>{categorias.map(item => <View key={item.id} style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: c.line, flexDirection: 'row', alignItems: 'center', gap: 8 }}><View style={{ flex: 1 }}><Text style={{ color: c.text, fontSize: 13, fontWeight: '600' }}>{item.nombre}</Text><Text style={{ color: c.muted, fontSize: 12, marginTop: 4 }}>{categoryCount(item)} productos · {Number(item.activo) !== 0 ? 'Activa' : 'Inactiva'}</Text></View><MenuButton icon={Edit3} label={`Editar categoría ${item.nombre}`} disabled={categorySaving} onPress={() => {
         if (JSON.stringify(categoryForm) !== categoryBaseline.current) confirmAction('Cambios sin guardar', '¿Descartar los cambios de la categoría actual?', () => startCategory(item)); else startCategory(item);
       }} /><MenuButton icon={Trash2} danger label={`Eliminar categoría ${item.nombre}`} disabled={categorySaving || categoryCount(item) > 0} onPress={() => removeCategory(item)} /></View>)}</View>
     </MenuModal>

@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { Platform, Text, View, useWindowDimensions } from 'react-native';
-import { useFonts } from 'expo-font';
 import { AlertCircle } from 'lucide-react-native';
 import { AdminProvider, useAdmin } from '../context/AdminContext';
 import { useTheme, AdminAppearance } from '../theme';
@@ -32,12 +31,12 @@ function useAdminBrowserStyle(c) {
     let el = document.getElementById('mm-admin-style');
     if (!el) { el = document.createElement('style'); el.id = 'mm-admin-style'; document.head.appendChild(el); }
     el.textContent = `
-      [data-mm-admin] ::selection { background: ${c.primarySoft}; color: ${c.text}; }
-      [data-mm-admin] input, [data-mm-admin] textarea { caret-color: ${c.primary}; }
+      [data-mm-admin] ::selection { background: ${c.interactiveSoft}; color: ${c.text}; }
+      [data-mm-admin] input, [data-mm-admin] textarea { caret-color: ${c.text}; }
       [data-mm-admin] [role="button"]:focus-visible, [data-mm-admin] [role="tab"]:focus-visible, [data-mm-admin] [role="switch"]:focus-visible,
-      [data-mm-admin] a:focus-visible { outline: 2px solid ${c.primary}; outline-offset: 2px; border-radius: 10px; }
+      [data-mm-admin] a:focus-visible, [data-mm-admin] [role="checkbox"]:focus-visible, [data-mm-admin] [role="menuitem"]:focus-visible { outline: 2px solid ${c.interactive}; outline-offset: 1px; border-radius: 8px; }
       [data-mm-admin] ::-webkit-scrollbar { width: 10px; height: 10px; }
-      [data-mm-admin] ::-webkit-scrollbar-thumb { background: ${c.lineStrong}; border-radius: 10px; border: 3px solid ${c.bg}; }
+      [data-mm-admin] ::-webkit-scrollbar-thumb { background: ${c.lineStrong}; border-radius: 10px; border: 3px solid transparent; background-clip: padding-box; }
       [data-mm-admin] ::-webkit-scrollbar-track { background: transparent; }
       [data-mm-admin] { scrollbar-color: ${c.lineStrong} transparent; }
       @media (prefers-reduced-motion: reduce) { [data-mm-admin] * { transition: none !important; } }
@@ -86,15 +85,17 @@ function AdminLayout() {
 
   return <AdminProvider>
     <ToastProvider>
-      <View dataSet={{ mmAdmin: 'true' }} style={{ flex: 1, flexDirection: isCompact ? 'column' : 'row', paddingTop: isCompact ? TOP_INSET : 0, backgroundColor: c.bg }}>
-        {!isCompact && <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />}
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Header activeTab={activeTab} onNavigate={setActiveTab} />
-          <ReadErrorBanner />
-          <View style={{ flex: 1, padding: isCompact ? space.lg : space.x3, paddingBottom: isCompact ? space.sm : space.xxl }}>
-            <FadeIn trigger={activeTab} style={{ flex: 1, width: '100%', maxWidth: 1400, alignSelf: 'center' }}>
-              <ActiveScreen tab={activeTab} setActiveTab={setActiveTab} />
-            </FadeIn>
+      <View dataSet={{ mmAdmin: 'true' }} style={{ flex: 1, paddingTop: isCompact ? TOP_INSET : 0, backgroundColor: isCompact ? '#1A1A1A' : c.bg }}>
+        <Header activeTab={activeTab} onNavigate={setActiveTab} />
+        <View style={{ flex: 1, flexDirection: 'row', backgroundColor: c.bg, ...(isCompact ? {} : { borderTopLeftRadius: 0 }) }}>
+          {!isCompact && <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />}
+          <View style={{ flex: 1, minWidth: 0, backgroundColor: c.bg }}>
+            <ReadErrorBanner />
+            <View style={{ flex: 1, paddingHorizontal: isCompact ? space.sm : space.xxl, paddingTop: isCompact ? space.md : space.xl, paddingBottom: isCompact ? 0 : space.lg }}>
+              <FadeIn trigger={activeTab} style={{ flex: 1, width: '100%', maxWidth: 1200, alignSelf: 'center' }}>
+                <ActiveScreen tab={activeTab} setActiveTab={setActiveTab} />
+              </FadeIn>
+            </View>
           </View>
         </View>
         {isCompact && <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} mode="bottom" />}
@@ -104,10 +105,5 @@ function AdminLayout() {
 }
 
 export default function AdminApp() {
-  // Manrope para títulos y cifras; la fuente del sistema para el resto de la interfaz.
-  useFonts({
-    'Manrope-Regular': require('../../assets/fonts/Manrope-Regular.ttf'),
-    'Manrope-Medium': require('../../assets/fonts/Manrope-Medium.ttf'),
-  });
   return <AdminAppearance><AdminLayout /></AdminAppearance>;
 }

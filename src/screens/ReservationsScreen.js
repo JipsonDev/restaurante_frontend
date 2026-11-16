@@ -4,13 +4,13 @@ import { CalendarClock, ChevronLeft, ChevronRight, Minus, Phone, Plus, UsersRoun
 import { useAdmin } from '../context/AdminContext';
 import { useTheme } from '../theme';
 import { MenuButton, MenuChip, MenuField, MenuModal, MenuNotice } from '../components/MenuUI';
-import { Button, EmptyState, FadeIn, IconButton, PageHeader, Press, Segmented, Skeleton, Status, space, type, radius, useToast } from '../components/admin/ui';
+import { Badge, Button, Card, CardHeader, DataTable, EmptyState, IconButton, PageHeader, Segmented, Skeleton, Tabs, space, type, radius, useToast } from '../components/admin/ui';
 import {
   BLOCKING_STATES, DEFAULT_DURATION, RESERVATION_LABELS, addDays, dayOf, findConflict, interval, isLate, localStamp,
   minutesUntil, reservationPayload, suggestTables, timeOf, fromMinutes,
 } from '../utils/reservationLogic.mjs';
 
-const TONE = { PENDIENTE: 'amber', CONFIRMADA: 'sky', LLEGO: 'green', NO_VINO: 'red', CANCELADA: 'neutral' };
+const TONE = { PENDIENTE: 'warning', CONFIRMADA: 'info', LLEGO: 'success', NO_VINO: 'critical', CANCELADA: 'neutral' };
 const DURATIONS = [60, 90, 120, 150];
 const QUICK_TIMES = ['12:00', '12:30', '13:00', '13:30', '14:00', '18:00', '18:30', '19:00', '19:30', '20:00', '20:30', '21:00'];
 const errorText = e => e?.response?.data?.message || e?.message || 'No se pudo guardar la reserva.';
@@ -95,95 +95,81 @@ export default function ReservationsScreen() {
     } catch (e) { fromDialog ? setError(errorText(e)) : toast.show(errorText(e), 'red'); }
   }
 
-  const statusOf = r => isLate(r, now) ? <Status tone="red">Retrasada {Math.abs(minutesUntil(r, now))} min</Status> : <Status tone={TONE[r.estado]}>{RESERVATION_LABELS[r.estado]}</Status>;
+  const statusOf = r => isLate(r, now) ? <Badge tone="critical">Retrasada {Math.abs(minutesUntil(r, now))} min</Badge> : <Badge tone={TONE[r.estado]}>{RESERVATION_LABELS[r.estado]}</Badge>;
   const tableTag = r => r.mesa_id != null
-    ? <View style={{ paddingHorizontal: 8, height: 24, borderRadius: radius.sm, backgroundColor: c.soft, justifyContent: 'center' }}><Text style={[type.small, type.num, { color: c.text, fontWeight: '600' }]}>Mesa {r.mesa_numero}</Text></View>
-    : <View style={{ paddingHorizontal: 8, height: 24, borderRadius: radius.sm, borderWidth: 1, borderColor: c.amber, borderStyle: 'dashed', justifyContent: 'center' }}><Text style={[type.small, { color: c.amber, fontWeight: '600' }]}>Sin mesa</Text></View>;
+    ? <Text numberOfLines={1} style={[type.body, type.num, { color: c.text }]}>Mesa {r.mesa_numero}{r.ubicacion_nombre && !phone ? <Text style={{ color: c.muted }}> · {r.ubicacion_nombre}</Text> : null}</Text>
+    : <Badge tone="warning" progress="incomplete">Sin mesa</Badge>;
   const quick = r => ['PENDIENTE', 'CONFIRMADA'].includes(r.estado) && dayOf(r.fecha_hora) === today
     ? <View style={{ flexDirection: 'row', gap: space.xs }}>
-        <Button size="sm" variant="secondary" onPress={() => mark(r, 'LLEGO')}>Llegó</Button>
-        {isLate(r, now) ? <Button size="sm" variant="ghost" onPress={() => mark(r, 'NO_VINO')}>No vino</Button> : null}
+        <Button size="sm" onPress={() => mark(r, 'LLEGO')}>Llegó</Button>
+        {isLate(r, now) ? <Button size="sm" variant="tertiary" onPress={() => mark(r, 'NO_VINO')}>No vino</Button> : null}
       </View> : null;
-
-  // La fila abre la reserva; las acciones rápidas van al lado (no dentro) para no anidar botones.
-  const row = (r, i) => <View key={r.id} style={{ flexDirection: phone ? 'column' : 'row', alignItems: phone ? 'stretch' : 'center', borderTopWidth: i ? 1 : 0, borderTopColor: c.line, opacity: BLOCKING_STATES.includes(r.estado) ? 1 : 0.6 }}>
-    <Press onPress={() => open(r)} scaleTo={0.995} accessibilityRole="button" accessibilityLabel={`${timeOf(r.fecha_hora)}, ${r.cliente_nombre}, ${r.personas} personas. Abrir reserva`}
-      style={({ hovered }) => ({ flex: phone ? undefined : 1, minWidth: 0, flexDirection: 'row', alignItems: phone ? 'flex-start' : 'center', gap: space.lg, paddingHorizontal: space.lg, paddingVertical: space.md, backgroundColor: hovered ? c.surfaceAlt : 'transparent' })}>
-      <View style={{ width: 54 }}>
-        <Text style={[type.figure, { fontSize: 20, lineHeight: 24, color: c.text }]}>{timeOf(r.fecha_hora)}</Text>
-        <Text style={[type.micro, type.num, { color: c.faint }]}>hasta {endTime(r)}</Text>
-      </View>
-      <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
-        <Text numberOfLines={1} style={[type.body, { color: c.text, fontWeight: '600', textDecorationLine: r.estado === 'CANCELADA' ? 'line-through' : 'none' }]}>{r.cliente_nombre}</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, flexWrap: 'wrap' }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><UsersRound size={13} color={c.faint} /><Text style={[type.small, type.num, { color: c.muted }]}>{r.personas}</Text></View>
-          {r.telefono ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Phone size={13} color={c.faint} /><Text style={[type.small, type.num, { color: c.muted }]}>{r.telefono}</Text></View> : null}
-          {phone ? tableTag(r) : null}
-          {phone ? statusOf(r) : null}
-        </View>
-        {r.notas ? <Text numberOfLines={1} style={[type.micro, { color: c.faint }]}>{r.notas}</Text> : null}
-      </View>
-      {!phone ? <View style={{ width: 110 }}>{tableTag(r)}</View> : null}
-      {!phone ? <View style={{ width: 150 }}>{statusOf(r)}</View> : null}
-    </Press>
-    {quick(r) ? <View style={{ width: phone ? undefined : 160, alignItems: phone ? 'flex-start' : 'flex-end', paddingHorizontal: space.lg, paddingBottom: phone ? space.md : 0, paddingLeft: phone ? space.lg + 54 + space.lg : space.lg }}>{quick(r)}</View>
-      : !phone ? <View style={{ width: 160 }} /> : null}
+  const hourCell = r => <View><Text style={[type.body, type.num, { color: c.text, fontWeight: '700' }]}>{timeOf(r.fecha_hora)}</Text><Text style={[type.small, type.num, { color: c.muted }]}>hasta {endTime(r)}</Text></View>;
+  const nameCell = r => <View style={{ minWidth: 0 }}>
+    <Text numberOfLines={1} style={[type.body, { color: c.text, fontWeight: '600', textDecorationLine: r.estado === 'CANCELADA' ? 'line-through' : 'none' }]}>{r.cliente_nombre}</Text>
+    {r.telefono || r.notas ? <Text numberOfLines={1} style={[type.body, { color: c.muted }]}>{[r.telefono, r.notas].filter(Boolean).join(' · ')}</Text> : null}
   </View>;
-
-  const agenda = <View style={{ flex: 1, minWidth: 0 }}>
-    <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: space.md, marginBottom: space.md, flexWrap: 'wrap' }}>
-      <Text style={[type.h2, { color: c.text }]}>{longDay(day)}</Text>
-      <Segmented size="sm" value={filter} onChange={setFilter} accessibilityLabel="Estado"
+  const columns = phone ? [
+    { key: 'h', label: 'Hora', width: 58, render: hourCell },
+    { key: 'n', label: 'Reserva', flex: 1, render: r => <View style={{ gap: 4, minWidth: 0 }}>{nameCell(r)}
+      <View style={{ flexDirection: 'row', gap: space.xs, flexWrap: 'wrap', alignItems: 'center' }}><Badge tone="neutral">{`${r.personas} p.`}</Badge>{tableTag(r)}{statusOf(r)}</View>{quick(r)}</View> },
+  ] : [
+    { key: 'h', label: 'Hora', width: 76, sortValue: r => r.fecha_hora, render: hourCell },
+    { key: 'n', label: 'Cliente', flex: 1.6, sortValue: r => r.cliente_nombre, render: nameCell },
+    { key: 'p', label: 'Personas', width: 80, align: 'center', sortValue: r => Number(r.personas), render: r => <Text style={[type.body, type.num, { color: c.text }]}>{r.personas}</Text> },
+    { key: 'm', label: 'Mesa', flex: 1.1, render: tableTag },
+    { key: 's', label: 'Estado', width: 150, render: statusOf },
+    { key: 'x', label: '', width: 150, align: 'right', render: r => quick(r) },
+  ];
+  const toolbar = <View>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs, paddingHorizontal: space.sm, paddingTop: space.sm }}>
+      <IconButton icon={ChevronLeft} label="Semana anterior" size={28} onPress={() => setWeekStart(w => addDays(w, -7))} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Tabs value={day} onChange={setDay} options={week.map(d => ({ value: d, label: dayName(d, today), count: countFor(d) || undefined }))} />
+      </View>
+      <IconButton icon={ChevronRight} label="Semana siguiente" size={28} onPress={() => setWeekStart(w => addDays(w, 7))} />
+      {day !== today ? <Button size="sm" variant="tertiary" onPress={() => { setDay(today); setWeekStart(addDays(today, -1)); }}>Hoy</Button> : null}
+    </View>
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.sm, paddingHorizontal: space.md, paddingVertical: space.sm, flexWrap: 'wrap' }}>
+      <Text style={[type.h3, { color: c.text }]}>{longDay(day)}</Text>
+      <Segmented value={filter} onChange={setFilter} accessibilityLabel="Estado"
         options={[{ value: 'active', label: 'Activas', count: active.length }, { value: 'closed', label: 'Cerradas', count: ofDay.length - active.length }, { value: 'all', label: 'Todas', count: ofDay.length }]} />
     </View>
-    {loading && !reservas.length ? <View style={{ gap: space.sm }}>{[0, 1, 2].map(i => <Skeleton key={i} height={64} radius={10} />)}</View>
-      : shown.length ? <FadeIn trigger={`${day}-${filter}`} duration={180} offset={4}><View style={{ borderWidth: 1, borderColor: c.line, borderRadius: radius.lg, backgroundColor: c.surface, overflow: 'hidden' }}>
-          {shown.map((r, i) => row(r, i))}
-        </View></FadeIn>
-      : <EmptyState icon={CalendarClock} title={ofDay.length ? 'Nada en este filtro' : day < today ? 'Ese día no hubo reservas' : 'Sin reservas para este día'}
-          description={ofDay.length ? 'Cambia el filtro para ver las demás.' : day < today ? 'Elige otro día en la franja de arriba.' : 'Cuando alguien llame o escriba para reservar, regístralo aquí y la mesa quedará apartada en ese horario.'}
-          action={day >= today ? <Button variant="primary" icon={Plus} onPress={() => open()}>Nueva reserva</Button> : null} />}
   </View>;
 
-  const arrivals = <View style={{ width: wide ? 320 : undefined, gap: space.md }}>
-    <Text style={[type.h3, { color: c.text }]}>Llegan pronto</Text>
+  const agenda = <View style={{ flex: 1, minWidth: 0, alignSelf: 'stretch' }}>
+    {loading && !reservas.length ? <Card><View style={{ gap: space.sm }}>{[0, 1, 2].map(i => <Skeleton key={i} height={40} radius={8} />)}</View></Card>
+      : <DataTable columns={columns} rows={shown} onRowPress={r => open(r)} selectedKey={dialog?.reserva?.id} toolbar={toolbar} defaultSort={{ key: 'h', dir: 1 }}
+          empty={<EmptyState icon={CalendarClock} title={ofDay.length ? 'Nada en este filtro' : day < today ? 'Ese día no hubo reservas' : 'Sin reservas para este día'}
+            description={ofDay.length ? 'Cambia el filtro para ver las demás.' : day < today ? 'Elige otro día.' : 'Cuando alguien reserve, regístralo aquí y la mesa quedará apartada en ese horario.'}
+            action={day >= today && !ofDay.length ? <Button variant="primary" onPress={() => open()}>Crear reserva</Button> : null} />} />}
+  </View>;
+
+  const arrivals = <Card padded={false} style={{ width: wide ? 320 : undefined }}>
+    <CardHeader title="Llegan pronto" description="Próximas 2 horas" />
     {upcoming.length ? upcoming.map(r => { const m = minutesUntil(r, now); const late = isLate(r, now);
-      return <View key={r.id} style={{ padding: space.lg, borderRadius: radius.lg, borderWidth: 1, borderColor: late ? c.red : c.line, backgroundColor: c.surface, gap: space.sm }}>
+      return <View key={r.id} style={{ paddingHorizontal: space.lg, paddingVertical: space.md, borderTopWidth: 1, borderTopColor: c.line, gap: 6 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.sm }}>
           <Text numberOfLines={1} style={[type.body, { color: c.text, fontWeight: '600', flex: 1 }]}>{r.cliente_nombre}</Text>
-          <Text style={[type.small, type.num, { color: late ? c.red : m <= 15 ? c.text : c.muted, fontWeight: '600' }]}>{m > 0 ? `en ${m} min` : late ? `${-m} min tarde` : 'ahora'}</Text>
+          {late ? <Badge tone="critical">{`${-m} min tarde`}</Badge> : <Text style={[type.body, type.num, { color: m <= 15 ? c.text : c.muted, fontWeight: m <= 15 ? '600' : '400' }]}>{m > 0 ? `en ${m} min` : 'ahora'}</Text>}
         </View>
-        <Text style={[type.small, { color: c.muted }]}>{timeOf(r.fecha_hora)} · {r.personas} personas · {r.mesa_id != null ? `Mesa ${r.mesa_numero}` : 'sin mesa asignada'}</Text>
-        <View style={{ flexDirection: 'row', gap: space.sm, marginTop: 2 }}>
-          <Button size="sm" variant="primary" onPress={() => mark(r, 'LLEGO')}>Llegó</Button>
-          {late ? <Button size="sm" variant="secondary" onPress={() => mark(r, 'NO_VINO')}>No vino</Button> : <Button size="sm" variant="ghost" onPress={() => open(r)}>Ver</Button>}
+        <Text style={[type.body, { color: c.muted }]}>{timeOf(r.fecha_hora)} · {r.personas} personas · {r.mesa_id != null ? `Mesa ${r.mesa_numero}` : 'sin mesa asignada'}</Text>
+        <View style={{ flexDirection: 'row', gap: space.sm }}>
+          <Button size="sm" onPress={() => mark(r, 'LLEGO')}>Llegó</Button>
+          {late ? <Button size="sm" variant="tertiary" onPress={() => mark(r, 'NO_VINO')}>No vino</Button> : <Button size="sm" variant="tertiary" onPress={() => open(r)}>Ver</Button>}
         </View>
       </View>; })
-      : <Text style={[type.small, { color: c.faint }]}>Nadie en las próximas 2 horas.</Text>}
-  </View>;
+      : <Text style={[type.body, { color: c.muted, paddingHorizontal: space.lg, paddingBottom: space.lg }]}>Nadie en las próximas 2 horas.</Text>}
+  </Card>;
 
   const title = dialog?.reserva ? 'Editar reserva' : 'Nueva reserva';
   const editingActive = dialog?.reserva && BLOCKING_STATES.includes(dialog.reserva.estado);
   return <View style={{ flex: 1 }}>
     <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: space.x3 }}>
-      <PageHeader title="Reservas" description={active.length ? `${dayName(day, today)}: ${active.length} ${active.length === 1 ? 'reserva' : 'reservas'} · ${people} personas${unassigned ? ` · ${unassigned} sin mesa` : ''}` : `${dayName(day, today)}: sin reservas activas`}
-        actions={<Button variant="primary" icon={Plus} onPress={() => open()}>Nueva reserva</Button>} />
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, marginBottom: space.xl }}>
-        <IconButton icon={ChevronLeft} label="Semana anterior" onPress={() => setWeekStart(w => addDays(w, -7))} />
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.sm }} style={{ flex: 1 }}>
-          {week.map(d => { const n = countFor(d); const sel = d === day;
-            return <Press key={d} onPress={() => setDay(d)} scaleTo={0.96} accessibilityRole="button" accessibilityState={{ selected: sel }} accessibilityLabel={`${longDay(d)}, ${n} reservas`}
-              style={{ minWidth: phone ? 64 : 92, paddingVertical: 8, paddingHorizontal: 12, borderRadius: radius.md, borderWidth: 1, borderColor: sel ? c.primary : c.line, backgroundColor: sel ? c.primarySoft : c.surface, alignItems: 'center', gap: 2 }}
-              hoverStyle={sel ? null : { borderColor: c.lineStrong }}>
-              <Text style={[type.small, { color: sel || d === today ? c.text : c.muted, fontWeight: sel || d === today ? '600' : '500' }]}>{dayName(d, today)}</Text>
-              <Text style={[type.micro, type.num, { color: n ? c.text : c.faint }]}>{n ? `${n} ${n === 1 ? 'reserva' : 'reservas'}` : '—'}</Text>
-            </Press>; })}
-        </ScrollView>
-        <IconButton icon={ChevronRight} label="Semana siguiente" onPress={() => setWeekStart(w => addDays(w, 7))} />
-        {day !== today ? <Button size="sm" variant="ghost" onPress={() => { setDay(today); setWeekStart(addDays(today, -1)); }}>Hoy</Button> : null}
-      </View>
-      <View style={{ flexDirection: wide ? 'row' : 'column', gap: space.xl, alignItems: 'flex-start' }}>
-        {!wide && upcoming.length ? <View style={{ alignSelf: 'stretch' }}>{arrivals}</View> : null}
+      <PageHeader title="Reservas" description={active.length ? `${dayName(day, today)}: ${active.length} ${active.length === 1 ? 'reserva' : 'reservas'} · ${people} personas${unassigned ? ` · ${unassigned} sin mesa` : ''}` : undefined}
+        actions={<Button variant="primary" onPress={() => open()}>Crear reserva</Button>} />
+      <View style={{ flexDirection: wide ? 'row' : 'column', gap: space.lg, alignItems: wide ? 'flex-start' : 'stretch' }}>
+        {!wide && upcoming.length ? arrivals : null}
         {agenda}
         {wide ? arrivals : null}
       </View>
@@ -191,8 +177,8 @@ export default function ReservationsScreen() {
 
     <MenuModal visible={!!dialog} title={title} subtitle={dialog?.reserva ? `Registrada por ${dialog.reserva.creado_por_nombre || 'el sistema'}` : 'La mesa queda apartada durante ese horario.'} maxWidth={620} close={close} busy={busy}
       footer={<View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, flexWrap: 'wrap' }}>
-        {editingActive ? <Button variant="ghost" disabled={busy} onPress={() => mark(dialog.reserva, 'CANCELADA', { fromDialog: true })}><Text style={[type.small, { color: c.red, fontWeight: '600' }]}>Cancelar reserva</Text></Button> : null}
-        {dialog?.reserva && !editingActive ? <Button variant="ghost" disabled={busy} onPress={() => mark(dialog.reserva, 'CONFIRMADA', { fromDialog: true })}>Reactivar</Button> : null}
+        {editingActive ? <Button variant="plain" disabled={busy} onPress={() => mark(dialog.reserva, 'CANCELADA', { fromDialog: true })}><Text style={[type.body, { color: c.red, fontWeight: '600' }]}>Cancelar reserva</Text></Button> : null}
+        {dialog?.reserva && !editingActive ? <Button variant="plain" disabled={busy} onPress={() => mark(dialog.reserva, 'CONFIRMADA', { fromDialog: true })}>Reactivar</Button> : null}
         <View style={{ flex: 1 }} />
         <MenuButton disabled={busy} onPress={close}>Cerrar</MenuButton>
         <MenuButton primary busy={busy} onPress={save}>{dialog?.reserva ? 'Guardar cambios' : 'Reservar'}</MenuButton>
@@ -203,15 +189,15 @@ export default function ReservationsScreen() {
         <MenuField containerStyle={{ flex: 1 }} label="Teléfono (opcional)" value={form.telefono} onChangeText={v => change('telefono', v.replace(/[^\d+\s-]/g, ''))} placeholder="099 123 4567" keyboardType="phone-pad" maxLength={30} />
       </View>
       <View style={{ gap: 6 }}>
-        <Text style={[type.small, { color: c.text, fontWeight: '600' }]}>Personas</Text>
+        <Text style={[type.body, { color: c.text }]}>Personas</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
           <IconButton icon={Minus} label="Una persona menos" disabled={form.personas <= 1} onPress={() => change('personas', Math.max(1, form.personas - 1))} />
-          <Text style={[type.figure, { fontSize: 22, minWidth: 36, textAlign: 'center', color: c.text }]}>{form.personas}</Text>
+          <Text style={[type.figure, { fontSize: 18, minWidth: 36, textAlign: 'center', color: c.text }]}>{form.personas}</Text>
           <IconButton icon={Plus} label="Una persona más" disabled={form.personas >= 50} onPress={() => change('personas', Math.min(50, form.personas + 1))} />
         </View>
       </View>
       <View style={{ gap: 6 }}>
-        <Text style={[type.small, { color: c.text, fontWeight: '600' }]}>Día</Text>
+        <Text style={[type.body, { color: c.text }]}>Día</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.sm }}>
           {Array.from({ length: 14 }, (_, i) => addDays(today, i)).map(d => <MenuChip key={d} selected={form.day === d} onPress={() => change('day', d)}>{dayName(d, today)}</MenuChip>)}
         </ScrollView>
@@ -224,18 +210,18 @@ export default function ReservationsScreen() {
           </ScrollView>
         </View>
         <View style={{ gap: 6 }}>
-          <Text style={[type.small, { color: c.text, fontWeight: '600' }]}>Duración</Text>
+          <Text style={[type.body, { color: c.text }]}>Duración</Text>
           <Segmented size="sm" value={Number(form.duracion_min)} onChange={v => change('duracion_min', v)} accessibilityLabel="Duración" options={DURATIONS.map(d => ({ value: d, label: d % 60 ? `${Math.floor(d / 60)} h ${d % 60}` : `${d / 60} h` }))} />
         </View>
       </View>
       <View style={{ gap: 6 }}>
-        <Text style={[type.small, { color: c.text, fontWeight: '600' }]}>Mesa</Text>
-        <Text style={[type.micro, { color: c.faint }]}>{free.length ? `Libres para ${form.personas} ${Number(form.personas) === 1 ? 'persona' : 'personas'} de ${form.time} a ${timeOf(fromMinutes((interval(candidate)?.start || 0) + Number(form.duracion_min)))}` : 'No hay mesas libres con esa capacidad en ese horario.'}{busyTables ? ` · ${busyTables} ya reservadas` : ''}</Text>
+        <Text style={[type.body, { color: c.text }]}>Mesa</Text>
+        <Text style={[type.body, { color: c.muted }]}>{free.length ? `Libres para ${form.personas} ${Number(form.personas) === 1 ? 'persona' : 'personas'} de ${form.time} a ${timeOf(fromMinutes((interval(candidate)?.start || 0) + Number(form.duracion_min)))}` : 'No hay mesas libres con esa capacidad en ese horario.'}{busyTables ? ` · ${busyTables} ya reservadas` : ''}</Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
           <MenuChip selected={form.mesa_id == null} onPress={() => change('mesa_id', null)}>Asignar después</MenuChip>
           {free.map(t => <MenuChip key={t.id} selected={Number(form.mesa_id) === Number(t.id)} onPress={() => change('mesa_id', t.id)}>{`Mesa ${t.numero} · ${t.capacidad}p${t.ubicacion_nombre ? ` · ${t.ubicacion_nombre}` : ''}`}</MenuChip>)}
         </View>
-        {!chosenStillFree ? <Text style={[type.small, { color: c.red }]}>La mesa elegida ya no está libre en ese horario.</Text> : null}
+        {!chosenStillFree ? <Text style={[type.body, { color: c.red }]}>La mesa elegida ya no está libre en ese horario.</Text> : null}
       </View>
       <MenuField label="Notas (opcional)" value={form.notas} onChangeText={v => change('notas', v)} placeholder="Cumpleaños, silla para bebé, terraza si es posible…" multiline maxLength={300} />
     </MenuModal>
