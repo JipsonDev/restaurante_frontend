@@ -184,6 +184,47 @@ export function AdminAppearance({ children }) {
   return <ThemeContext.Provider value={{ ...theme, c }}>{children}</ThemeContext.Provider>;
 }
 
+// App del mesero — dirección «Comanda»: la libreta de comandas del restaurante.
+// Papel y tinta; achiote para la acción principal y lo que requiere cobro; los estados también se
+// distinguen por forma (discontinuo = libre, sólido = ocupada, relleno = por cobrar, sello = reservada).
+export const comandaPalette = {
+  light: {
+    bg: '#F7F4EE', surface: '#FFFDF8', surfaceAlt: '#F1ECE2', soft: '#ECE6DA', softer: '#E2DACB',
+    line: '#DDD5C6', lineStrong: '#B9AF9C', text: '#1F1D1A', muted: '#6B655C', faint: '#736C61',
+    primary: '#B8321A', primaryHover: '#9E2913', primaryPressed: '#86220F', primarySoft: '#F6E1D9', primaryText: '#9E2913', onPrimary: '#FFFFFF',
+    ink: '#1F1D1A', onInk: '#FFFDF8',
+    green: '#1F6B45', greenSoft: '#DDEEE2', amber: '#9A5B00', amberSoft: '#F6E7C8', red: '#B8321A', redSoft: '#F6E1D9',
+    sky: '#2F5D8A', skySoft: '#E1E9F2', purple: '#5B3FA8', purpleSoft: '#E9E3F6', pink: '#A23B6B', pinkSoft: '#F5E1EA',
+    focus: 'rgba(184,50,26,0.45)', overlay: 'rgba(31,29,26,0.45)', shadow: 'rgba(31,29,26,0.12)',
+  },
+  dark: {
+    bg: '#1A1917', surface: '#23211E', surfaceAlt: '#2A2825', soft: '#312E2A', softer: '#3A3631',
+    line: '#3A3631', lineStrong: '#4D4842', text: '#EDE8E0', muted: '#B3AB9F', faint: '#9C9488',
+    primary: '#E0573A', primaryHover: '#EC6B4F', primaryPressed: '#C94A2F', primarySoft: 'rgba(224,87,58,0.18)', primaryText: '#FF8A70', onPrimary: '#1A1917',
+    ink: '#EDE8E0', onInk: '#1A1917',
+    green: '#7BD9A6', greenSoft: 'rgba(123,217,166,0.14)', amber: '#F2C14E', amberSoft: 'rgba(242,193,78,0.14)', red: '#FF8A70', redSoft: 'rgba(255,138,112,0.16)',
+    sky: '#8FB8E8', skySoft: 'rgba(143,184,232,0.14)', purple: '#B7A6F5', purpleSoft: 'rgba(183,166,245,0.16)', pink: '#F08BB0', pinkSoft: 'rgba(240,139,176,0.16)',
+    focus: 'rgba(224,87,58,0.55)', overlay: 'rgba(0,0,0,0.6)', shadow: 'rgba(0,0,0,0.45)',
+  },
+};
+
+export function WaiterAppearance({ children }) {
+  const theme = useTheme();
+  const c = { ...theme.c, ...comandaPalette[theme.isDark ? 'dark' : 'light'], comanda: true, admin: false, isDark: theme.isDark };
+  return <ThemeContext.Provider value={{ ...theme, c }}>{children}</ThemeContext.Provider>;
+}
+
+// Estado de mesa en la dirección Comanda: etiqueta, forma del borde y colores.
+export function comandaTableMeta(state, c) {
+  const map = {
+    Libre: { label: 'Libre', shape: 'dashed', bg: 'transparent', border: c.lineStrong, text: c.green, number: c.text },
+    Ocupada: { label: 'Ocupada', shape: 'solid', bg: c.surface, border: c.ink, text: c.text, number: c.text },
+    Cuenta: { label: 'Por cobrar', shape: 'filled', bg: c.primary, border: c.primary, text: c.onPrimary, number: c.onPrimary },
+    Reservada: { label: 'Reservada', shape: 'stamp', bg: c.surface, border: c.purple, text: c.purple, number: c.text },
+  };
+  return map[state] || map.Libre;
+}
+
 export const softShadow = (c, level = 1) => {
   if (c.admin) return Platform.OS === 'web' ? { boxShadow: c.isDark ? 'none' : `0 ${level}px ${3 * level}px ${c.shadow}` } : { elevation: 0 };
   if (Platform.OS === 'web') {
