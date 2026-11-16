@@ -9,6 +9,7 @@ import { Button, EmptyState, FadeIn, IconButton, PageHeader, Press, SearchField,
 import { tableLayout } from '../utils/tableLayout.mjs';
 import { tableDraft, tableKey, tablePayload } from '../utils/adminTables.mjs';
 import { normalizeCatalogText as normalize } from '../utils/menuLogic.mjs';
+import { localStamp, minutesUntil, nextByTable, timeOf } from '../utils/reservationLogic.mjs';
 
 const LABEL = { Libre: 'Disponible', Ocupada: 'Ocupada', Cuenta: 'Pidió la cuenta', Reservada: 'Reservada', inactive: 'Inactiva' };
 const STATUS_TONE = { Libre: 'green', Ocupada: 'amber', Cuenta: 'red', Reservada: 'purple', inactive: 'neutral' };
@@ -27,11 +28,12 @@ function TableDrawing({ table }) {
     <SvgText x={model.x + model.width / 2} y={model.y + 48} fill={color} fontSize={24} fontFamily="Manrope-Medium, sans-serif" fontWeight="500" textAnchor="middle">{table.numero}</SvgText>
   </Svg>;
 }
-export default function TablesScreen() {
+export default function TablesScreen({ onNavigate }) {
   const { c } = useTheme();
   const { width } = useWindowDimensions();
   const phone = width < 680;
-  const { mesas, ubicaciones, loading, createMesa, updateMesa, deleteMesa, updateMesaEstado } = useAdmin();
+  const { mesas, ubicaciones, reservas = [], loading, createMesa, updateMesa, deleteMesa, updateMesaEstado } = useAdmin();
+  const nextRes = useMemo(() => nextByTable(reservas, localStamp()), [reservas]);
   const toast = useToast();
   const [query, setQuery] = useState(''), [filter, setFilter] = useState('all'), [zone, setZone] = useState('all');
   const [limit, setLimit] = useState(48);
@@ -112,6 +114,10 @@ export default function TablesScreen() {
                     </View>
                     <Status tone={STATUS_TONE[key]}>{LABEL[key] || table.estado}</Status>
                     <Text numberOfLines={1} style={[type.micro, { color: c.faint }]}>{orders ? `${orders} ${orders === 1 ? 'pedido activo' : 'pedidos activos'}` : key === 'Reservada' ? 'Apartada' : key === 'inactive' ? 'Fuera de servicio' : 'Sin pedidos'}</Text>
+                    {nextRes[table.id] ? (r => { const m = minutesUntil(r); return <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <CalendarClock size={12} color={m != null && m <= 30 ? c.purple : c.faint} />
+                      <Text numberOfLines={1} style={[type.micro, type.num, { color: m != null && m <= 30 ? c.purple : c.muted, fontWeight: m != null && m <= 30 ? '600' : '400', flexShrink: 1 }]}>Reserva {timeOf(r.fecha_hora)} · {r.personas}p</Text>
+                    </View>; })(nextRes[table.id]) : null}
                   </Press>
                   <Press accessibilityRole="button" accessibilityLabel={`${action[0]} · Mesa ${table.numero}`} onPress={action[2]} disabled={busy} scaleTo={0.96}
                     style={{ position: 'absolute', left: space.lg, right: space.lg, bottom: space.lg, height: 30, borderRadius: radius.sm, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: c.isDark ? c.surface : 'rgba(255,255,255,0.8)', borderWidth: 1, borderColor: c.line }}

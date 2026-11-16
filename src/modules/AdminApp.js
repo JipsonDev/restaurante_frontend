@@ -9,6 +9,7 @@ import Header from '../components/Header';
 import DashboardScreen from '../screens/DashboardScreen';
 import MenuScreen from '../screens/MenuScreen';
 import TablesScreen from '../screens/TablesScreen';
+import ReservationsScreen from '../screens/ReservationsScreen';
 import OrdersScreen from '../screens/OrdersScreen';
 import ExtrasScreen from '../screens/ExtrasScreen';
 import InventoryScreen from '../screens/InventoryScreen';
@@ -68,7 +69,8 @@ function ActiveScreen({ tab, setActiveTab }) {
     case 'reportes': return <ReportsScreen />;
     case 'configuracion': return <SettingsScreen />;
     case 'auditoria': return <AuditScreen />;
-    case 'mesas': return <TablesScreen />;
+    case 'mesas': return <TablesScreen onNavigate={setActiveTab} />;
+    case 'reservas': return <ReservationsScreen />;
     case 'pedidos': return <OrdersScreen onNavigate={setActiveTab} />;
     case 'caja': return <CashScreen />;
     default: return <DashboardScreen setActiveTab={setActiveTab} />;

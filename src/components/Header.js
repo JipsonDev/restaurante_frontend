@@ -3,6 +3,7 @@ import { Animated, Modal, Platform, Pressable, ScrollView, Text, TextInput, View
 import { AlertTriangle, ArrowRight, Bell, CalendarClock, ClipboardList, CornerDownLeft, Moon, Search, Sun, UtensilsCrossed, X } from 'lucide-react-native';
 import { useAdmin } from '../context/AdminContext';
 import { useTheme } from '../theme';
+import { dayOf, isLate, localStamp, minutesUntil, timeOf } from '../utils/reservationLogic.mjs';
 import { EASE_OUT, IconButton, Press, Status, font, money, radius, reduceMotion, space, type } from './admin/ui';
 import { NAV, navItem } from './admin/nav';
 import Logo from './Logo';
@@ -113,7 +114,7 @@ function Alerts({ open, onClose, items, onNavigate }) {
 }
 
 export default function Header({ activeTab, onNavigate }) {
-  const { pedidos, productos, mesas, inventario, syncStatus } = useAdmin();
+  const { pedidos, productos, mesas, inventario, reservas = [], syncStatus } = useAdmin();
   const { c, isDark, toggle } = useTheme();
   const { width } = useWindowDimensions();
   const compact = width < 1024;
@@ -134,14 +135,17 @@ export default function Header({ activeTab, onNavigate }) {
     const toCharge = pedidos.filter(p => OPEN(p) && (p.cuenta_solicitada_at || p.estado === 'ENTREGADO'));
     const slow = pedidos.filter(p => OPEN(p) && ['PENDIENTE', 'PREPARANDO'].includes(String(p.estado).toUpperCase()) && now - new Date(String(p.created_at).replace(' ', 'T')).getTime() > 20 * 60000);
     const lowStock = (inventario || []).filter(i => Number(i.stock_minimo) > 0 && Number(i.stock_disponible ?? i.stock) <= Number(i.stock_minimo));
-    const reserved = mesas.filter(m => m.estado === 'Reservada');
+    const busyTable = r => r.mesa_id != null && ['Ocupada', 'Cuenta'].includes(mesas.find(t => Number(t.id) === Number(r.mesa_id))?.estado);
+    const stamp = localStamp(), soon = reservas.filter(r => ['PENDIENTE', 'CONFIRMADA'].includes(r.estado) && dayOf(r.fecha_hora) === dayOf(stamp))
+      .filter(r => { const m = minutesUntil(r, stamp); return m != null && m <= 30 && m >= -60; });
     return [
       ...slow.map(p => ({ id: `w-${p.id}`, tone: 'red', icon: AlertTriangle, title: `${orderTarget(p)} lleva más de 20 min`, body: `Pedido #${p.id} · ${String(p.estado).toLowerCase()}`, target: 'pedidos' })),
+      ...soon.map(r => { const late = isLate(r, stamp), m = minutesUntil(r, stamp); return { id: `r-${r.id}`, tone: late ? 'red' : busyTable(r) ? 'amber' : 'neutral', icon: CalendarClock,
+        title: late ? `${r.cliente_nombre} lleva ${-m} min de retraso` : busyTable(r) ? `Mesa ${r.mesa_numero} ocupada · reserva en ${Math.max(m, 0)} min` : `${r.cliente_nombre} llega ${m > 0 ? `en ${m} min` : 'ahora'}`, body: busyTable(r) ? `${r.cliente_nombre} · ${timeOf(r.fecha_hora)} · ${r.personas} personas` : `Reserva ${timeOf(r.fecha_hora)} · ${r.personas} personas · ${r.mesa_id != null ? `mesa ${r.mesa_numero}` : 'sin mesa'}`, target: 'reservas' }; }),
       ...toCharge.map(p => ({ id: `c-${p.id}`, tone: 'amber', icon: ClipboardList, title: `${orderTarget(p)} por cobrar`, body: `${money(Number(p.total) - Number(p.abonado || 0))} pendientes`, target: 'caja' })),
       ...lowStock.map(i => ({ id: `s-${i.id}`, tone: 'amber', icon: AlertTriangle, title: `Stock bajo: ${i.nombre}`, body: `Quedan ${Number(i.stock_disponible ?? i.stock)} ${i.unidad || ''} (mínimo ${Number(i.stock_minimo)})`, target: 'inventario' })),
-      ...reserved.map(m => ({ id: `m-${m.id}`, tone: 'neutral', icon: CalendarClock, title: `Mesa ${m.numero} reservada`, body: `${m.ubicacion_nombre || 'Salón'} · ${m.capacidad} personas`, target: 'mesas' })),
     ];
-  }, [pedidos, productos, mesas, inventario]);
+  }, [pedidos, productos, mesas, inventario, reservas]);
 
   return <View style={{ height: compact ? 56 : 64, paddingHorizontal: compact ? 12 : 24, flexDirection: 'row', alignItems: 'center', gap: space.md, backgroundColor: c.surface, borderBottomWidth: 1, borderBottomColor: c.line }}>
     {compact ? <View style={{ flex: 1 }}><Logo width={104} dark={c.isDark} style={!c.isDark ? { tintColor: c.text } : undefined} /></View> : null}
