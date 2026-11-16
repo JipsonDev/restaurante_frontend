@@ -4,6 +4,7 @@ import { Check, CirclePlus, Edit3, MessageSquare, MinusCircle, Plus, Search, Sli
 import { useAdmin } from '../context/AdminContext';
 import { useTheme } from '../theme';
 import { MenuButton, MenuChip, MenuField, MenuModal, MenuNotice } from '../components/MenuUI';
+import { Button, DataTable, EmptyState, FadeIn, IconButton, PageHeader, SearchField, Segmented, Skeleton, Status, Switch as Toggle, Tag as Pill, space, type as typo, useToast } from '../components/admin/ui';
 import { adminNumber } from '../utils/adminNumbers.mjs';
 
 const TYPES = {
@@ -30,8 +31,10 @@ export default function ExtrasScreen() {
   const busyRef = useRef(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const toast = useToast();
+  React.useEffect(() => { if (notice) { toast.show(notice); setNotice(''); } }, [notice]);
   const compact = availableWidth < 760;
-  const money = value => `${configuracion?.simbolo_moneda || '$'}${Number(value || 0).toFixed(2)}`;
+  const money = value => `${configuracion?.simbolo_moneda || '$'}${Number(value || 0).toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const card = { backgroundColor: c.surface, borderColor: c.line, borderWidth: 1, borderRadius: 10, overflow: 'hidden' };
   const activeCount = extras.filter(e => Number(e.activo) === 1).length;
   const filtered = useMemo(() => extras.filter(e =>
@@ -71,57 +74,43 @@ export default function ExtrasScreen() {
     const Icon = meta.icon;
     return <View style={{ width: 36, height: 36, borderRadius: 9, backgroundColor: c[`${meta.tone}Soft`], alignItems: 'center', justifyContent: 'center' }}><Icon size={18} color={meta.tone === 'primary' ? c.primaryText : c[meta.tone]} /></View>;
   };
-  const actions = extra => <View style={[row, { gap: 7 }]}><MenuButton icon={Edit3} label={`Editar ${extra.nombre}`} onPress={() => edit(extra)} /><MenuButton icon={Trash2} label={`Eliminar ${extra.nombre}`} onPress={() => { setError(''); setDialog({ kind: 'delete', extra }); }} /></View>;
+  const actions = extra => <View style={[row, { gap: 2 }]}><IconButton icon={Edit3} label={`Editar ${extra.nombre}`} onPress={() => edit(extra)} /><IconButton icon={Trash2} tone="danger" label={`Eliminar ${extra.nombre}`} onPress={() => { setError(''); setDialog({ kind: 'delete', extra }); }} /></View>;
 
   return <View style={{ flex: 1 }} onLayout={e => setAvailableWidth(e.nativeEvent.layout.width)}>
-    <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 18, paddingBottom: 24 }}>
-      <View style={[row, { justifyContent: 'space-between', flexWrap: 'wrap', gap: 14 }]}>
-        <View style={{ gap: 6, flexShrink: 1 }}><Text style={{ color: c.primaryText, fontSize: 10, fontWeight: '700', letterSpacing: 1.4 }}>CATÁLOGO · PERSONALIZACIÓN</Text><Text accessibilityRole="header" style={{ color: c.text, fontSize: compact ? 26 : 30, fontWeight: '700', letterSpacing: -0.6 }}>Extras y preferencias</Text><Text style={{ color: c.muted, fontSize: 13, lineHeight: 20 }}>Cada pedido, al gusto del cliente.</Text></View>
-        <MenuButton primary icon={Plus} onPress={() => edit()}>Nuevo extra</MenuButton>
+    <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: space.x3 }}>
+      <PageHeader title="Extras" description={`${extras.length} opciones para personalizar pedidos · ${activeCount} activas. El precio se suma por unidad.`}
+        actions={<Button variant="primary" icon={Plus} onPress={() => edit()}>Nuevo extra</Button>} />
+      <View style={{ flexDirection: compact ? 'column' : 'row', gap: space.md, marginBottom: space.lg, alignItems: compact ? 'stretch' : 'center' }}>
+        <SearchField value={query} onChangeText={setQuery} placeholder="Buscar por nombre o categoría…" style={compact ? null : { flex: 1, minWidth: 260, maxWidth: 380 }} />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}><Segmented size="sm" value={type} onChange={setType} accessibilityLabel="Tipo"
+          options={[{ value: 'ALL', label: 'Todos', count: extras.length }, ...Object.entries(TYPES).map(([key, meta]) => ({ value: key, label: meta.plural, count: extras.filter(e => e.tipo === key).length }))]} /></ScrollView>
+        <Segmented size="sm" value={status} onChange={setStatus} accessibilityLabel="Estado" options={[{ value: 'ALL', label: 'Todos' }, { value: '1', label: 'Activos' }, { value: '0', label: 'Inactivos' }]} />
       </View>
-
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-        {Object.entries(TYPES).map(([key, meta]) => {
-          const Icon = meta.icon; const selected = type === key;
-          const tone = meta.tone === 'primary' ? c.primaryText : c[meta.tone];
-          return <Pressable key={key} accessibilityRole="button" accessibilityLabel={`Filtrar ${meta.plural}`} accessibilityState={{ selected }} onPress={() => setType(selected ? 'ALL' : key)} style={({ hovered }) => [card, { flexGrow: 1, flexBasis: compact ? '45%' : '22%', padding: 13, gap: 12, borderColor: selected ? c.primary : c.line, backgroundColor: selected ? c.primarySoft : hovered ? c.surfaceAlt : c.surface }]}>
-            <View style={[row, { justifyContent: 'space-between' }]}><Icon size={20} color={tone} /><Text style={{ color: c.text, fontSize: 22, fontWeight: '600', fontVariant: ['tabular-nums'] }}>{extras.filter(e => e.tipo === key).length}</Text></View>
-            <Text style={{ color: c.muted, fontSize: 12, fontWeight: '600' }}>{meta.plural}</Text>
-          </Pressable>;
-        })}
-      </View>
-      {!!notice && <View style={[row, { backgroundColor: c.greenSoft, borderRadius: 8, padding: 10, gap: 9 }]}><Check size={16} color={c.green} /><Text accessibilityLiveRegion="polite" style={{ color: c.green, flex: 1, fontSize: 12 }}>{notice}</Text><MenuButton icon={X} label="Cerrar aviso" onPress={() => setNotice('')} /></View>}
-
-      <View style={card}>
-        <View style={{ padding: compact ? 14 : 18, gap: 14 }}>
-          <View style={[row, { gap: 10, flexWrap: 'wrap' }]}>
-            <View style={[row, { flexGrow: 1, flexBasis: 270, minWidth: 0, paddingHorizontal: 12, gap: 9, borderWidth: 1, borderColor: c.line, backgroundColor: c.surfaceAlt, borderRadius: 8 }]}><Search size={18} color={c.muted} /><TextInput accessibilityLabel="Buscar extras" placeholder="Buscar por nombre o categoría…" placeholderTextColor={c.muted} value={query} onChangeText={setQuery} style={{ flex: 1, minWidth: 0, minHeight: 44, color: c.text, fontSize: 13 }} />{!!query && <Pressable accessibilityRole="button" accessibilityLabel="Limpiar búsqueda" onPress={() => setQuery('')} style={{ padding: 8 }}><X size={16} color={c.muted} /></Pressable>}</View>
-            <View style={[row, { gap: 6 }]}>{[['ALL', 'Todos'], ['1', 'Activos'], ['0', 'Inactivos']].map(([key, label]) => <MenuChip key={key} selected={status === key} onPress={() => setStatus(key)}>{label}</MenuChip>)}</View>
-          </View>
-          <View style={[row, { justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }]}><Text style={{ color: c.muted, fontSize: 12 }}>{filtered.length} de {extras.length} opciones · {activeCount} activas</Text>{type !== 'ALL' ? <MenuButton icon={X} onPress={() => setType('ALL')}>{TYPES[type].plural}</MenuButton> : <Text style={{ color: c.faint, fontSize: 11 }}>El precio se suma por unidad</Text>}</View>
-        </View>
-        {!compact && <View style={[row, { paddingHorizontal: 18, paddingVertical: 11, borderTopWidth: 1, borderBottomWidth: 1, borderColor: c.line, backgroundColor: c.surfaceAlt }]}>{[['OPCIÓN', 2.2], ['TIPO', 1.2], ['CATEGORÍA', 1], ['PRECIO', 0.7], ['ESTADO', 0.8]].map(([label, flex]) => <Text key={label} style={{ flex, color: c.faint, fontSize: 10, fontWeight: '600', letterSpacing: 0.6 }}>{label}</Text>)}<Text style={{ width: 91, textAlign: 'right', color: c.faint, fontSize: 10, fontWeight: '600' }}>ACCIONES</Text></View>}
-        {loading && !extras.length ? <ActivityIndicator style={{ padding: 30 }} color={c.primary} /> : filtered.map((extra, index) => <View key={extra.id} style={{ paddingHorizontal: compact ? 14 : 18, paddingVertical: 13, borderTopWidth: index || compact ? 1 : 0, borderTopColor: c.line }}>
-          {compact ? <View style={{ gap: 12 }}><View style={[row, { gap: 10 }]}>{typeMark(extra)}<View style={{ flex: 1, gap: 4 }}><Text style={{ color: c.text, fontSize: 14, fontWeight: '600' }}>{extra.nombre}</Text><Text style={{ color: c.muted, fontSize: 11 }}>{TYPES[extra.tipo]?.label} · {extra.categoria || 'Sin categoría'}</Text></View><Text style={{ color: Number(extra.precio) > 0 ? c.primaryText : c.muted, fontWeight: '700', fontSize: 14 }}>{Number(extra.precio) > 0 ? `+${money(extra.precio)}` : 'Sin cargo'}</Text></View><View style={[row, { justifyContent: 'space-between' }]}>{statePill(Number(extra.activo) === 1)}{actions(extra)}</View></View> : <View style={row}>
-            <View style={[row, { flex: 2.2, gap: 10, paddingRight: 12 }]}>{typeMark(extra)}<Text style={{ flex: 1, color: c.text, fontSize: 13, fontWeight: '600' }}>{extra.nombre}</Text></View>
-            <Text style={{ flex: 1.2, color: c.muted, fontSize: 12 }}>{TYPES[extra.tipo]?.label || extra.tipo}</Text>
-            <Text style={{ flex: 1, color: c.muted, fontSize: 12, paddingRight: 10 }}>{extra.categoria || 'Sin categoría'}</Text>
-            <Text style={{ flex: 0.7, color: Number(extra.precio) > 0 ? c.primaryText : c.muted, fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] }}>{Number(extra.precio) > 0 ? `+${money(extra.precio)}` : 'Sin cargo'}</Text>
-            <View style={{ flex: 0.8 }}>{statePill(Number(extra.activo) === 1)}</View>{actions(extra)}
-          </View>}
-        </View>)}
-        {!loading && !filtered.length && <View style={{ padding: 36, alignItems: 'center', gap: 12 }}><SlidersHorizontal size={30} color={c.muted} /><Text style={{ color: c.text, fontSize: 16, fontWeight: '600' }}>{extras.length ? 'No hay coincidencias' : 'Personaliza tu primer pedido'}</Text><Text style={{ color: c.muted, fontSize: 12, textAlign: 'center' }}>{extras.length ? 'Prueba con otro nombre, tipo o estado.' : 'Crea adicionales e indicaciones para que el equipo pueda seleccionarlos.'}</Text><MenuButton onPress={extras.length ? () => { setQuery(''); setStatus('ALL'); setType('ALL'); } : () => edit()}>{extras.length ? 'Limpiar filtros' : 'Crear extra'}</MenuButton></View>}
-      </View>
+      {loading && !extras.length ? <View style={{ gap: space.sm }}>{[0, 1, 2, 3].map(i => <Skeleton key={i} height={52} radius={10} />)}</View>
+        : <FadeIn trigger={`${type}-${status}`} duration={180} offset={4}><DataTable selectedKey={dialog?.extra?.id} rows={filtered} onRowPress={extra => edit(extra)} compact
+          columns={compact ? [
+            { key: 'n', label: 'Opción', flex: 1, render: e => <View style={{ gap: 4 }}><Text style={[typo.body, { color: c.text, fontWeight: '600' }]}>{e.nombre}</Text><Text style={[typo.micro, { color: c.faint }]}>{TYPES[e.tipo]?.label} · {e.categoria || 'Sin categoría'}</Text></View> },
+            { key: 'p', label: 'Precio', width: 92, align: 'right', render: e => <Text style={[typo.body, typo.num, { color: Number(e.precio) > 0 ? c.text : c.faint, fontWeight: '600' }]}>{Number(e.precio) > 0 ? `+${money(e.precio)}` : 'Sin cargo'}</Text> },
+          ] : [
+            { key: 'n', label: 'Opción', flex: 2.4, sortValue: e => e.nombre, render: e => <Text numberOfLines={1} style={[typo.body, { color: c.text, fontWeight: '600' }]}>{e.nombre}</Text> },
+            { key: 't', label: 'Tipo', flex: 1.4, sortValue: e => e.tipo, render: e => <Pill tone="neutral">{TYPES[e.tipo]?.label || e.tipo}</Pill> },
+            { key: 'c', label: 'Categoría', flex: 1.2, sortValue: e => e.categoria || '', render: e => <Text numberOfLines={1} style={[typo.small, { color: c.muted }]}>{e.categoria || 'Sin categoría'}</Text> },
+            { key: 'p', label: 'Precio', width: 100, sortValue: e => Number(e.precio), align: 'right', render: e => <Text style={[typo.body, typo.num, { color: Number(e.precio) > 0 ? c.text : c.faint, fontWeight: '600' }]}>{Number(e.precio) > 0 ? `+${money(e.precio)}` : 'Sin cargo'}</Text> },
+            { key: 's', label: 'Estado', width: 100, render: e => <Status tone={Number(e.activo) === 1 ? 'green' : 'neutral'}>{Number(e.activo) === 1 ? 'Activo' : 'Inactivo'}</Status> },
+            { key: 'a', label: '', width: 84, actions: true, align: 'right', render: e => actions(e) },
+          ]}
+          empty={<EmptyState icon={SlidersHorizontal} title={extras.length ? 'No hay coincidencias' : 'Personaliza tu primer pedido'} description={extras.length ? 'Prueba con otro nombre, tipo o estado.' : 'Crea adicionales e indicaciones para que el equipo pueda seleccionarlos.'}
+            action={<Button onPress={extras.length ? () => { setQuery(''); setStatus('ALL'); setType('ALL'); } : () => edit()}>{extras.length ? 'Quitar filtros' : 'Crear extra'}</Button>} />} /></FadeIn>}
     </ScrollView>
 
     <MenuModal visible={!!dialog} title={dialog?.kind === 'delete' ? 'Eliminar extra' : dialog?.extra ? 'Editar extra' : 'Nuevo extra'} subtitle={dialog?.kind === 'delete' ? dialog.extra.nombre : 'Define cómo aparecerá esta opción al tomar pedidos.'} close={close} busy={busy} maxWidth={620} footer={<View style={[row, { justifyContent: 'flex-end', gap: 8 }]}><MenuButton disabled={busy} onPress={close}>Cancelar</MenuButton><MenuButton primary={dialog?.kind !== 'delete'} danger={dialog?.kind === 'delete'} busy={busy} onPress={submit}>{dialog?.kind === 'delete' ? 'Eliminar definitivamente' : 'Guardar extra'}</MenuButton></View>}>
       {!!error && <MenuNotice danger>{error}</MenuNotice>}
-      {dialog?.kind === 'delete' ? <MenuNotice>Esta acción elimina permanentemente la opción. Puedes desactivarla desde Editar si quieres conservarla para usarla después.</MenuNotice> : <>
+      {dialog?.kind === 'delete' ? <MenuNotice>Si solo quieres ocultarla al tomar pedidos, desactívala desde Editar.</MenuNotice> : <>
         <MenuField label="Nombre del extra" value={form.nombre} onChangeText={v => change('nombre', v)} maxLength={120} editable={!busy} placeholder="Ej. Shot de espresso" />
-        <View style={{ gap: 9 }}><Text style={{ color: c.text, fontSize: 12, fontWeight: '600' }}>Tipo de opción</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{Object.entries(TYPES).map(([key, meta]) => <MenuButton key={key} icon={meta.icon} disabled={busy} onPress={() => change('tipo', key)} style={form.tipo === key ? { borderColor: c.primary, backgroundColor: c.primarySoft } : null}>{meta.label}</MenuButton>)}</View><Text style={{ color: c.muted, fontSize: 12, lineHeight: 18 }}>{TYPES[form.tipo]?.hint}</Text></View>
+        <View style={{ gap: 9 }}><Text style={{ color: c.text, fontSize: 12, fontWeight: '600' }}>Tipo de opción</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{Object.entries(TYPES).map(([key, meta]) => <MenuButton key={key} icon={meta.icon} disabled={busy} onPress={() => change('tipo', key)} style={form.tipo === key ? { backgroundColor: c.primarySoft, borderColor: c.primary } : null}>{meta.label}</MenuButton>)}</View><Text style={{ color: c.muted, fontSize: 12, lineHeight: 18 }}>{TYPES[form.tipo]?.hint}</Text></View>
         <View style={{ flexDirection: compact ? 'column' : 'row', gap: 14 }}><MenuField containerStyle={{ flex: 1 }} label="Precio adicional" hint="Usa 0 para una opción sin cargo." value={form.precio} onChangeText={v => change('precio', v)} editable={!busy} keyboardType="decimal-pad" placeholder="0.00" /><MenuField containerStyle={{ flex: 1 }} label="Categoría" hint="Agrupa opciones: Café, Comida, Bebidas…" value={form.categoria} onChangeText={v => change('categoria', v)} maxLength={80} editable={!busy} placeholder="Opcional" /></View>
-        <View style={[row, { padding: 14, backgroundColor: c.surfaceAlt, borderRadius: 8, gap: 12 }]}><View style={{ flex: 1, gap: 5 }}><Text style={{ color: c.text, fontSize: 13, fontWeight: '600' }}>Disponible para pedidos</Text><Text style={{ color: c.muted, fontSize: 12, lineHeight: 18 }}>Desactívalo para ocultarlo de la selección de extras.</Text></View><Switch accessibilityLabel="Extra activo" value={form.activo} disabled={busy} onValueChange={v => change('activo', v)} trackColor={{ false: c.line, true: c.green }} /></View>
-        <View style={[row, { borderWidth: 1, borderColor: c.line, borderRadius: 8, padding: 14, gap: 10 }]}><Tag size={19} color={c.primaryText} /><View style={{ flex: 1 }}><Text style={{ color: c.faint, fontSize: 10, marginBottom: 5 }}>VISTA PREVIA</Text><Text style={{ color: c.text, fontSize: 14, fontWeight: '600' }}>{form.nombre.trim() || 'Nombre del extra'}</Text></View><Text style={{ color: c.primaryText, fontWeight: '600' }}>{Number.isFinite(Number(form.precio.replace(',', '.'))) && Number(form.precio.replace(',', '.')) >= 0 ? Number(form.precio.replace(',', '.')) === 0 ? 'Sin cargo' : `+${money(form.precio.replace(',', '.'))}` : '—'}</Text></View>
+        <View style={[row, { padding: 14, backgroundColor: c.surfaceAlt, borderRadius: 8, gap: 12 }]}><View style={{ flex: 1, gap: 5 }}><Text style={{ color: c.text, fontSize: 13, fontWeight: '600' }}>Disponible para pedidos</Text><Text style={{ color: c.muted, fontSize: 12, lineHeight: 18 }}>Desactívalo para ocultarlo de la selección de extras.</Text></View><Toggle label="Extra activo" showLabel={false} value={form.activo} disabled={busy} onValueChange={v => change('activo', v)} /></View>
+        <View style={[row, { borderWidth: 1, borderColor: c.line, borderRadius: 8, padding: 14, gap: 10 }]}><Tag size={19} color={c.primaryText} /><View style={{ flex: 1 }}><Text style={[typo.micro, { color: c.faint, marginBottom: 4 }]}>Vista previa</Text><Text style={{ color: c.text, fontSize: 14, fontWeight: '600' }}>{form.nombre.trim() || 'Nombre del extra'}</Text></View><Text style={{ color: c.primaryText, fontWeight: '600' }}>{Number.isFinite(Number(form.precio.replace(',', '.'))) && Number(form.precio.replace(',', '.')) >= 0 ? Number(form.precio.replace(',', '.')) === 0 ? 'Sin cargo' : `+${money(form.precio.replace(',', '.'))}` : '—'}</Text></View>
       </>}
     </MenuModal>
   </View>;

@@ -176,6 +176,34 @@ export function AdminProvider({ children }) {
     })();
   }, [refreshAll]);
 
+  // Sincronización en segundo plano: el tiempo real cubre los cambios al instante;
+  // además se refresca todo cada 45 s (15 s sin conexión) y al volver a la pestaña.
+  const syncingRef = useRef(false);
+  const lastSyncRef = useRef(Date.now());
+  const syncStatusRef = useRef(syncStatus);
+  syncStatusRef.current = syncStatus;
+  useEffect(() => {
+    const isHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    const sync = async (force = false) => {
+      if (syncingRef.current || isHidden()) return;
+      if (!force && Date.now() - lastSyncRef.current < 10000) return;
+      syncingRef.current = true;
+      try { await refreshAll(); lastSyncRef.current = Date.now(); } catch { /* se reintenta en el siguiente ciclo */ } finally { syncingRef.current = false; }
+    };
+    const tick = setInterval(() => {
+      const every = syncStatusRef.current === 'connected' ? 45000 : 15000;
+      if (Date.now() - lastSyncRef.current >= every) sync(true);
+    }, 5000);
+    const onVisible = () => { if (!isHidden()) sync(); };
+    if (typeof document !== 'undefined' && document.addEventListener) document.addEventListener('visibilitychange', onVisible);
+    if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('focus', onVisible);
+    return () => {
+      clearInterval(tick);
+      if (typeof document !== 'undefined' && document.removeEventListener) document.removeEventListener('visibilitychange', onVisible);
+      if (typeof window !== 'undefined' && window.removeEventListener) window.removeEventListener('focus', onVisible);
+    };
+  }, [refreshAll]);
+
   useEffect(() => {
     const socket = getRealtimeSocket();
     const handleConnect = () => { setSyncStatus('connected'); refreshAll(); };
