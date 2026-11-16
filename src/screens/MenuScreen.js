@@ -1,744 +1,262 @@
-﻿import React, { useMemo, useState } from 'react';
-import {
-  View, Text, ScrollView, TouchableOpacity, TextInput, Modal,
-  Image, Alert, ActivityIndicator, Switch, Platform, useWindowDimensions,
-} from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Image, Platform, Pressable, ScrollView, Switch, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { Archive, ArrowDownUp, BadgePercent, Check, ChefHat, Edit3, Eye, EyeOff, ImagePlus, LayoutGrid, List, Package, Plus, Search, Trash2, Utensils, X } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
-import {
-  BadgePercent, Camera, Edit3, ImagePlus, Plus, Search, Trash2, Utensils, X,
-} from 'lucide-react-native';
 import axios from 'axios';
+import { Alert } from '../utils/adminAlert';
 import { assetUrl, BASE_URL } from '../context/AuthContext';
 import { useAdmin } from '../context/AdminContext';
-import { useTheme, softShadow } from '../theme';
-import { BOTTOM_INSET } from '../utils/safeArea';
+import { useTheme } from '../theme';
+import { MenuButton, MenuChip, MenuField, MenuModal, MenuNotice, MenuSection } from '../components/MenuUI';
+import { normalizeCatalogText as normalize, productPayload, productStatus, productStock, recipeEstimate, stockMode } from '../utils/menuLogic.mjs';
 
-const EMPTY_FORM = {
-  id: null,
-  nombre: '',
-  descripcion: '',
-  precio: '',
-  stock: '10',
-  categoria_id: 1,
-  imagen_url: null,
-  disponible: true,
-  imageAsset: null,
-  inventario_item_id: null,
-  receta: [],
-};
+const money = value => `$${Number(value || 0).toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const EMPTY = { id: null, nombre: '', descripcion: '', precio: '', stock: '0', categoria_id: null, disponible: true, imagen_url: null, imageAsset: null, inventario_item_id: null, receta: [], mode: 'own' };
+const EMPTY_CATEGORY = { id: null, nombre: '', icono: '', activo: true };
+const STATUS = { available: 'Disponible', empty: 'Agotado', hidden: 'Oculto' };
+const MODES = { own: 'Stock propio', linked: 'Insumo vinculado', recipe: 'Por receta' };
+const PAGE_SIZE = 24;
+const errorText = error => error?.response?.data?.message || error?.response?.data?.error || error?.message || 'No se pudo completar la operación.';
+const promo = product => normalize(`${product.nombre} ${product.categoria_nombre} ${product.descripcion}`).includes('promo');
 
-const money = (value) => `$${Number(value || 0).toFixed(2)}`;
-const normalizeText = (value) =>
-  String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLowerCase();
-const isPromotionProduct = (producto) => {
-  const category = normalizeText(producto.categoria_nombre || '');
-  const name = normalizeText(producto.nombre);
-  const description = normalizeText(producto.descripcion);
-  return category.includes('promo') || name.includes('promo') || description.includes('promo');
-};
+function ProductImage({ uri, height = 132, style }) {
+  const { c } = useTheme();
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [uri]);
+  return <View style={[{ height, backgroundColor: c.surfaceAlt, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }, style]}>
+    {uri && !failed ? <Image source={{ uri: assetUrl(uri) }} resizeMode="cover" onError={() => setFailed(true)} style={{ width: '100%', height: '100%' }} /> : <View style={{ alignItems: 'center', gap: 8 }}><Utensils size={28} color={c.faint} /><Text style={{ color: c.muted, fontSize: 10 }}>{failed ? 'Imagen no disponible' : 'Sin fotografía'}</Text></View>}
+  </View>;
+}
+function StatusBadge({ product }) {
+  const { c } = useTheme();
+  const status = productStatus(product);
+  const color = { available: c.green, empty: c.amber, hidden: c.muted }[status];
+  const backgroundColor = { available: c.greenSoft, empty: c.amberSoft, hidden: c.soft }[status];
+  return <View style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 5, paddingHorizontal: 8, backgroundColor, borderRadius: 12 }}><View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: color }} /><Text style={{ color, fontSize: 10, fontWeight: '600' }}>{STATUS[status]}</Text></View>;
+}
 
 export default function MenuScreen() {
   const { c } = useTheme();
   const { width } = useWindowDimensions();
-  const compact = width < 680;
-  // Minimo 2 columnas en movil, 3 en tablet, 4 en escritorio.
-  const cardWidth = compact ? '48%' : width < 1180 ? '31.5%' : '23.5%';
-  const {
-    productos, categorias, inventario, createProducto, updateProducto,
-    deleteProducto, fetchProductos, createCategoria, updateCategoria, deleteCategoria,
-  } = useAdmin();
-
-  const [query, setQuery] = useState('');
-  const [category, setCategory] = useState('todos');
-  const [modalOpen, setModalOpen] = useState(false);
-  const [categoryModal, setCategoryModal] = useState(false);
-  const [categoryForm, setCategoryForm] = useState({ id: null, nombre: '', icono: '', activo: true });
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
-
-  const allCategoryOptions = categorias.length
-    ? categorias
-    : [{ id: 1, nombre: 'Entradas' }, { id: 2, nombre: 'Platos fuertes' }, { id: 6, nombre: 'Bebidas' }];
-  const activeCategoryOptions = allCategoryOptions.filter((c) => Number(c.activo) !== 0);
-  const categoryOptions = activeCategoryOptions.length ? activeCategoryOptions : allCategoryOptions;
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return productos.filter((p) => {
-      const matchesQ = !q
-        || p.nombre?.toLowerCase().includes(q)
-        || p.categoria_nombre?.toLowerCase().includes(q);
-      const matchesCategory = category === 'todos' || Number(p.categoria_id) === Number(category);
-      return matchesQ && matchesCategory;
-    });
-  }, [productos, query, category]);
-
-  const openNew = () => {
-    setForm({ ...EMPTY_FORM, categoria_id: categoryOptions[0]?.id || 1 });
-    setModalOpen(true);
+  const phone = width < 680;
+  const { productos, categorias, inventario, loading, createProducto, updateProducto, deleteProducto, createCategoria, updateCategoria, deleteCategoria } = useAdmin();
+  const [query, setQuery] = useState(''), [category, setCategory] = useState('all'), [status, setStatus] = useState('all');
+  const [sort, setSort] = useState('name'), [layout, setLayout] = useState('grid'), [limit, setLimit] = useState(PAGE_SIZE);
+  const [contentWidth, setContentWidth] = useState(800);
+  const [modalOpen, setModalOpen] = useState(false), [formTab, setFormTab] = useState('info');
+  const [form, setForm] = useState(EMPTY), [formError, setFormError] = useState(''), [saving, setSaving] = useState(false), [loadingEdit, setLoadingEdit] = useState(null);
+  const [categoryModal, setCategoryModal] = useState(false), [categoryForm, setCategoryForm] = useState(EMPTY_CATEGORY), [categorySaving, setCategorySaving] = useState(false), [categoryError, setCategoryError] = useState('');
+  const [ingredientQuery, setIngredientQuery] = useState(''), [pending, setPending] = useState([]), [notice, setNotice] = useState('');
+  const [confirmation, setConfirmation] = useState(null);
+  const busy = useRef(false), categoryBusy = useRef(false), toggleBusy = useRef(new Set()), version = useRef(0), baseline = useRef(''), categoryBaseline = useRef(JSON.stringify(EMPTY_CATEGORY));
+  useEffect(() => () => { version.current += 1; }, []);
+  useEffect(() => setLimit(PAGE_SIZE), [query, category, status, sort]);
+  useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(''), 5000); return () => clearTimeout(timer); }, [notice]);
+  const activeCategories = categorias.filter(item => Number(item.activo) !== 0);
+  const activeInventory = inventario.filter(item => Number(item.activo) !== 0);
+  const counts = useMemo(() => productos.reduce((acc, product) => { acc[productStatus(product)] += 1; return acc; }, { available: 0, empty: 0, hidden: 0 }), [productos]);
+  const filtered = useMemo(() => productos.filter(product => normalize(`${product.nombre} ${product.descripcion} ${product.categoria_nombre} ${product.id}`).includes(normalize(query)) && (category === 'all' || Number(product.categoria_id) === Number(category)) && (status === 'all' || productStatus(product) === status)).sort((a, b) => sort === 'price' ? Number(a.precio) - Number(b.precio) || Number(a.id) - Number(b.id) : sort === 'stock' ? productStock(a) - productStock(b) || Number(a.id) - Number(b.id) : String(a.nombre).localeCompare(String(b.nombre), 'es', { sensitivity: 'base' }) || Number(a.id) - Number(b.id)), [productos, query, category, status, sort]);
+  const columns = contentWidth >= 1040 ? 4 : contentWidth >= 750 ? 3 : contentWidth >= 500 ? 2 : 1;
+  const cardWidth = Math.max(0, Math.floor((contentWidth - (columns - 1) * 14 - 2) / columns));
+  const estimate = useMemo(() => recipeEstimate(form, inventario), [form, inventario]);
+  const formCategory = categorias.find(item => Number(item.id) === Number(form.categoria_id));
+  const categoryCount = item => productos.filter(product => Number(product.categoria_id) === Number(item.id)).length;
+  const confirmAction = (title, message, action, actionLabel = 'Descartar') => {
+    setConfirmation({ title, message, action, actionLabel });
   };
-
-  const openNewPromotion = () => {
-    const promoCategory = categoryOptions.find((item) => normalizeText(item.nombre).includes('promo'));
-    setForm({
-      ...EMPTY_FORM,
-      nombre: 'Promo ',
-      descripcion: 'Promocion creada desde admin. Agrega aqui los productos o insumos de la receta.',
-      categoria_id: promoCategory?.id || categoryOptions[0]?.id || 1,
-      stock: '10',
-    });
-    setModalOpen(true);
+  const setField = (key, value) => { setForm(previous => ({ ...previous, [key]: value })); setFormError(''); };
+  const beginForm = next => { setForm(next); baseline.current = JSON.stringify(next); setFormError(''); setFormTab('info'); setIngredientQuery(''); setModalOpen(true); };
+  const closeForm = () => {
+    if (busy.current) return;
+    if (JSON.stringify(form) !== baseline.current) confirmAction('Cambios sin guardar', '¿Descartar los cambios de este producto?', () => setModalOpen(false));
+    else setModalOpen(false);
   };
-
-  const openEdit = async (p) => {
-    let receta = [];
+  const openNew = (promotion = false) => {
+    version.current += 1;
+    setLoadingEdit(null);
+    const selected = activeCategories.find(item => Number(item.id) === Number(category));
+    const promoCategory = activeCategories.find(item => normalize(item.nombre).includes('promo'));
+    beginForm({ ...EMPTY, nombre: promotion ? 'Promo ' : '', categoria_id: (promotion ? promoCategory : selected)?.id || activeCategories[0]?.id || null });
+  };
+  const openEdit = async product => {
+    const token = ++version.current;
+    setLoadingEdit(product.id);
     try {
-      const res = await axios.get(`${BASE_URL}/productos/${p.id}/receta`);
-      receta = res.data || [];
-    } catch {
-      receta = [];
-    }
-    setForm({
-      id: p.id,
-      nombre: p.nombre || '',
-      descripcion: p.descripcion || '',
-      precio: String(p.precio ?? ''),
-      stock: String(p.stock ?? 0),
-      categoria_id: p.categoria_id || categoryOptions[0]?.id || 1,
-      inventario_item_id: p.inventario_item_id || null,
-      imagen_url: p.imagen_url || null,
-      disponible: Number(p.disponible) === 1,
-      imageAsset: null,
-      receta: receta.map((item) => ({
-        inventario_item_id: item.inventario_item_id,
-        cantidad: String(item.cantidad ?? 1),
-        unidad: item.unidad || item.inventario_unidad || '',
-      })),
-    });
-    setModalOpen(true);
+      const { data } = await axios.get(`${BASE_URL}/productos/${product.id}/receta`, { timeout: 10000 });
+      if (!Array.isArray(data)) throw new Error('No se pudo leer la receta.');
+      if (version.current !== token) return;
+      const mode = data.some(line => Number(line.activo) !== 0) ? 'recipe' : product.inventario_item_id ? 'linked' : 'own';
+      beginForm({ ...EMPTY, ...product, precio: String(product.precio ?? ''), stock: String(product.stock ?? 0), descripcion: product.descripcion || '', disponible: Number(product.disponible) === 1, imageAsset: null, originalStock: Number(product.stock || 0), originalMode: mode, originalCategory: product.categoria_id, reserved: Number(product.stock_reservado || 0), mode,
+        receta: data.filter(line => Number(line.activo) !== 0).map(line => ({ inventario_item_id: line.inventario_item_id, cantidad: String(line.cantidad), unidad: line.inventario_unidad || line.unidad || '' })) });
+    } catch (error) { if (version.current === token) Alert.alert('No se pudo abrir el producto', errorText(error)); }
+    finally { if (version.current === token) setLoadingEdit(null); }
   };
-
-  const openCategory = (item = null) => {
-    setCategoryForm(item ? {
-      id: item.id,
-      nombre: item.nombre || '',
-      icono: item.icono || '',
-      activo: Number(item.activo) !== 0,
-    } : { id: null, nombre: '', icono: '', activo: true });
-    setCategoryModal(true);
-  };
-
-  const saveCategory = async () => {
-    if (!categoryForm.nombre.trim()) {
-      Alert.alert('Falta nombre', 'Escribe el nombre de la categoria.');
-      return;
-    }
-    try {
-      const payload = {
-        nombre: categoryForm.nombre.trim(),
-        icono: categoryForm.icono.trim() || null,
-        activo: categoryForm.activo ? 1 : 0,
-      };
-      if (categoryForm.id) await updateCategoria(categoryForm.id, payload);
-      else await createCategoria(payload);
-      setCategoryForm({ id: null, nombre: '', icono: '', activo: true });
-    } catch (error) {
-      Alert.alert('No se pudo guardar', error.response?.data?.message || error.response?.data?.error || 'Revisa el backend.');
-    }
-  };
-
-  const confirmDeleteCategory = (item) => {
-    confirmDanger('Eliminar categoria', `Eliminar permanentemente "${item.nombre}"? Solo se permite si no tiene productos.`, async () => {
-      await deleteCategoria(item.id);
-      if (Number(category) === Number(item.id)) setCategory('todos');
-    }, 'Eliminar');
-  };
-
-  const setField = (key, value) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  };
-
-  const showError = (title, error, fallback = 'Revisa el backend.') => {
-    Alert.alert(title, error?.response?.data?.message || error?.response?.data?.error || error?.message || fallback);
-  };
-
-  const confirmDanger = (title, message, action, label = 'Eliminar') => {
-    const run = async () => {
-      try {
-        await action();
-      } catch (error) {
-        showError('No se pudo completar', error);
-      }
-    };
-
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      if (window.confirm(`${title}\n\n${message}`)) run();
-      return;
-    }
-
-    Alert.alert(title, message, [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: label, style: 'destructive', onPress: run },
-    ]);
-  };
-
-  const addRecipeItem = (item) => {
-    setForm((prev) => {
-      if ((prev.receta || []).some((r) => Number(r.inventario_item_id) === Number(item.id))) return prev;
-      return {
-        ...prev,
-        receta: [...(prev.receta || []), {
-          inventario_item_id: item.id,
-          cantidad: '1',
-          unidad: item.unidad || '',
-        }],
-      };
-    });
-  };
-
-  const updateRecipeItem = (inventarioItemId, key, value) => {
-    setForm((prev) => ({
-      ...prev,
-      receta: (prev.receta || []).map((item) => (
-        Number(item.inventario_item_id) === Number(inventarioItemId) ? { ...item, [key]: value } : item
-      )),
-    }));
-  };
-
-  const removeRecipeItem = (inventarioItemId) => {
-    setForm((prev) => ({
-      ...prev,
-      receta: (prev.receta || []).filter((item) => Number(item.inventario_item_id) !== Number(inventarioItemId)),
-    }));
-  };
-
-  const pickImage = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Permiso requerido', 'Activa el permiso de galeria para seleccionar imagenes.');
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.85,
-    });
-
-    if (!result.canceled && result.assets?.[0]) {
-      const asset = result.assets[0];
-      setForm((prev) => ({
-        ...prev,
-        imageAsset: asset,
-        imagen_url: asset.uri,
-      }));
-    }
-  };
-
-  const uploadImage = async (imageAsset) => {
-    const data = new FormData();
-    const name = imageAsset.fileName || `producto-${Date.now()}.jpg`;
-    const type = imageAsset.mimeType || 'image/jpeg';
-
-    if (Platform.OS === 'web') {
-      const response = await fetch(imageAsset.uri);
-      const blob = await response.blob();
-      data.append('image', blob, name);
-    } else {
-      data.append('image', {
-        uri: imageAsset.uri,
-        name,
-        type,
-      });
-    }
-
-    const res = await axios.post(`${BASE_URL}/productos/upload`, data, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-    return res.data.imagen_url;
-  };
-
   const saveProduct = async () => {
-    if (!form.nombre.trim()) {
-      Alert.alert('Falta nombre', 'Escribe el nombre del producto.');
-      return;
-    }
-    if (!form.precio || Number.isNaN(Number(form.precio))) {
-      Alert.alert('Precio invalido', 'Escribe un precio numerico.');
-      return;
-    }
-
-    setSaving(true);
+    if (busy.current) return;
+    busy.current = true; setSaving(true); setFormError('');
     try {
-      let imageUrl = form.imagen_url;
+      const payload = productPayload(form, categorias, inventario);
       if (form.imageAsset) {
-        imageUrl = await uploadImage(form.imageAsset);
+        const asset = form.imageAsset, data = new FormData();
+        if (Platform.OS === 'web') { const response = await fetch(asset.uri); data.append('image', await response.blob(), asset.fileName || 'producto.jpg'); }
+        else data.append('image', { uri: asset.uri, name: asset.fileName || 'producto.jpg', type: asset.mimeType || 'image/jpeg' });
+        const uploaded = await axios.post(`${BASE_URL}/productos/upload`, data, { headers: { 'Content-Type': 'multipart/form-data' } });
+        payload.imagen_url = uploaded.data.imagen_url;
+        setForm(previous => ({ ...previous, imagen_url: payload.imagen_url, imageAsset: null }));
       }
-
-      const payload = {
-        nombre: form.nombre.trim(),
-        descripcion: form.descripcion.trim() || null,
-        precio: Number(form.precio),
-        stock: Number(form.stock || 0),
-        categoria_id: Number(form.categoria_id),
-        inventario_item_id: form.inventario_item_id ? Number(form.inventario_item_id) : null,
-        imagen_url: imageUrl,
-        disponible: form.disponible ? 1 : 0,
-      };
-
-      let saved = null;
-      if (form.id) {
-        saved = await updateProducto(form.id, payload);
-      } else {
-        saved = await createProducto(payload);
-      }
-      const productId = form.id || saved?.id;
-      if (productId) {
-        await axios.put(`${BASE_URL}/productos/${productId}/receta`, {
-          items: (form.receta || []).map((item) => ({
-            inventario_item_id: Number(item.inventario_item_id),
-            cantidad: Number(item.cantidad || 0),
-            unidad: item.unidad || null,
-          })),
-        });
-      }
-
-      setModalOpen(false);
-      setForm(EMPTY_FORM);
-    } catch (error) {
-      Alert.alert('No se pudo guardar', error.response?.data?.message || error.response?.data?.error || 'Revisa el backend.');
-    } finally {
-      setSaving(false);
-    }
+      if (form.id) await updateProducto(form.id, payload); else await createProducto(payload);
+      setModalOpen(false); setNotice(form.id ? 'Producto actualizado.' : 'Producto creado.');
+    } catch (error) { setFormError(errorText(error)); }
+    finally { busy.current = false; setSaving(false); }
   };
-
-  const confirmDelete = (p) => {
-    confirmDanger('Eliminar producto', `Eliminar permanentemente "${p.nombre}"? Solo se permite si no aparece en pedidos historicos.`, () => deleteProducto(p.id), 'Eliminar');
+  const pickImage = async () => {
+    if (saving) return;
+    try {
+      if (Platform.OS !== 'web') { const permission = await ImagePicker.requestMediaLibraryPermissionsAsync(); if (!permission.granted) throw new Error('Se necesita acceso a la galería para seleccionar una imagen.'); }
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [4, 3], quality: 0.85 });
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+      if (asset.fileSize > 5 * 1024 * 1024) throw new Error('La imagen debe pesar como máximo 5 MB.');
+      setForm(previous => ({ ...previous, imageAsset: asset, imagen_url: asset.uri }));
+    } catch (error) { setFormError(errorText(error)); }
   };
-
-  const toggleDisponibilidad = async (p) => {
-    await updateProducto(p.id, { disponible: Number(p.disponible) === 1 ? 0 : 1 });
-    await fetchProductos();
+  const toggleProduct = async product => {
+    if (toggleBusy.current.has(product.id)) return;
+    if (Number(product.disponible) !== 1 && product.categoria_activa != null && Number(product.categoria_activa) === 0) { Alert.alert('Categoría inactiva', 'Activa su categoría antes de publicar el producto.'); return; }
+    toggleBusy.current.add(product.id); setPending([...toggleBusy.current]);
+    try { await updateProducto(product.id, { disponible: Number(product.disponible) === 1 ? 0 : 1 }); setNotice(Number(product.disponible) === 1 ? 'Producto oculto. Se conserva su historial.' : 'Producto publicado. La venta depende de sus existencias.'); }
+    catch (error) { Alert.alert('No se pudo cambiar la publicación', errorText(error)); }
+    finally { toggleBusy.current.delete(product.id); setPending([...toggleBusy.current]); }
   };
-
-  const imagePreview = form.imagen_url
-    ? (form.imageAsset ? form.imagen_url : assetUrl(form.imagen_url))
-    : null;
-
-  return (
-    <View className="flex-1">
-      <View style={{ backgroundColor: c.surface, borderRadius: 18, borderWidth: 1, borderColor: c.line, padding: 16, marginBottom: 16, ...softShadow(c) }}>
-        <View className={compact ? 'flex-col' : 'flex-row items-center'}>
-          <View
-            className={`flex-row items-center rounded-lg px-4 flex-1 ${compact ? 'mb-3' : 'mr-3'}`}
-            style={{ backgroundColor: c.soft, borderWidth: 1, borderColor: c.line }}
-          >
-            <Search size={18} color={c.faint} />
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Buscar producto, bebida o categoria"
-              placeholderTextColor={c.faint}
-              className="flex-1 py-3 ml-2 text-sm"
-              style={{ color: c.text }}
-            />
-          </View>
-          <View className="flex-row" style={{ flexWrap: compact ? 'wrap' : 'nowrap', gap: compact ? 8 : 0 }}>
-            <TouchableOpacity
-              onPress={openNewPromotion}
-              className="flex-row items-center rounded-lg px-4 py-3"
-              style={{ backgroundColor: c.amberSoft, marginRight: compact ? 0 : 8 }}
-            >
-              <BadgePercent size={18} color={c.amber} />
-              <Text className="font-bold ml-2" style={{ color: c.amber }}>Nueva promocion</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => openCategory()}
-              className="flex-row items-center rounded-lg px-4 py-3"
-              style={{ backgroundColor: c.primarySoft, marginRight: compact ? 0 : 8 }}
-            >
-              <Utensils size={18} color={c.primaryText} />
-              <Text className="font-bold ml-2" style={{ color: c.primaryText }}>Categorias</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={openNew}
-              className="flex-row items-center rounded-lg px-4 py-3 flex-1 justify-center"
-              style={{ backgroundColor: c.primary }}
-            >
-              <Plus size={18} color={c.onPrimary} />
-              <Text className="font-bold ml-2" style={{ color: c.onPrimary }}>Nuevo producto</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mt-3">
-          <View className="flex-row">
-            <TouchableOpacity
-              onPress={() => setCategory('todos')}
-              className="px-4 py-2 rounded-lg mr-2"
-              style={{ backgroundColor: category === 'todos' ? c.primary : c.soft }}
-            >
-              <Text className="font-semibold text-sm" style={{ color: category === 'todos' ? c.onPrimary : c.muted }}>Todos</Text>
-            </TouchableOpacity>
-            {categoryOptions.map((cat) => {
-              const active = Number(category) === Number(cat.id);
-              return (
-                <TouchableOpacity
-                  key={cat.id}
-                  onPress={() => setCategory(cat.id)}
-                  className="px-4 py-2 rounded-lg mr-2"
-                  style={{ backgroundColor: active ? c.primary : c.soft }}
-                >
-                  <Text className="font-semibold text-sm" style={{ color: active ? c.onPrimary : c.muted }}>
-                    {cat.nombre}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </ScrollView>
+  const deleteCurrent = () => confirmAction('Eliminar producto', `Se eliminará “${form.nombre}” solo si no tiene pedidos históricos. Puedes ocultarlo para conservarlo.`, async () => {
+    if (busy.current) return; busy.current = true; setSaving(true);
+    try { await deleteProducto(form.id); setModalOpen(false); setNotice('Producto eliminado.'); }
+    catch (error) { setFormError(errorText(error)); }
+    finally { busy.current = false; setSaving(false); }
+  }, 'Eliminar');
+  const startCategory = (item = EMPTY_CATEGORY) => {
+    const next = { id: item.id, nombre: item.nombre || '', icono: item.icono || '', activo: Number(item.activo) !== 0 };
+    setCategoryForm(next); categoryBaseline.current = JSON.stringify(next); setCategoryError(''); setCategoryModal(true);
+  };
+  const closeCategories = () => {
+    if (categoryBusy.current) return;
+    if (JSON.stringify(categoryForm) !== categoryBaseline.current) confirmAction('Cambios sin guardar', '¿Descartar los cambios de esta categoría?', () => setCategoryModal(false)); else setCategoryModal(false);
+  };
+  const saveCategory = async () => {
+    if (categoryBusy.current) return;
+    categoryBusy.current = true; setCategorySaving(true); setCategoryError('');
+    try {
+      const nombre = categoryForm.nombre.trim();
+      if (!nombre) throw new Error('Escribe el nombre de la categoría.');
+      if (categoryForm.activo && categorias.some(item => Number(item.id) !== Number(categoryForm.id) && Number(item.activo) !== 0 && normalize(item.nombre) === normalize(nombre))) throw new Error('Ya existe una categoría activa con ese nombre.');
+      const payload = { nombre, icono: categoryForm.icono.trim() || null, activo: categoryForm.activo ? 1 : 0 };
+      if (categoryForm.id) await updateCategoria(categoryForm.id, payload); else await createCategoria(payload);
+      startCategory(); setNotice('Categoría guardada.');
+    } catch (error) { setCategoryError(errorText(error)); }
+    finally { categoryBusy.current = false; setCategorySaving(false); }
+  };
+  const removeCategory = item => confirmAction('Eliminar categoría', `¿Eliminar “${item.nombre}”? Debe estar vacía.`, async () => {
+    if (categoryBusy.current) return; categoryBusy.current = true; setCategorySaving(true);
+    try { await deleteCategoria(item.id); if (Number(category) === Number(item.id)) setCategory('all'); if (Number(categoryForm.id) === Number(item.id)) startCategory(); setNotice('Categoría eliminada.'); }
+    catch (error) { setCategoryError(errorText(error)); }
+    finally { categoryBusy.current = false; setCategorySaving(false); }
+  }, 'Eliminar');
+  const ingredientResults = activeInventory.filter(item => normalize(item.nombre).includes(normalize(ingredientQuery)));
+  const updateRecipe = (id, cantidad) => setForm(previous => ({ ...previous, receta: previous.receta.map(line => Number(line.inventario_item_id) === Number(id) ? { ...line, cantidad } : line) }));
+  const addIngredient = item => setForm(previous => previous.receta.some(line => Number(line.inventario_item_id) === Number(item.id)) ? previous : { ...previous, receta: [...previous.receta, { inventario_item_id: item.id, cantidad: '1', unidad: item.unidad || '' }] });
+  const resetFilters = () => { setQuery(''); setCategory('all'); setStatus('all'); };
+  return <View style={{ flex: 1, gap: 14 }}>
+    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 24, gap: 18 }}>
+      <View style={{ flexDirection: phone ? 'column' : 'row', alignItems: phone ? 'stretch' : 'center', gap: 14 }}>
+        <View style={{ flex: 1 }}><Text style={{ color: c.primaryText, fontSize: 10, fontWeight: '700', letterSpacing: 1.5 }}>CATÁLOGO DEL RESTAURANTE</Text><Text style={{ color: c.text, fontSize: 28, fontWeight: '700', marginTop: 7 }}>Menú y productos</Text><Text style={{ color: c.muted, fontSize: 12, marginTop: 6 }}>Administra lo que vendes, cómo se presenta y sus existencias.</Text></View>
+        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}><MenuButton icon={Utensils} onPress={() => startCategory()}>Categorías</MenuButton><MenuButton icon={Plus} primary onPress={() => openNew()}>Nuevo producto</MenuButton></View>
       </View>
-
-      <ScrollView showsVerticalScrollIndicator={false} className="flex-1" contentContainerStyle={{ paddingBottom: BOTTOM_INSET + 16 }}>
-        <View className="flex-row flex-wrap" style={{ gap: 12 }}>
-          {filtered.map((p) => {
-            const displayStock = p.inventario_item_id ? p.inventario_stock : p.stock;
-            const available = Number(p.disponible) === 1 && Number(displayStock || 0) > 0;
-            const promo = isPromotionProduct(p);
-            return (
-              <View key={p.id} className="rounded-lg overflow-hidden" style={{ width: cardWidth, backgroundColor: c.surface, borderWidth: 1, borderColor: c.line, ...softShadow(c) }}>
-                <View className="h-36" style={{ backgroundColor: c.soft }}>
-                  {p.imagen_url ? (
-                    <Image source={{ uri: assetUrl(p.imagen_url) }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                  ) : (
-                    <View className="flex-1 items-center justify-center" style={{ backgroundColor: c.amberSoft }}>
-                      <Utensils size={34} color={c.amber} />
-                      <Text className="font-semibold text-xs mt-2" style={{ color: c.amber }}>Sin imagen</Text>
-                    </View>
-                  )}
-                  {promo && (
-                    <View className="absolute top-2 left-2 px-3 py-1 rounded-full flex-row items-center" style={{ backgroundColor: c.amberSoft }}>
-                      <BadgePercent size={13} color={c.amber} />
-                      <Text className="text-xs font-extrabold ml-1" style={{ color: c.amber }}>Promo</Text>
-                    </View>
-                  )}
-                </View>
-                <View className="p-4">
-                  <View className="flex-row items-start justify-between">
-                    <View className="flex-1 pr-3">
-                      <Text className="text-base font-extrabold" style={{ color: c.text }} numberOfLines={1}>{p.nombre}</Text>
-                      <Text className="text-xs mt-0.5" style={{ color: c.faint }}>{p.categoria_nombre || 'Sin categoria'}</Text>
-                    </View>
-                    <Text className="font-extrabold" style={{ color: c.primaryText }}>{money(p.precio)}</Text>
-                  </View>
-
-                  <Text className="text-xs mt-2 h-8" style={{ color: c.muted }} numberOfLines={2}>
-                    {p.descripcion || 'Sin descripcion.'}
-                  </Text>
-
-                  <View className="flex-row items-center justify-between mt-3">
-                    <TouchableOpacity
-                      onPress={() => toggleDisponibilidad(p)}
-                      className="px-3 py-1 rounded-full"
-                      style={{ backgroundColor: available ? c.greenSoft : c.redSoft }}
-                    >
-                      <Text className="text-xs font-bold" style={{ color: available ? c.green : c.red }}>
-                        {available ? `Disponible (${displayStock})` : 'Agotado/Oculto'}
-                      </Text>
-                    </TouchableOpacity>
-                    <View className="flex-row">
-                      <TouchableOpacity onPress={() => openEdit(p)} className="w-9 h-9 rounded-lg items-center justify-center mr-2" style={{ backgroundColor: c.soft }}>
-                        <Edit3 size={16} color={c.muted} />
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={() => confirmDelete(p)} className="w-9 h-9 rounded-lg items-center justify-center" style={{ backgroundColor: c.redSoft }}>
-                        <Trash2 size={16} color={c.red} />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                </View>
+      {!!notice && <View accessibilityRole="status" style={{ flexDirection: 'row', alignItems: 'center', gap: 9, backgroundColor: c.greenSoft, borderRadius: 8, padding: 12 }}><Check color={c.green} size={17} /><Text style={{ flex: 1, color: c.green, fontSize: 12 }}>{notice}</Text><MenuButton icon={X} label="Cerrar aviso" onPress={() => setNotice('')} /></View>}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+        {[[productos.length, 'Productos', 'all', Package, c.primaryText, c.primarySoft], [counts.available, 'Disponibles', 'available', Eye, c.green, c.greenSoft], [counts.empty, 'Agotados', 'empty', Archive, c.amber, c.amberSoft], [counts.hidden, 'Ocultos', 'hidden', EyeOff, c.muted, c.soft]].map(([count, label, key, Icon, color, bg]) => <Pressable key={key} accessibilityRole="button" accessibilityLabel={`Filtrar ${label}`} accessibilityState={{ selected: status === key }} onPress={() => setStatus(key)} style={{ width: phone ? '46%' : '22%', flexGrow: 1, padding: 14, borderRadius: 10, backgroundColor: c.surface, borderWidth: 1, borderColor: status === key ? c.primary : c.line, flexDirection: 'row', alignItems: 'center', gap: 11 }}><View style={{ width: 34, height: 34, borderRadius: 9, backgroundColor: bg, justifyContent: 'center', alignItems: 'center' }}><Icon size={18} color={color} /></View><View><Text style={{ color: c.text, fontWeight: '700', fontSize: 23 }}>{count}</Text><Text style={{ color: c.muted, fontSize: 11, marginTop: 3 }}>{label}</Text></View></Pressable>)}
+      </View>
+      <View style={{ backgroundColor: c.surface, borderWidth: 1, borderColor: c.line, borderRadius: 10, padding: 14, gap: 14 }}>
+        <View style={{ flexDirection: phone ? 'column' : 'row', gap: 10 }}>
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.surfaceAlt, borderWidth: 1, borderColor: c.line, borderRadius: 8, paddingHorizontal: 12 }}><Search color={c.muted} size={18} /><TextInput accessibilityLabel="Buscar productos" value={query} onChangeText={setQuery} placeholder="Buscar por nombre, descripción, categoría o código…" placeholderTextColor={c.muted} style={{ flex: 1, minWidth: 0, minHeight: 44, color: c.text, fontSize: 12 }} />{!!query && <MenuButton icon={X} label="Limpiar búsqueda" onPress={() => setQuery('')} />}</View>
+          <View style={{ flexDirection: 'row', gap: 8 }}><MenuButton icon={ArrowDownUp} onPress={() => setSort(previous => ({ name: 'price', price: 'stock', stock: 'name' })[previous])}>{`Orden: ${{ name: 'A–Z', price: 'menor precio', stock: 'menor stock' }[sort]}`}</MenuButton><MenuButton icon={layout === 'grid' ? List : LayoutGrid} label={layout === 'grid' ? 'Ver como lista' : 'Ver como tarjetas'} onPress={() => setLayout(previous => previous === 'grid' ? 'list' : 'grid')} /><MenuButton icon={BadgePercent} label="Crear promoción" onPress={() => openNew(true)} /></View>
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}><MenuChip selected={category === 'all'} onPress={() => setCategory('all')}>Todas las categorías</MenuChip>{categorias.map(item => <MenuChip key={item.id} selected={Number(category) === Number(item.id)} onPress={() => setCategory(item.id)}>{`${item.nombre} · ${categoryCount(item)}${Number(item.activo) === 0 ? ' · Inactiva' : ''}`}</MenuChip>)}</ScrollView>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}><Text style={{ color: c.muted, fontSize: 11 }}>{filtered.length} resultados · {status === 'all' ? 'Todos los estados' : STATUS[status]}</Text>{(query || category !== 'all' || status !== 'all') && <MenuButton onPress={resetFilters}>Limpiar filtros</MenuButton>}</View>
+      </View>
+      {loading && !productos.length ? <ActivityIndicator color={c.primary} /> : !filtered.length ? <View style={{ padding: 30, alignItems: 'center', gap: 12, backgroundColor: c.surface, borderRadius: 10, borderWidth: 1, borderColor: c.line }}><Search size={30} color={c.muted} /><Text style={{ color: c.text, fontSize: 17, fontWeight: '600' }}>{productos.length ? 'No encontramos coincidencias' : 'Tu menú empieza aquí'}</Text><Text style={{ color: c.muted, fontSize: 12, textAlign: 'center' }}>{productos.length ? 'Prueba otra búsqueda o limpia los filtros.' : 'Crea una categoría y agrega tu primer producto.'}</Text><MenuButton onPress={productos.length ? resetFilters : () => openNew()}>{productos.length ? 'Mostrar todos' : 'Agregar producto'}</MenuButton></View> : <View onLayout={event => setContentWidth(event.nativeEvent.layout.width)} style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 14 }}>
+        {filtered.slice(0, limit).map(product => {
+          const asRow = layout === 'list', mode = stockMode(product);
+          return <View key={product.id} style={{ width: asRow ? '100%' : cardWidth, backgroundColor: c.surface, borderWidth: 1, borderColor: c.line, borderRadius: 10, overflow: 'hidden' }}>
+            <View style={{ flexDirection: asRow && !phone ? 'row' : 'column' }}>
+              <ProductImage uri={product.imagen_url} height={asRow ? 90 : 138} style={asRow && !phone ? { width: 116, height: 'auto', minHeight: 112 } : undefined} />
+              <View style={{ padding: 15, flex: 1, minWidth: 0, gap: 11 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}><View style={{ flex: 1, minWidth: 0 }}><Text style={{ color: c.muted, fontSize: 10, marginBottom: 5 }}>{product.categoria_nombre || 'Sin categoría'} · #{product.id}</Text><Text style={{ color: c.text, fontSize: 16, lineHeight: 22, fontWeight: '600' }} numberOfLines={2}>{product.nombre}</Text></View><Text style={{ color: c.text, fontSize: 18, fontWeight: '700', marginTop: 16 }}>{money(product.precio)}</Text></View>
+                <Text numberOfLines={2} style={{ color: c.muted, fontSize: 12, lineHeight: 18, minHeight: asRow ? undefined : 36 }}>{product.descripcion || 'Agrega una descripción para presentar mejor este producto.'}</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 7 }}><StatusBadge product={product} /><Text style={{ color: c.muted, fontSize: 11 }}>{productStock(product)} para vender</Text>{promo(product) && <Text style={{ color: c.purple || c.primaryText, fontSize: 10, fontWeight: '600' }}>Promoción</Text>}</View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderTopWidth: 1, borderTopColor: c.line, paddingTop: 10 }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flex: 1 }}><ChefHat size={14} color={c.muted} /><Text style={{ color: c.muted, fontSize: 10 }}>{MODES[mode]}</Text></View><MenuButton icon={Edit3} label={`Editar ${product.nombre}`} busy={loadingEdit === product.id} onPress={() => openEdit(product)}>Editar</MenuButton><MenuButton icon={Number(product.disponible) === 1 ? EyeOff : Eye} label={`${Number(product.disponible) === 1 ? 'Ocultar' : 'Publicar'} ${product.nombre}`} busy={pending.includes(product.id)} onPress={() => toggleProduct(product)} /></View>
               </View>
-            );
+            </View>
+          </View>;
+        })}
+      </View>}
+      {filtered.length > limit && <MenuButton onPress={() => setLimit(previous => previous + PAGE_SIZE)}>{`Ver más productos (${filtered.length - limit} restantes)`}</MenuButton>}
+    </ScrollView>
+
+    <MenuModal visible={modalOpen} title={form.id ? 'Editar producto' : 'Nuevo producto'} subtitle="Información clara, precio y control de existencias en un solo lugar." close={closeForm}
+      tabs={<View style={{ paddingHorizontal: 18, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: c.line }}><ScrollView horizontal contentContainerStyle={{ gap: 8 }}>{[['info','Información'],['stock','Existencias y receta'],['image','Fotografía']].map(([key,label]) => <MenuChip key={key} selected={formTab === key} onPress={() => setFormTab(key)}>{label}</MenuChip>)}</ScrollView></View>}
+      footer={<>{!!formError && <MenuNotice danger>{formError}</MenuNotice>}<View style={{ flexDirection: 'row', gap: 8, justifyContent: 'flex-end' }}><MenuButton disabled={saving} onPress={closeForm}>Cancelar</MenuButton><MenuButton primary icon={Check} busy={saving} onPress={saveProduct}>{form.id ? 'Guardar cambios' : 'Crear producto'}</MenuButton></View></>}>
+      {formTab === 'info' && <MenuSection title="Información del producto" subtitle="El nombre, la descripción y el precio aparecen en el menú del mesero.">
+        <MenuField label="Nombre del producto" maxLength={80} value={form.nombre} onChangeText={value => setField('nombre', value)} placeholder="Ej. Cappuccino" editable={!saving} />
+        <MenuField label="Descripción" multiline maxLength={1500} value={form.descripcion} onChangeText={value => setField('descripcion', value)} placeholder="Ingredientes principales y presentación" editable={!saving} />
+        <MenuField label="Precio de venta" value={form.precio} onChangeText={value => setField('precio', value)} keyboardType="decimal-pad" placeholder="0,00" hint="Admite hasta dos decimales. Se conservan los precios de pedidos ya confirmados." editable={!saving} />
+        {form.precio.trim() && Number(form.precio.replace(',', '.')) === 0 ? <MenuNotice>Precio cero: este producto se registrará sin importe. Verifica que sea intencional.</MenuNotice> : null}
+        <View style={{ gap: 8 }}><Text style={{ color: c.text, fontSize: 12, fontWeight: '600' }}>Categoría</Text>{!categorias.length && <MenuNotice>No hay categorías registradas. Crea una desde Categorías antes de guardar el producto.</MenuNotice>}<View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>{categorias.filter(item => Number(item.activo) !== 0 || Number(item.id) === Number(form.categoria_id)).map(item => <MenuChip key={item.id} selected={Number(form.categoria_id) === Number(item.id)} onPress={() => !saving && Number(item.activo) !== 0 && setField('categoria_id', item.id)}>{`${item.nombre}${Number(item.activo) === 0 ? ' · Inactiva' : ''}`}</MenuChip>)}</View></View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, padding: 14, borderWidth: 1, borderColor: c.line, backgroundColor: c.surfaceAlt, borderRadius: 8 }}><View style={{ flex: 1 }}><Text style={{ color: c.text, fontSize: 13, fontWeight: '600' }}>Publicado en el menú</Text><Text style={{ color: c.muted, fontSize: 11, lineHeight: 17, marginTop: 5 }}>Ocultarlo impide nuevas ventas y conserva su historial. Agotado significa que está publicado, pero sin existencias.</Text></View><Switch accessibilityLabel="Publicado en el menú" disabled={saving} value={form.disponible} onValueChange={value => value && Number(formCategory?.activo) === 0 ? setFormError('Activa la categoría o selecciona otra antes de publicar.') : setField('disponible', value)} trackColor={{ false: c.line, true: c.primary }} thumbColor={c.surface} /></View>
+        {form.id && <View style={{ alignItems: 'flex-start', paddingTop: 6 }}><MenuButton danger icon={Trash2} disabled={saving} onPress={deleteCurrent}>Eliminar producto sin historial</MenuButton></View>}
+      </MenuSection>}
+      {formTab === 'stock' && <MenuSection title="Control de existencias" subtitle="Elige una fuente. El sistema reserva unidades al confirmar el pedido y descuenta el consumo al preparar.">
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{Object.entries(MODES).map(([key,label]) => <MenuChip key={key} selected={form.mode === key} onPress={() => !saving && setField('mode', key)}>{label}</MenuChip>)}</View>
+        {form.mode === 'own' ? <>
+          <MenuField label="Existencias físicas" value={form.stock} onChangeText={value => setField('stock', value)} keyboardType="number-pad" placeholder="0" hint="Unidades enteras del producto terminado. Los productos nuevos comienzan en cero." editable={!saving} />
+          {!!form.id && <MenuNotice>{`${form.reserved || 0} unidades reservadas en pedidos. Si no modificas las existencias, el guardado respeta las ventas realizadas mientras editabas.`}</MenuNotice>}
+        </> : <>
+          <MenuNotice>{form.mode === 'linked' ? 'Cada unidad vendida consume 1 unidad del insumo elegido. Para fracciones o varios ingredientes, usa una receta.' : 'Las cantidades corresponden a UNA unidad vendida y se expresan en la unidad del inventario. Ejemplo: 20 g de un insumo almacenado en kg se ingresan como 0,020 kg.'}</MenuNotice>
+          <MenuField label="Buscar insumo" value={ingredientQuery} onChangeText={setIngredientQuery} placeholder="Nombre del insumo" />
+          <View style={{ maxHeight: 160, borderWidth: 1, borderColor: c.line, borderRadius: 8 }}><ScrollView keyboardShouldPersistTaps="handled">{ingredientResults.map(item => {
+            const selected = form.mode === 'linked' ? Number(item.id) === Number(form.inventario_item_id) : form.receta.some(line => Number(line.inventario_item_id) === Number(item.id));
+            return <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={`${form.mode === 'linked' ? 'Vincular' : 'Agregar'} ${item.nombre}`} accessibilityState={{ selected }} disabled={saving} onPress={() => form.mode === 'linked' ? setField('inventario_item_id', item.id) : addIngredient(item)} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, backgroundColor: selected ? c.primarySoft : c.surface, borderBottomWidth: 1, borderBottomColor: c.line }}><View style={{ flex: 1 }}><Text style={{ color: c.text, fontSize: 12, fontWeight: '600' }}>{item.nombre}</Text><Text style={{ color: c.muted, fontSize: 11, marginTop: 4 }}>{Math.max(0, Number(item.stock || 0) - Number(item.stock_reservado || 0)).toLocaleString('es-EC')} {item.unidad} libres</Text></View>{selected ? <Check size={17} color={c.primaryText} /> : <Plus size={17} color={c.muted} />}</Pressable>;
+          })}{!ingredientResults.length && <Text style={{ color: c.muted, padding: 18, fontSize: 12 }}>{activeInventory.length ? 'No hay coincidencias.' : 'No hay insumos activos. Regístralos primero en Inventario.'}</Text>}</ScrollView></View>
+          {form.mode === 'recipe' && form.receta.map(line => {
+            const item = inventario.find(item => Number(item.id) === Number(line.inventario_item_id));
+            return <View key={line.inventario_item_id} style={{ padding: 12, borderRadius: 8, borderWidth: 1, borderColor: c.line, gap: 10 }}><Text style={{ color: c.text, fontSize: 13, fontWeight: '600' }}>{item?.nombre || `Insumo no disponible #${line.inventario_item_id}`}</Text><View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><MenuField containerStyle={{ flex: 1 }} label={`Cantidad de ${item?.nombre || 'insumo'}`} value={line.cantidad} keyboardType="decimal-pad" onChangeText={value => updateRecipe(line.inventario_item_id, value)} editable={!saving} /><Text style={{ color: c.muted, fontSize: 12, paddingTop: 18 }}>{item?.unidad || line.unidad}</Text><MenuButton icon={Trash2} danger label={`Quitar ${item?.nombre || 'insumo'} de receta`} disabled={saving} onPress={() => setForm(previous => ({ ...previous, receta: previous.receta.filter(row => row.inventario_item_id !== line.inventario_item_id) }))} /></View></View>;
           })}
-          {!filtered.length && (
-            <View className="rounded-lg p-10 flex-1 items-center" style={{ backgroundColor: c.surface, borderWidth: 1, borderColor: c.line }}>
-              <Utensils size={36} color={c.faint} />
-              <Text className="font-bold mt-3" style={{ color: c.muted }}>No hay productos con ese filtro.</Text>
-            </View>
-          )}
-        </View>
-      </ScrollView>
+          {estimate && <View style={{ backgroundColor: c.surfaceAlt, padding: 14, borderRadius: 8, gap: 7 }}><Text style={{ color: c.text, fontSize: 14, fontWeight: '600' }}>{estimate.portions} unidades elaborables ahora</Text><Text style={{ color: c.muted, fontSize: 12 }}>Costo de insumos por unidad: {estimate.completeCost ? money(estimate.cost) : 'incompleto; revisa los costos del inventario'}.</Text><Text style={{ color: c.muted, fontSize: 11 }}>Estimación de materiales; no incluye personal, impuestos ni otros gastos.</Text>{estimate.completeCost && Number(form.precio.replace(',', '.')) > 0 && estimate.cost >= Number(form.precio.replace(',', '.')) && <MenuNotice>El costo de insumos alcanza o supera el precio de venta.</MenuNotice>}</View>}
+        </>}
+        {form.id && form.originalMode !== form.mode && <MenuNotice>El cambio se aplica a los próximos pedidos. Las reservas ya confirmadas conservan sus insumos originales.</MenuNotice>}
+      </MenuSection>}
+      {formTab === 'image' && <MenuSection title="Fotografía del producto" subtitle="Usa una imagen horizontal con buena luz. Tamaño máximo: 5 MB.">
+        <View style={{ alignSelf: 'center', width: '100%', maxWidth: 400, aspectRatio: 4 / 3, borderRadius: 10, overflow: 'hidden', backgroundColor: c.surfaceAlt, justifyContent: 'center', alignItems: 'center' }}>{form.imagen_url ? <Image source={{ uri: form.imageAsset ? form.imagen_url : assetUrl(form.imagen_url) }} style={{ width: '100%', height: '100%' }} resizeMode="cover" /> : <ImagePlus size={44} color={c.muted} />}</View>
+        <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'center' }}><MenuButton icon={ImagePlus} disabled={saving} onPress={pickImage}>{form.imagen_url ? 'Cambiar fotografía' : 'Seleccionar fotografía'}</MenuButton>{!!form.imagen_url && <MenuButton icon={Trash2} danger disabled={saving} label="Quitar fotografía" onPress={() => setForm(previous => ({ ...previous, imagen_url: null, imageAsset: null }))} />}</View>
+      </MenuSection>}
+    </MenuModal>
 
-      <Modal visible={categoryModal} animationType="fade" transparent onRequestClose={() => setCategoryModal(false)}>
-        <View className="flex-1 bg-black/40 items-center justify-center px-4">
-          <View className="bg-white rounded-lg w-full max-w-2xl max-h-[88%] overflow-hidden">
-            <View className="flex-row items-center justify-between px-5 py-4 border-b border-slate-100">
-              <Text className="text-lg font-extrabold text-slate-800">Categorias del menu</Text>
-              <TouchableOpacity onPress={() => setCategoryModal(false)} className="p-1">
-                <X size={22} color="#64748b" />
-              </TouchableOpacity>
-            </View>
-            <ScrollView className="p-5" contentContainerStyle={{ paddingBottom: BOTTOM_INSET + 12 }}>
-              <View className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-4">
-                <Text className="text-slate-600 font-semibold text-sm mb-1">Nombre</Text>
-                <TextInput
-                  value={categoryForm.nombre}
-                  onChangeText={(v) => setCategoryForm((p) => ({ ...p, nombre: v }))}
-                  placeholder="Ej. Bebidas frias"
-                  placeholderTextColor="#94a3b8"
-                  className="bg-white border border-slate-200 rounded-lg px-4 py-3 text-slate-800 mb-3"
-                />
-                <Text className="text-slate-600 font-semibold text-sm mb-1">Icono o clave</Text>
-                <TextInput
-                  value={categoryForm.icono}
-                  onChangeText={(v) => setCategoryForm((p) => ({ ...p, icono: v }))}
-                  placeholder="bebida, cafe, postre..."
-                  placeholderTextColor="#94a3b8"
-                  className="bg-white border border-slate-200 rounded-lg px-4 py-3 text-slate-800 mb-3"
-                />
-                <View className="flex-row items-center justify-between mb-4">
-                  <Text className="text-slate-700 font-bold">Categoria activa</Text>
-                  <Switch value={categoryForm.activo} onValueChange={(v) => setCategoryForm((p) => ({ ...p, activo: v }))} />
-                </View>
-                <View className="flex-row">
-                  <TouchableOpacity onPress={() => setCategoryForm({ id: null, nombre: '', icono: '', activo: true })} className="px-4 py-3 rounded-lg bg-white border border-slate-200 mr-2">
-                    <Text className="text-slate-600 font-bold">Limpiar</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={saveCategory} className="px-4 py-3 rounded-lg bg-blue-600 flex-1 items-center">
-                    <Text className="text-white font-bold">{categoryForm.id ? 'Actualizar categoria' : 'Crear categoria'}</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {allCategoryOptions.map((item) => (
-                <View key={item.id} className="flex-row items-center py-3 border-b border-slate-100">
-                  <View className="w-10 h-10 rounded-lg bg-amber-50 items-center justify-center mr-3">
-                    <Utensils size={17} color="#2563EB" />
-                  </View>
-                  <View className="flex-1">
-                    <Text className="text-slate-900 font-bold">{item.nombre}</Text>
-                    <Text className="text-slate-400 text-xs">{item.icono || 'Sin icono'} - {Number(item.activo) !== 0 ? 'Activa' : 'Inactiva'}</Text>
-                  </View>
-                  <TouchableOpacity onPress={() => openCategory(item)} className="w-9 h-9 rounded-lg bg-slate-50 items-center justify-center mr-2">
-                    <Edit3 size={16} color="#64748b" />
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => confirmDeleteCategory(item)} className="w-9 h-9 rounded-lg bg-rose-50 items-center justify-center">
-                    <Trash2 size={16} color="#e11d48" />
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={modalOpen} animationType="fade" transparent onRequestClose={() => setModalOpen(false)}>
-        <View className="flex-1 bg-black/40 items-center justify-center px-4">
-          <View className="bg-white rounded-lg w-full max-w-3xl max-h-[92%] overflow-hidden">
-            <View className="flex-row items-center justify-between px-5 py-4 border-b border-slate-100">
-              <Text className="text-lg font-extrabold text-slate-800">
-                {form.id ? 'Editar producto' : 'Nuevo producto'}
-              </Text>
-              <TouchableOpacity onPress={() => setModalOpen(false)} className="p-1">
-                <X size={22} color="#64748b" />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView className="p-5" contentContainerStyle={{ paddingBottom: BOTTOM_INSET + 12 }}>
-              <View className="flex-row flex-wrap -m-2">
-                <View className="m-2" style={{ width: compact ? '100%' : 288 }}>
-                  <TouchableOpacity
-                    onPress={pickImage}
-                    className="h-56 bg-slate-50 border border-dashed border-slate-300 rounded-lg overflow-hidden items-center justify-center"
-                  >
-                    {imagePreview ? (
-                      <Image source={{ uri: imagePreview }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                    ) : (
-                      <>
-                        <ImagePlus size={34} color="#94a3b8" />
-                        <Text className="text-slate-500 font-bold mt-2">Subir imagen real</Text>
-                        <Text className="text-slate-400 text-xs mt-1 text-center px-6">
-                          Recomendado 4:3, buena luz y sin mucho fondo.
-                        </Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={pickImage} className="flex-row items-center justify-center bg-slate-100 rounded-lg py-3 mt-3">
-                    <Camera size={17} color="#2563EB" />
-                    <Text className="text-blue-600 font-bold ml-2">Seleccionar imagen</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <View className="m-2 flex-1" style={{ minWidth: compact ? '100%' : 300 }}>
-                  <Text className="text-slate-600 font-semibold text-sm mb-1">Nombre</Text>
-                  <TextInput
-                    value={form.nombre}
-                    onChangeText={(v) => setField('nombre', v)}
-                    placeholder="Ej. Cappuccino"
-                    placeholderTextColor="#94a3b8"
-                    className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-slate-800 mb-3"
-                  />
-
-                  <Text className="text-slate-600 font-semibold text-sm mb-1">Descripcion</Text>
-                  <TextInput
-                    value={form.descripcion}
-                    onChangeText={(v) => setField('descripcion', v)}
-                    placeholder="Ingredientes, preparacion o nota visible"
-                    placeholderTextColor="#94a3b8"
-                    multiline
-                    className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-slate-800 mb-3 min-h-[84px]"
-                  />
-
-                  <View className="flex-row">
-                    <View className="flex-1 mr-2">
-                      <Text className="text-slate-600 font-semibold text-sm mb-1">Precio</Text>
-                      <TextInput
-                        value={form.precio}
-                        onChangeText={(v) => setField('precio', v.replace(',', '.'))}
-                        keyboardType="decimal-pad"
-                        placeholder="0.00"
-                        placeholderTextColor="#94a3b8"
-                        className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-slate-800 mb-3"
-                      />
-                    </View>
-                    <View className="flex-1 ml-2">
-                      <Text className="text-slate-600 font-semibold text-sm mb-1">Stock</Text>
-                      <TextInput
-                        value={form.stock}
-                        onChangeText={(v) => setField('stock', v.replace(/[^0-9]/g, ''))}
-                        keyboardType="number-pad"
-                        placeholder="0"
-                        placeholderTextColor="#94a3b8"
-                        className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-slate-800 mb-3"
-                      />
-                    </View>
-                  </View>
-
-                  <Text className="text-slate-600 font-semibold text-sm mb-2">Categoria</Text>
-                  <View className="flex-row flex-wrap mb-3">
-                    {categoryOptions.map((c) => {
-                      const active = Number(form.categoria_id) === Number(c.id);
-                      return (
-                        <TouchableOpacity
-                          key={c.id}
-                          onPress={() => setField('categoria_id', c.id)}
-                          className={`px-3 py-2 rounded-lg mr-2 mb-2 ${active ? 'bg-blue-600' : 'bg-slate-50 border border-slate-200'}`}
-                        >
-                          <Text className={`text-xs font-bold ${active ? 'text-white' : 'text-slate-500'}`}>{c.nombre}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-
-                  <Text className="text-slate-600 font-semibold text-sm mb-2">Vincular con inventario</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-3">
-                    <View className="flex-row">
-                      <TouchableOpacity
-                        onPress={() => setField('inventario_item_id', null)}
-                        className={`px-3 py-2 rounded-lg mr-2 ${!form.inventario_item_id ? 'bg-blue-600' : 'bg-slate-50 border border-slate-200'}`}
-                      >
-                        <Text className={`text-xs font-bold ${!form.inventario_item_id ? 'text-white' : 'text-slate-500'}`}>Sin vinculo</Text>
-                      </TouchableOpacity>
-                      {inventario.map((item) => {
-                        const active = Number(form.inventario_item_id) === Number(item.id);
-                        return (
-                          <TouchableOpacity
-                            key={item.id}
-                            onPress={() => setField('inventario_item_id', item.id)}
-                            className={`px-3 py-2 rounded-lg mr-2 ${active ? 'bg-blue-600' : 'bg-slate-50 border border-slate-200'}`}
-                          >
-                            <Text className={`text-xs font-bold ${active ? 'text-white' : 'text-slate-500'}`}>
-                              {item.nombre} ({Number(item.stock).toFixed(0)})
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                  </ScrollView>
-
-                  <Text className="text-slate-600 font-semibold text-sm mb-2">Receta estandar</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-3">
-                    <View className="flex-row">
-                      {inventario.map((item) => (
-                        <TouchableOpacity
-                          key={item.id}
-                          onPress={() => addRecipeItem(item)}
-                          className="px-3 py-2 rounded-lg mr-2 bg-slate-50 border border-slate-200"
-                        >
-                          <Text className="text-xs font-bold text-slate-500">{item.nombre}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </ScrollView>
-                  {(form.receta || []).map((recipe) => {
-                    const inv = inventario.find((item) => Number(item.id) === Number(recipe.inventario_item_id));
-                    return (
-                      <View key={recipe.inventario_item_id} className={`${compact ? 'flex-col items-stretch' : 'flex-row items-center'} bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 mb-2`}>
-                        <View className="flex-1" style={{ minWidth: 0 }}>
-                          <Text className="text-slate-800 font-bold text-sm">{inv?.nombre || `Insumo ${recipe.inventario_item_id}`}</Text>
-                          <Text className="text-slate-400 text-xs">Stock: {Number(inv?.stock || 0).toFixed(2)} {inv?.unidad || ''}</Text>
-                        </View>
-                        <View className={`${compact ? 'mt-2' : ''} flex-row items-center`}>
-                          <TextInput
-                            value={recipe.cantidad}
-                            onChangeText={(v) => updateRecipeItem(recipe.inventario_item_id, 'cantidad', v.replace(',', '.'))}
-                            keyboardType="decimal-pad"
-                            className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 mr-2"
-                            style={{ flex: compact ? 1 : undefined, width: compact ? undefined : 82 }}
-                          />
-                          <TextInput
-                            value={recipe.unidad}
-                            onChangeText={(v) => updateRecipeItem(recipe.inventario_item_id, 'unidad', v)}
-                            placeholder={inv?.unidad || 'unidad'}
-                            placeholderTextColor="#94a3b8"
-                            className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 mr-2"
-                            style={{ flex: compact ? 1 : undefined, width: compact ? undefined : 90 }}
-                          />
-                          <TouchableOpacity onPress={() => removeRecipeItem(recipe.inventario_item_id)} className="w-9 h-9 rounded-lg bg-rose-50 items-center justify-center">
-                            <Trash2 size={16} color="#e11d48" />
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    );
-                  })}
-
-                  <View className="flex-row items-center justify-between bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
-                    <View>
-                      <Text className="text-slate-700 font-bold text-sm">Disponible para venta</Text>
-                      <Text className="text-slate-400 text-xs">Si esta apagado, no aparece al mesero.</Text>
-                    </View>
-                    <Switch
-                      value={form.disponible}
-                      onValueChange={(v) => setField('disponible', v)}
-                      trackColor={{ true: '#d8c7bb', false: '#e2e8f0' }}
-                      thumbColor={form.disponible ? '#2563EB' : '#94a3b8'}
-                    />
-                  </View>
-                </View>
-              </View>
-            </ScrollView>
-
-            <View className={`${compact ? 'flex-col' : 'flex-row justify-end'} px-5 py-4 border-t border-slate-100`} style={{ paddingBottom: BOTTOM_INSET + 16 }}>
-              <TouchableOpacity onPress={() => setModalOpen(false)} className="px-5 py-3 rounded-lg bg-slate-100 mr-3">
-                <Text className="text-slate-600 font-bold">Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={saveProduct}
-                disabled={saving}
-                className={`px-5 py-3 rounded-lg bg-blue-600 min-w-[150px] items-center ${compact ? 'mt-3' : ''}`}
-              >
-                {saving ? <ActivityIndicator color="#fff" /> : <Text className="text-white font-bold">Guardar</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-    </View>
-  );
+    <MenuModal visible={categoryModal} title="Categorías del menú" subtitle="Organiza los productos y controla qué grupos aparecen en el menú." maxWidth={720} close={closeCategories}>
+      {!!categoryError && <MenuNotice danger>{categoryError}</MenuNotice>}
+      <MenuSection title={categoryForm.id ? 'Editar categoría' : 'Nueva categoría'}>
+        <MenuField label="Nombre de categoría" maxLength={80} value={categoryForm.nombre} onChangeText={value => setCategoryForm(previous => ({ ...previous, nombre: value }))} placeholder="Ej. Cafetería" editable={!categorySaving} />
+        <MenuField label="Clave de icono (opcional)" maxLength={30} value={categoryForm.icono} onChangeText={value => setCategoryForm(previous => ({ ...previous, icono: value }))} placeholder="cafe, bebida, postre…" editable={!categorySaving} />
+        <View style={{ flexDirection: 'row', gap: 14, alignItems: 'center' }}><View style={{ flex: 1 }}><Text style={{ color: c.text, fontSize: 13, fontWeight: '600' }}>Categoría activa</Text><Text style={{ color: c.muted, fontSize: 11, lineHeight: 17, marginTop: 5 }}>Al desactivarla se ocultan sus productos para nuevas ventas. Los pedidos e historial se conservan.</Text></View><Switch accessibilityLabel="Categoría activa" value={categoryForm.activo} disabled={categorySaving} onValueChange={value => setCategoryForm(previous => ({ ...previous, activo: value }))} trackColor={{ true: c.primary, false: c.line }} thumbColor={c.surface} /></View>
+        <View style={{ flexDirection: 'row', gap: 8 }}><MenuButton disabled={categorySaving} onPress={() => {
+          if (JSON.stringify(categoryForm) !== categoryBaseline.current) confirmAction('Cambios sin guardar', '¿Descartar los cambios de esta categoría?', () => startCategory()); else startCategory();
+        }}>Nueva / limpiar</MenuButton><MenuButton primary busy={categorySaving} onPress={saveCategory}>{categoryForm.id ? 'Guardar categoría' : 'Crear categoría'}</MenuButton></View>
+      </MenuSection>
+      <View style={{ borderTopWidth: 1, borderTopColor: c.line, paddingTop: 16 }}><Text style={{ color: c.text, fontSize: 14, fontWeight: '600', marginBottom: 8 }}>{categorias.length} categorías registradas</Text>{categorias.map(item => <View key={item.id} style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: c.line, flexDirection: 'row', alignItems: 'center', gap: 8 }}><View style={{ flex: 1 }}><Text style={{ color: c.text, fontSize: 13, fontWeight: '600' }}>{item.nombre}</Text><Text style={{ color: c.muted, fontSize: 11, marginTop: 4 }}>{categoryCount(item)} productos · {Number(item.activo) !== 0 ? 'Activa' : 'Inactiva'}</Text></View><MenuButton icon={Edit3} label={`Editar categoría ${item.nombre}`} disabled={categorySaving} onPress={() => {
+        if (JSON.stringify(categoryForm) !== categoryBaseline.current) confirmAction('Cambios sin guardar', '¿Descartar los cambios de la categoría actual?', () => startCategory(item)); else startCategory(item);
+      }} /><MenuButton icon={Trash2} danger label={`Eliminar categoría ${item.nombre}`} disabled={categorySaving || categoryCount(item) > 0} onPress={() => removeCategory(item)} /></View>)}</View>
+    </MenuModal>
+    <MenuModal visible={!!confirmation} title={confirmation?.title || 'Confirmar acción'} maxWidth={440} close={() => setConfirmation(null)}
+      footer={<View style={{ flexDirection: 'row', gap: 8, justifyContent: 'flex-end' }}><MenuButton onPress={() => setConfirmation(null)}>Seguir editando</MenuButton><MenuButton danger onPress={() => { const action = confirmation?.action; setConfirmation(null); action?.(); }}>{confirmation?.actionLabel || 'Confirmar'}</MenuButton></View>}>
+      <Text style={{ color: c.text, fontSize: 14, lineHeight: 22 }}>{confirmation?.message}</Text>
+    </MenuModal>
+  </View>;
 }
-
-

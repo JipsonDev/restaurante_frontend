@@ -9,7 +9,9 @@
     "expo": "~56.0.11",
     "expo-av": "^16.0.8",
     "expo-constants": "~56.0.18",
+    "expo-font": "~56.0.7",
     "expo-image-picker": "^56.0.17",
+    "expo-linear-gradient": "~56.0.4",
     "expo-notifications": "~56.0.18",
     "expo-router": "^56.2.10",
     "expo-status-bar": "~56.0.4",
@@ -19,10 +21,13 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.85.3",
+    "react-native-svg": "15.15.4",
     "react-native-web": "^0.21.2",
-    "socket.io-client": "^4.8.3"
+    "socket.io-client": "^4.8.3",
+    "three": "^0.186.0"
   },
   "scripts": {
+    "test": "node --test tests/*.test.mjs",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",

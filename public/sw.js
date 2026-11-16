@@ -1,4 +1,4 @@
-const CACHE_NAME = 'morena-mia-webapp-v1';
+const CACHE_NAME = 'morena-mia-webapp-v2';
 const APP_SHELL = ['/', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -25,6 +25,8 @@ self.addEventListener('fetch', (event) => {
 
   if (request.method !== 'GET') return;
   if (url.pathname.startsWith('/api') || url.pathname.includes('/socket.io')) return;
+  // Metro reuses bundle URLs between edits; an offline fallback can show old UI.
+  if (url.searchParams.get('dev') === 'true' || url.pathname.endsWith('.bundle') || url.pathname.startsWith('/@')) return;
 
   if (request.mode === 'navigate') {
     event.respondWith(

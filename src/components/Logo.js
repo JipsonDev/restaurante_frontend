@@ -19,15 +19,15 @@ const SIZES = {
  * y se salía de la pantalla en móvil; ahora basta con elegir `size` o pasar una
  * altura concreta y el ancho se ajusta solo (con `resizeMode: contain`).
  */
-export default function Logo({ size = 'md', height, style, dark = false }) {
-  const h = height || SIZES[size] || SIZES.md;
-  const w = Math.round(h * RATIO);
+export default function Logo({ size = 'md', height, width, style, dark = false }) {
+  const h = width ? width / RATIO : height || SIZES[size] || SIZES.md;
+  const w = width || Math.round(h * RATIO);
   return (
     <Image
       source={require('../../assets/logo-wide.png')}
       style={[
-        { width: w, height: h, resizeMode: 'contain' },
-        dark ? { tintColor: '#ffffff' } : null,
+        { width: w, height: h, maxWidth: '100%', resizeMode: 'contain', flexShrink: 1 },
+        dark ? { tintColor: '#F7F4E9' } : null,
         style,
       ]}
       accessibilityLabel="Morena Mia"

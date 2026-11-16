@@ -26,6 +26,14 @@ export function registerWebApp() {
   }
 
   if ('serviceWorker' in navigator && window.location.protocol !== 'file:') {
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      // Keep production app-shell caches out of Metro's development session.
+      navigator.serviceWorker.getRegistrations().then(registrations => Promise.all(
+        registrations.filter(registration => registration.active?.scriptURL === `${window.location.origin}/sw.js`)
+          .map(registration => registration.unregister())
+      )).catch(error => console.warn('No se pudo desactivar la caché de desarrollo:', error.message));
+      return;
+    }
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('/sw.js').catch((error) => {
         console.warn('No se pudo registrar el service worker:', error.message);
