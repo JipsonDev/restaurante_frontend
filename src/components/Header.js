@@ -14,6 +14,7 @@ import {
 } from 'lucide-react-native';
 import { useAdmin } from '../context/AdminContext';
 import { useTheme } from '../theme';
+import AdminSearch from './AdminSearch';
 
 function isPickupOrder(order) {
   return !order?.mesa_id || ['Delivery', 'Para llevar', 'Express'].includes(order?.tipo);
@@ -29,21 +30,21 @@ function orderTargetLabel(order) {
 }
 
 const TITLES = {
-  dashboard: ['Resumen', 'Lectura rapida de la operacion'],
+  dashboard: ['Vista general', 'El pulso de tu restaurante'],
   pedidos: ['Pedidos', 'Seguimiento de comandas y estados'],
   caja: ['Caja', 'Cobros, cortes y pagos recientes'],
-  menu: ['Menu', 'Productos, categorias y recetas'],
+  menu: ['Menú', 'Productos, categorias y recetas'],
   extras: ['Extras', 'Modificadores para pedidos'],
   mesas: ['Mesas', 'Salon, estados y ubicaciones'],
   trabajadores: ['Equipo', 'Usuarios y roles del sistema'],
   inventario: ['Inventario', 'Stock, costos y movimientos'],
   reportes: ['Reportes', 'Indicadores del dia'],
-  auditoria: ['Auditoria', 'Trazabilidad de acciones criticas'],
+  auditoria: ['Auditoría', 'Usuarios, ventas y acciones críticas'],
   ubicaciones: ['Ubicaciones', 'Zonas del restaurante'],
   configuracion: ['Ajustes', 'Conexion y parametros'],
 };
 
-export default function Header({ activeTab }) {
+export default function Header({ activeTab, onNavigate }) {
   const [title, subtitle] = TITLES[activeTab] || [activeTab, 'Panel administrativo'];
   const { refreshAll, pedidos, productos, mesas, syncStatus } = useAdmin();
   const { c, isDark, toggle } = useTheme();
@@ -53,7 +54,7 @@ export default function Header({ activeTab }) {
 
   const notifications = useMemo(() => {
     const activeOrders = pedidos.filter((p) => !['PAGADO', 'CANCELADO'].includes(String(p.estado || '').toUpperCase()));
-    const lowStock = productos.filter((p) => Number(p.stock || 0) <= 3 || Number(p.disponible) === 0);
+    const lowStock = productos.filter((p) => Number(p.stock_disponible ?? p.stock ?? 0) <= 3 || Number(p.disponible) === 0);
     const reserved = mesas.filter((m) => m.estado === 'Reservada');
     return [
       ...activeOrders.map((p) => ({
@@ -71,7 +72,7 @@ export default function Header({ activeTab }) {
       ...lowStock.map((p) => ({
         id: `s-${p.id}`,
         title: `Stock bajo: ${p.nombre}`,
-        body: `Stock actual: ${p.stock || 0}.`,
+        body: `Stock actual: ${p.stock_disponible ?? p.stock ?? 0}.`,
         icon: AlertTriangle,
       })),
     ];
@@ -79,45 +80,57 @@ export default function Header({ activeTab }) {
 
   const connected = syncStatus === 'connected';
   const iconBtn = {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
+    width: compact ? 38 : 40,
+    height: compact ? 38 : 40,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: c.soft,
+    backgroundColor: 'transparent',
   };
 
   return (
-    <View style={{ minHeight: compact ? 64 : 78, paddingHorizontal: compact ? 10 : 24, paddingVertical: compact ? 9 : 12, backgroundColor: c.bg, borderBottomWidth: 1, borderBottomColor: c.line }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-        <View style={{ flex: 1, paddingRight: 12 }}>
-          <Text style={{ color: c.text, fontSize: compact ? 18 : 26, fontWeight: '900' }} numberOfLines={1}>{title}</Text>
-          {!compact ? <Text style={{ color: c.faint, fontSize: 13, fontWeight: '800', marginTop: 3 }}>{subtitle}</Text> : null}
+    <View style={{ minHeight: compact ? 60 : 70, paddingHorizontal: compact ? 12 : 20, paddingVertical: compact ? 8 : 10, backgroundColor: c.surface, borderBottomWidth: 1, borderBottomColor: c.line }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: compact ? 8 : 16 }}>
+        <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 18 }}>
+          {compact ? (
+            <Text style={{ color: c.text, fontSize: 16, fontWeight: '700', flex: 1 }} numberOfLines={1}>{title}</Text>
+          ) : (
+            <View style={{ width: 150, minWidth: 150 }}>
+              <Text style={{ color: c.primaryText, fontSize: 9, fontWeight: '700', letterSpacing: 1.25 }}>ADMINISTRACIÓN</Text>
+              <Text style={{ color: c.text, fontSize: 15, fontWeight: '700', marginTop: 3 }} numberOfLines={1}>{title}</Text>
+              <Text style={{ color: c.faint, fontSize: 9, marginTop: 2 }} numberOfLines={1}>{subtitle}</Text>
+            </View>
+          )}
+          <AdminSearch onNavigate={onNavigate} compact={compact} />
         </View>
 
         {!compact ? (
-          <View style={{ height: 42, borderRadius: 999, paddingHorizontal: 14, backgroundColor: connected ? c.greenSoft : c.amberSoft, flexDirection: 'row', alignItems: 'center', marginRight: 10 }}>
+          <View style={{ height: 36, borderRadius: 9, paddingHorizontal: 12, backgroundColor: connected ? c.greenSoft : c.amberSoft, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: connected ? `${c.green}35` : `${c.amber}35` }}>
             {connected ? <Wifi size={17} color={c.green} /> : <WifiOff size={17} color={c.amber} />}
-            <Text style={{ marginLeft: 8, color: connected ? c.green : c.amber, fontSize: 12, fontWeight: '900' }}>
+            <Text style={{ marginLeft: 7, color: connected ? c.green : c.amber, fontSize: 11, fontWeight: '700' }}>
               {connected ? 'En vivo' : 'Reconectando'}
             </Text>
           </View>
         ) : null}
 
-        <TouchableOpacity onPress={toggle} style={{ ...iconBtn, marginRight: 8 }}>
-          {isDark ? <Sun size={18} color={c.amber} /> : <Moon size={18} color={c.muted} />}
-        </TouchableOpacity>
-        <TouchableOpacity onPress={refreshAll} style={{ ...iconBtn, marginRight: 8 }}>
-          <RefreshCw size={18} color={c.muted} />
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => setOpen(true)} style={iconBtn}>
-          <Bell size={18} color={c.muted} />
-          {!!notifications.length && (
-            <View style={{ position: 'absolute', top: -4, right: -4, minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: c.red }}>
-              <Text style={{ color: '#fff', fontSize: 10, fontWeight: '900' }}>{notifications.length}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', padding: 3, borderRadius: 12, backgroundColor: c.surfaceAlt, borderWidth: 1, borderColor: c.line }}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={isDark ? "Usar modo claro" : "Usar modo oscuro"} onPress={toggle} style={iconBtn}>
+            {isDark ? <Sun size={18} color={c.amber} /> : <Moon size={18} color={c.muted} />}
+          </TouchableOpacity>
+          <View style={{ width: 1, height: 21, backgroundColor: c.line }} />
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Actualizar datos" onPress={refreshAll} style={iconBtn}>
+            <RefreshCw size={18} color={c.muted} />
+          </TouchableOpacity>
+          <View style={{ width: 1, height: 21, backgroundColor: c.line }} />
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Ver alertas" onPress={() => setOpen(true)} style={iconBtn}>
+            <Bell size={18} color={c.muted} />
+            {!!notifications.length && (
+              <View style={{ position: 'absolute', top: -5, right: -3, minWidth: 19, height: 19, borderRadius: 10, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary, borderWidth: 2, borderColor: c.surfaceAlt }}>
+                <Text style={{ color: c.onPrimary, fontSize: 9, fontWeight: '900' }}>{notifications.length > 99 ? '99+' : notifications.length}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>

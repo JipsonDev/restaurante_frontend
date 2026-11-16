@@ -1,7 +1,9 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { NativeModules, Platform } from 'react-native';
 import axios from 'axios';
+import { isOwnApiRequest, shouldExpireSession } from '../utils/sessionLogic.mjs';
 import * as safeStorage from '../services/storage';
+import { KNOWN_USERS_KEY, forgetUser, parseKnownUsers, rememberUser } from '../utils/knownUsers.mjs';
 
 const ENV_API_HOST = process.env.EXPO_PUBLIC_API_HOST;
 const ENV_API_URL = process.env.EXPO_PUBLIC_API_URL;
@@ -39,7 +41,7 @@ export const assetUrl = (url) => {
 axios.interceptors.request.use(
   async (config) => {
     const token = await safeStorage.getItem('token');
-    if (token) {
+    if (token && isOwnApiRequest(config, BASE_URL)) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
@@ -47,16 +49,21 @@ axios.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-axios.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    if (error.response?.status === 401) {
-      await safeStorage.removeItem('token');
-      await safeStorage.removeItem('user');
-    }
-    return Promise.reject(error);
-  }
-);
+// Avisos de cambio de sesion (login/logout). realtime.js se suscribe para
+// cerrar el socket del usuario anterior; asi evitamos un import circular.
+const sessionListeners = new Set();
+export function onSessionChange(listener) {
+  sessionListeners.add(listener);
+  return () => sessionListeners.delete(listener);
+}
+const notifySessionChange = () => sessionListeners.forEach(listener => { try { listener(); } catch {} });
+
+// Serialize session writes so a late 401 cannot erase a newer login.
+let sessionWrites = Promise.resolve();
+const writeSession = operation => {
+  sessionWrites = sessionWrites.catch(() => {}).then(operation);
+  return sessionWrites;
+};
 
 const AuthContext = createContext(null);
 
@@ -64,6 +71,29 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [knownUsers, setKnownUsers] = useState([]);
+  const tokenRef = useRef(null);
+  tokenRef.current = token;
+
+  useEffect(() => {
+    const interceptor = axios.interceptors.response.use(response => response, async error => {
+      if (shouldExpireSession(error, tokenRef.current, BASE_URL)) {
+        const failedToken = tokenRef.current;
+        await writeSession(async () => {
+          if (await safeStorage.getItem('token') !== failedToken) return;
+          await safeStorage.removeItem('token');
+          await safeStorage.removeItem('user');
+          if (tokenRef.current === failedToken) {
+            tokenRef.current = null;
+            setToken(null);
+            setUser(null);
+          }
+        });
+      }
+      return Promise.reject(error);
+    });
+    return () => axios.interceptors.response.eject(interceptor);
+  }, []);
 
   useEffect(() => {
     const restoreSession = async () => {
@@ -81,74 +111,88 @@ export function AuthProvider({ children }) {
       }
     };
     restoreSession();
+    safeStorage.getItem(KNOWN_USERS_KEY).then(raw => setKnownUsers(parseKnownUsers(raw))).catch(() => {});
   }, []);
+
+  const saveKnownUsers = async (update) => {
+    const current = parseKnownUsers(await safeStorage.getItem(KNOWN_USERS_KEY));
+    const next = update(current);
+    await safeStorage.setItem(KNOWN_USERS_KEY, JSON.stringify(next));
+    setKnownUsers(next);
+  };
+
+  const startSession = async (tk, usr) => {
+    await writeSession(async () => {
+      await safeStorage.setItem('token', tk);
+      await safeStorage.setItem('user', JSON.stringify(usr));
+    });
+    tokenRef.current = tk;
+    notifySessionChange();
+    await saveKnownUsers(list => rememberUser(list, usr)).catch(() => {});
+    setToken(tk);
+    setUser(usr);
+  };
+
+  const forgetKnownUser = (correo) => saveKnownUsers(list => forgetUser(list, correo)).catch(() => {});
 
   const login = async (correo, password) => {
     try {
-      const res = await axios.post(`${BASE_URL}/auth/login`, { correo, password });
+      const res = await axios.post(`${BASE_URL}/auth/login`, { correo, password }, { timeout: 15000 });
       const { token: tk, user: usr } = res.data;
 
       if (res.data.requires_pin_setup) {
         return { success: false, requiresPinSetup: true, message: res.data.message || 'Crea tu PIN rapido.', user: usr };
       }
 
-      await safeStorage.setItem('token', tk);
-      await safeStorage.setItem('user', JSON.stringify(usr));
-
-      setToken(tk);
-      setUser(usr);
+      await startSession(tk, usr);
       return { success: true };
     } catch (e) {
       const msg = e.response?.data?.message
-        || (e.request ? `No se pudo conectar al backend (${BASE_URL}). Revisa que backend y Expo esten en la misma red.` : 'Credenciales incorrectas');
+        || (e.request ? 'No se pudo conectar. Comprueba tu conexión y avisa al administrador si el problema continúa.' : 'No se pudo iniciar sesión. Inténtalo otra vez.');
       return { success: false, message: msg };
     }
   };
 
-  const loginWithPin = async (pin) => {
+  const loginWithPin = async (correo, pin) => {
     try {
-      const res = await axios.post(`${BASE_URL}/auth/login-pin`, { pin });
+      const res = await axios.post(`${BASE_URL}/auth/login-pin`, { correo, pin }, { timeout: 15000 });
       const { token: tk, user: usr } = res.data;
 
-      await safeStorage.setItem('token', tk);
-      await safeStorage.setItem('user', JSON.stringify(usr));
-
-      setToken(tk);
-      setUser(usr);
+      await startSession(tk, usr);
       return { success: true };
     } catch (e) {
       const msg = e.response?.data?.message
-        || (e.request ? `No se pudo conectar al backend (${BASE_URL}). Revisa que backend y Expo esten en la misma red.` : 'PIN incorrecto');
+        || (e.request ? 'No se pudo conectar. Comprueba tu conexión y avisa al administrador si el problema continúa.' : 'No se pudo iniciar sesión. Inténtalo otra vez.');
       return { success: false, message: msg };
     }
   };
 
   const setupPin = async (correo, password, pin) => {
     try {
-      const res = await axios.post(`${BASE_URL}/auth/setup-pin`, { correo, password, pin });
+      const res = await axios.post(`${BASE_URL}/auth/setup-pin`, { correo, password, pin }, { timeout: 15000 });
       const { token: tk, user: usr } = res.data;
 
-      await safeStorage.setItem('token', tk);
-      await safeStorage.setItem('user', JSON.stringify(usr));
-
-      setToken(tk);
-      setUser(usr);
+      await startSession(tk, usr);
       return { success: true };
     } catch (e) {
       const msg = e.response?.data?.message
-        || (e.request ? `No se pudo conectar al backend (${BASE_URL}). Revisa que backend y Expo esten en la misma red.` : 'No se pudo crear el PIN');
+        || (e.request ? 'No se pudo conectar. Comprueba tu conexión y avisa al administrador si el problema continúa.' : 'No se pudo crear el PIN. Inténtalo otra vez.');
       return { success: false, message: msg };
     }
   };
 
   const logout = async () => {
-    await safeStorage.removeItem('token');
-    await safeStorage.removeItem('user');
+    await writeSession(async () => {
+      await safeStorage.removeItem('token');
+      await safeStorage.removeItem('user');
+    });
+    tokenRef.current = null;
+    notifySessionChange();
     setToken(null);
     setUser(null);
   };
 
-  const value = useMemo(() => ({ user, token, loading, login, loginWithPin, setupPin, logout }), [user, token, loading]);
+  const value = useMemo(() => ({ user, token, loading, knownUsers, login, loginWithPin, setupPin, logout, forgetKnownUser }), [user, token, loading, knownUsers]);
 
   return (
     <AuthContext.Provider value={value}>

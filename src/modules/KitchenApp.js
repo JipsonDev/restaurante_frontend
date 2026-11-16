@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { kitchenRounds } from '../utils/kitchenLogic.mjs';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import {
   ActivityIndicator, Animated, Platform, SafeAreaView, ScrollView,
   Text as RNText, TouchableOpacity, View, useWindowDimensions, Vibration
@@ -9,10 +10,11 @@ import {
   Layers, LayoutGrid, Megaphone, Volume2, VolumeX, X, Play
 } from 'lucide-react-native';
 import axios from 'axios';
+import { normalizeKitchenState as normalize, kitchenColumn, pendingSignature, createRefreshQueue } from '../utils/kitchenLogic.mjs';
 
 // TUS RUTAS Y CONTEXTOS REALES
 import { BASE_URL, useAuth } from '../context/AuthContext';
-import { useTheme } from '../theme';
+import { useTheme, operationalColors as UI_COLORS, tableStatusMeta } from '../theme';
 import { BOTTOM_INSET, TOP_INSET } from '../utils/safeArea';
 import { REALTIME_EVENTS, getRealtimeSocket, subscribeRealtime } from '../services/realtime';
 import { ALERT_TONES, installWebAudioUnlock, playWebAlertTone, unlockWebAudio } from '../services/webAudioAlerts';
@@ -28,20 +30,7 @@ const Text = ({ style, ...props }) => (
   <RNText {...props} style={[WAITER_FONT ? { fontFamily: WAITER_FONT } : null, style]} />
 );
 
-const UI_COLORS = {
-  light: {
-    pageBg: '#f8fafc', surface: '#ffffff', field: '#f1f5f9', line: '#e2e8f0', ink: '#0f172a',
-    muted: '#64748b', faint: '#94a3b8', brand: '#ea580c', softOrange: '#ffedd5', onAccent: '#ffffff',
-    danger: '#ef4444', success: '#16a34a', successSoft: '#dcfce7', warning: '#f59e0b',
-    warningSoft: '#fef3c7', info: '#3b82f6', infoSoft: '#dbeafe'
-  },
-  dark: {
-    pageBg: '#090E17', surface: '#121A2F', field: '#1A243D', line: '#263554', ink: '#F8FAFC',
-    muted: '#94A3B8', faint: '#475569', brand: '#FF7A00', softOrange: '#2B1C15', onAccent: '#FFFFFF',
-    danger: '#FB7185', success: '#34D399', successSoft: '#064E3B', warning: '#FBBF24',
-    warningSoft: '#451A03', info: '#60A5FA', infoSoft: '#1E3A8A'
-  }
-};
+
 
 const modernShadow = Platform.select({
   web: { boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.15), 0 2px 4px -2px rgb(0 0 0 / 0.15)' },
@@ -53,17 +42,6 @@ const softShadow = Platform.select({
   default: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 1 }
 });
 
-const normalize = (estado) => ({
-  Pendiente: 'PENDIENTE',
-  'En preparación': 'PREPARANDO',
-  'En preparacion': 'PREPARANDO',
-  Listo: 'LISTO',
-  Entregado: 'ENTREGADO',
-  Completado: 'PAGADO',
-  Pagado: 'PAGADO',
-  Cancelado: 'CANCELADO',
-}[estado] || estado);
-
 const isToday = (date) => new Date(date).toDateString() === new Date().toDateString();
 
 const money = (value) => `$${Number(value || 0).toFixed(2)}`;
@@ -72,7 +50,7 @@ const modifierLabel = (mod) => `${mod.nombre}${Number(mod.precio_extra || 0) ? `
 const isPickupOrder = (order) => !order?.mesa_id || ['Para llevar', 'Delivery'].includes(order?.tipo);
 const orderTargetLabel = (order) => (
   isPickupOrder(order)
-    ? `${order?.tipo === 'Delivery' ? 'Delivery' : 'Para llevar'} #${order?.id || '-'} ${order?.cliente_nombre || ''}`.trim()
+    ? `${order?.tipo === 'Delivery' ? 'Delivery' : 'Para llevar'} #${order?.pedido_id || order?.id || '-'} ${order?.cliente_nombre || ''}`.trim()
     : `Mesa ${order?.mesa_numero || order?.mesa_id || '-'}`
 );
 const orderPickupDetail = (order) => {
@@ -129,10 +107,19 @@ export default function KitchenApp() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState(null);
-  const [viewMode, setViewMode] = useState('tickets'); 
+  const [viewMode, setViewMode] = useState('tickets');
   const [sosOrdersList, setSosOrdersList] = useState(new Set());
-  
+
   const [toast, setToast] = useState(null);
+  const toastTimer = useRef(null);
+  const actionLocks = useRef(new Set());
+  const [busyOrders, setBusyOrders] = useState(new Set());
+  const [printing, setPrinting] = useState(false);
+  const printLock = useRef(false);
+  const [printStatus, setPrintStatus] = useState(null);
+  const [printStatusError, setPrintStatusError] = useState(false);
+  const [clockNow, setClockNow] = useState(Date.now());
+  const refreshQueue = useRef(null);
   const [realtimeStatus, setRealtimeStatus] = useState('connecting');
 
   const [isMuted, setIsMuted] = useState(false);
@@ -150,27 +137,40 @@ export default function KitchenApp() {
     isMutedRef.current = isMuted;
   }, [isMuted]);
 
-  const showToast = (title, message, isError = false) => {
+  const showToast = useCallback((title, message, isError = false) => {
+    clearTimeout(toastTimer.current);
     setToast({ title, message, isError });
-    setTimeout(() => setToast(null), 4000);
-  };
+    toastTimer.current = setTimeout(() => setToast(null), 4000);
+  }, []);
 
-  const loadOrders = async (silent = false) => {
+  const loadOrders = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
+    await refreshQueue.current?.refresh();
+    if (!silent) setLoading(false);
+  }, []);
+
+  const loadPrintStatus = useCallback(async () => {
     try {
-      const res = await axios.get(`${BASE_URL}/pedidos?history=1`);
-      setOrders(res.data || []);
-      setLastRefresh(new Date());
-    } catch (error) {
-      if (!silent) showToast('Error de conexión', error.response?.data?.message || 'Revisa el backend.', true);
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  };
+      const { data } = await axios.get(`${BASE_URL}/impresiones/estado`);
+      setPrintStatus(data);
+      setPrintStatusError(false);
+    } catch { setPrintStatusError(true); }
+  }, []);
 
   useEffect(() => {
+    refreshQueue.current = createRefreshQueue(
+      async () => {
+        const { data } = await axios.get(`${BASE_URL}/pedidos?cocina=1`);
+        if (!Array.isArray(data)) throw new Error('Respuesta de pedidos invalida.');
+        return data;
+      },
+      (data) => { setOrders(kitchenRounds(data)); setLastRefresh(new Date()); },
+      (error) => showToast('Error de conexión', error.response?.data?.message || 'No se pudo actualizar cocina.', true),
+    );
     loadOrders();
-    const timer = setInterval(() => loadOrders(true), 15000);
+    loadPrintStatus();
+    const timer = setInterval(() => { loadOrders(true); loadPrintStatus(); }, 15000);
+    const clockTimer = setInterval(() => setClockNow(Date.now()), 10000);
     const client = getRealtimeSocket();
     const onConnect = () => {
       setRealtimeStatus('connected');
@@ -191,16 +191,19 @@ export default function KitchenApp() {
     ];
     return () => {
       clearInterval(timer);
+      clearInterval(clockTimer);
+      clearTimeout(toastTimer.current);
+      refreshQueue.current.stop();
       client.off('connect', onConnect);
       client.off('disconnect', onDisconnect);
       client.off('connect_error', onConnectError);
       unsubscribers.forEach((unsubscribe) => unsubscribe && unsubscribe());
     };
-  }, []);
+  }, [loadOrders, loadPrintStatus, showToast]);
 
   const prepMinutes = (order) => {
     const start = order.preparando_at || order.created_at;
-    return Math.max(0, Math.round((Date.now() - new Date(start).getTime()) / 60000));
+    return Math.max(0, Math.round((clockNow - new Date(start).getTime()) / 60000));
   };
 
   useEffect(() => {
@@ -209,9 +212,8 @@ export default function KitchenApp() {
 
     orders.forEach(o => {
       const state = normalize(o.estado);
-      const isOrderToday = isToday(o.created_at);
-      
-      if (isOrderToday && (state === 'PENDIENTE' || state === 'PREPARANDO')) {
+
+      if (state === 'PENDIENTE' || state === 'PREPARANDO') {
         if (prepMinutes(o) >= 20) {
           currentSos.add(o.id);
           if (!sosOrdersList.has(o.id)) newSosDetected = true;
@@ -227,15 +229,14 @@ export default function KitchenApp() {
       }
     }
     setSosOrdersList(currentSos);
-  }, [orders, audioEnabled]);
+  }, [orders, audioEnabled, clockNow]);
 
   const tableCounts = useMemo(() => {
     const counts = {};
     orders.forEach(o => {
       const state = normalize(o.estado);
-      const isOrderToday = isToday(o.created_at);
       const hasItems = (o.items || []).some((item) => Number(item.cantidad || 0) > 0);
-      if (hasItems && isOrderToday && ['PENDIENTE', 'PREPARANDO', 'LISTO'].includes(state)) {
+      if (hasItems && ['PENDIENTE', 'PREPARANDO', 'LISTO'].includes(state)) {
         const tableId = orderTargetLabel(o);
         counts[tableId] = (counts[tableId] || 0) + 1;
       }
@@ -251,7 +252,7 @@ export default function KitchenApp() {
       const hasItems = (order.items || []).some((item) => Number(item.cantidad || 0) > 0);
       if (!hasItems) continue;
 
-      if (state === 'PAGADO' || state === 'ENTREGADO' || state === 'CANCELADO' || !isOrderToday) {
+      if (kitchenColumn(order) === 'ENTREGADO') {
         let dayStr = 'Hoy';
         if (!isOrderToday) {
           const d = new Date(order.created_at);
@@ -269,15 +270,16 @@ export default function KitchenApp() {
 
   useEffect(() => {
     const pendingOrders = grouped.PENDIENTE || [];
-    const currentPendingIds = new Set(pendingOrders.map((order) => Number(order.id)));
-    
+    const currentPendingIds = new Set(pendingOrders.map(pendingSignature));
+
+    if (!lastRefresh) return;
     if (isFirstLoad.current) {
       isFirstLoad.current = false;
       prevPendingIds.current = currentPendingIds;
       return;
     }
 
-    const newOrders = pendingOrders.filter((order) => !prevPendingIds.current.has(Number(order.id)));
+    const newOrders = pendingOrders.filter((order) => !prevPendingIds.current.has(pendingSignature(order)));
 
     if (newOrders.length) {
       if (!isMutedRef.current && audioEnabled) {
@@ -295,7 +297,7 @@ export default function KitchenApp() {
       );
     }
     prevPendingIds.current = currentPendingIds;
-  }, [grouped.PENDIENTE, audioEnabled]);
+  }, [grouped.PENDIENTE, audioEnabled, lastRefresh]);
 
   useEffect(() => {
     const previous = realtimeStatusRef.current;
@@ -312,43 +314,67 @@ export default function KitchenApp() {
     );
   }, [realtimeStatus, audioEnabled]);
 
-  const updateOrder = async (id, estado) => {
+  const updateOrder = async (order, estado) => {
+    if (actionLocks.current.has(order.id)) return;
+    actionLocks.current.add(order.id);
+    setBusyOrders(new Set(actionLocks.current));
     try {
-      await axios.put(`${BASE_URL}/pedidos/${id}`, { estado });
-      await loadOrders(true);
+      await axios.put(`${BASE_URL}/pedidos/${order.pedido_id}/rondas/${order.ronda_id}`, {
+        estado,
+      });
     } catch (error) {
       showToast('Error', error.response?.data?.message || 'No se pudo actualizar.', true);
+    } finally {
+      await loadOrders(true);
+      actionLocks.current.delete(order.id);
+      setBusyOrders(new Set(actionLocks.current));
     }
   };
 
   const pingWaiter = async (order) => {
+    if (actionLocks.current.has(order.id)) return;
+    actionLocks.current.add(order.id);
+    setBusyOrders(new Set(actionLocks.current));
     try {
-      await axios.post(`${BASE_URL}/pedidos/${order.id}/ping`).catch(() => {}); 
+      await axios.post(`${BASE_URL}/pedidos/${order.pedido_id}/ping`);
       showToast('¡Aviso Enviado!', `Se notificó al mesero: ${orderTargetLabel(order)}.`);
     } catch (error) {
-      showToast('Error', 'No se pudo enviar el aviso al mesero.', true);
+      showToast('Error', error.response?.data?.message || 'No se pudo enviar el aviso al mesero.', true);
+    } finally {
+      actionLocks.current.delete(order.id);
+      setBusyOrders(new Set(actionLocks.current));
     }
   };
 
-  const printText = (text) => {
-    showToast('Imprimiendo', 'Enviando comanda a impresora...');
+  const printOrders = async (selected) => {
+    if (printLock.current) return;
+    if (!selected.length) return showToast('Sin comandas', 'No hay comandas pendientes para imprimir.', true);
+    printLock.current = true;
+    setPrinting(true);
+    let sent = 0;
+    try {
+      for (const order of selected) {
+        await axios.post(`${BASE_URL}/pedidos/${order.pedido_id}/imprimir-comanda`, { ronda_id: order.ronda_id });
+        sent += 1;
+      }
+      showToast('Comandas en cola', `${sent} comandas pendientes del agente de impresión.`);
+    } catch (error) {
+      showToast('Error de impresión', `${sent} en cola. ${error.response?.data?.message || 'No se pudieron enviar las restantes.'}`, true);
+    } finally {
+      printLock.current = false;
+      setPrinting(false);
+      loadPrintStatus();
+    }
   };
 
-  const printAllPending = () => {
-    if (grouped.PENDIENTE.length + grouped.PREPARANDO.length === 0) {
-      showToast('Sin comandas', 'No hay comandas pendientes para imprimir.', true);
-      return;
-    }
-    printText('Impresión por lotes enviada');
-  };
+  const printAllPending = () => printOrders([...grouped.PENDIENTE, ...grouped.PREPARANDO]);
 
   const batchItems = useMemo(() => {
     const itemsMap = {};
     orders.forEach(order => {
       const state = normalize(order.estado);
-      const isOrderToday = isToday(order.created_at);
-      
-      if (isOrderToday && (state === 'PENDIENTE' || state === 'PREPARANDO')) {
+
+      if (state === 'PENDIENTE' || state === 'PREPARANDO') {
         (order.items || []).forEach(item => {
           const modsString = (item.modificadores || []).map(m => modifierLabel(m)).sort().join(' | ');
           const key = `${item.nombre}::${item.notas || ''}::${modsString}`;
@@ -367,11 +393,11 @@ export default function KitchenApp() {
     nuevos: grouped.PENDIENTE.length,
     prep: grouped.PREPARANDO.length,
     listos: grouped.LISTO.length,
-    completados: (grouped.ENTREGADO['Hoy'] || []).length, 
+    completados: (grouped.ENTREGADO['Hoy'] || []).length,
   };
 
   const elapsed = (createdAt) => {
-    const mins = Math.max(0, Math.round((Date.now() - new Date(createdAt).getTime()) / 60000));
+    const mins = Math.max(0, Math.round((clockNow - new Date(createdAt).getTime()) / 60000));
     if (mins < 1) return 'Hace segs';
     if (mins >= 60) {
       const hours = Math.floor(mins / 60);
@@ -384,7 +410,7 @@ export default function KitchenApp() {
   const kitchenSemaphore = (order) => {
     const state = normalize(order.estado);
     if (state !== 'PREPARANDO' && state !== 'PENDIENTE') return { borderColor: colors.line, backgroundColor: colors.surface, borderWidth: 1 };
-    
+
     const mins = prepMinutes(order);
     if (mins >= 20) return { borderColor: colors.danger, backgroundColor: isDark ? '#450A0A' : '#fee2e2', borderWidth: 2 };
     if (mins >= 15) return { borderColor: colors.danger, backgroundColor: isDark ? '#450A0A' : colors.danger + '1A', borderWidth: 2 };
@@ -419,14 +445,14 @@ export default function KitchenApp() {
     const semaphore = kitchenSemaphore(order);
     const colColor = getColColor(col.key);
     const isSOS = sosOrdersList.has(order.id);
-    
+
     const tableId = orderTargetLabel(order);
     const isAdicional = tableCounts[tableId] > 1;
 
     return (
       <BlinkingTicket isSOS={isSOS} key={`ticket-${order.id}`}>
         <View style={{ borderRadius: 14, padding: 14, marginBottom: 12, borderWidth: semaphore.borderWidth, borderColor: semaphore.borderColor, backgroundColor: semaphore.backgroundColor, ...softShadow }}>
-          
+
           <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
             {isSOS && (
               <View style={{ backgroundColor: colors.danger, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, flexDirection: 'row', alignItems: 'center' }}>
@@ -444,7 +470,7 @@ export default function KitchenApp() {
           <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
             <View style={{ flexShrink: 1 }}>
               <Text style={{ fontWeight: '900', fontSize: 16, color: colColor }} numberOfLines={1}>{tableId}</Text>
-              <Text style={{ fontSize: 12, fontWeight: '600', color: colors.muted, marginTop: 2 }}>{itemCount} productos</Text>
+              <Text style={{ fontSize: 12, fontWeight: '600', color: colors.muted, marginTop: 2 }}>Ronda #{order.ronda_id} · {itemCount} productos · {order.estado_cobro === 'PAGADO' ? 'Pagado' : 'Por cobrar'}</Text>
               {isPickupOrder(order) ? (
                 <Text style={{ fontSize: 11, fontWeight: '700', color: colors.muted, marginTop: 2 }} numberOfLines={1}>{orderPickupDetail(order)}</Text>
               ) : null}
@@ -478,20 +504,20 @@ export default function KitchenApp() {
           ) : null}
 
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            <TouchableOpacity onPress={() => printText('Imprimiendo')} style={{ borderRadius: 10, paddingHorizontal: 14, height: 40, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.field, borderWidth: 1, borderColor: colors.line }}>
+            <TouchableOpacity disabled={printing} onPress={() => printOrders([order])} style={{ borderRadius: 10, paddingHorizontal: 14, height: 40, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.field, borderWidth: 1, borderColor: colors.line }}>
               <Printer size={16} color={colors.ink} />
             </TouchableOpacity>
-            
+
             {normalize(order.estado) === 'LISTO' && (
-               <TouchableOpacity onPress={() => pingWaiter(order)} style={{ flex: 1, minWidth: '40%', height: 40, borderRadius: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.infoSoft, borderWidth: 1, borderColor: colors.info }}>
+               <TouchableOpacity disabled={busyOrders.has(order.id)} onPress={() => pingWaiter(order)} style={{ flex: 1, minWidth: '40%', height: 40, borderRadius: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.infoSoft, borderWidth: 1, borderColor: colors.info }}>
                  <Megaphone size={14} color={colors.info} />
                  <Text style={{ color: colors.info, fontSize: 12, fontWeight: '900', marginLeft: 6 }}>Avisar</Text>
                </TouchableOpacity>
             )}
 
             {col.action ? (
-              <TouchableOpacity onPress={() => updateOrder(order.id, col.next)} style={{ flex: 1, minWidth: '40%', height: 40, borderRadius: 10, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: colColor }}>
-                <Text style={{ color: colors.onAccent, fontSize: 13, fontWeight: '900' }}>{col.action}</Text>
+              <TouchableOpacity disabled={busyOrders.has(order.id)} onPress={() => updateOrder(order, col.next)} style={{ flex: 1, minWidth: '40%', height: 40, borderRadius: 10, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: colColor }}>
+                <Text style={{ color: colors.onAccent, fontSize: 13, fontWeight: '900' }}>{busyOrders.has(order.id) ? 'Actualizando…' : col.action}</Text>
               </TouchableOpacity>
             ) : (
               normalize(order.estado) !== 'LISTO' && (
@@ -571,7 +597,7 @@ export default function KitchenApp() {
 
   return (
     <SafeAreaView style={{ flex: 1, paddingTop: TOP_INSET, backgroundColor: colors.pageBg }}>
-      
+
       {toast && (
         <View style={{ position: 'absolute', top: TOP_INSET + 10, alignSelf: 'center', zIndex: 100, elevation: 10 }}>
           <View style={{ backgroundColor: toast.isError ? colors.danger : colors.surface, padding: 14, borderRadius: 12, flexDirection: 'row', alignItems: 'center', ...modernShadow, minWidth: 280, maxWidth: '90%', borderWidth: 1, borderColor: toast.isError ? colors.danger : colors.line }}>
@@ -587,7 +613,7 @@ export default function KitchenApp() {
       {/* HEADER */}
       <View style={{ paddingHorizontal: 16, paddingVertical: 14, backgroundColor: colors.surface, borderBottomWidth: 1, borderColor: colors.line, zIndex: 10 }}>
         <View style={{ flexDirection: isCompact ? 'column' : 'row', alignItems: isCompact ? 'flex-start' : 'center', justifyContent: 'space-between' }}>
-          
+
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: isCompact ? 14 : 0, marginRight: isCompact ? 0 : 16, flexShrink: 1 }}>
             <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: colors.softOrange, alignItems: 'center', justifyContent: 'center' }}>
               <ChefHat size={22} color={colors.brand} />
@@ -599,7 +625,7 @@ export default function KitchenApp() {
           </View>
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, alignItems: 'center' }} style={isCompact ? { width: '100%' } : { flexShrink: 0 }}>
-            
+
             {!audioEnabled && (
               <TouchableOpacity onPress={() => { setAudioEnabled(true); unlockWebAudio().catch(() => null); showToast('Sonido Activado', 'Las alertas sonoras están listas.'); }} style={{ height: 40, paddingHorizontal: 12, borderRadius: 10, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.successSoft, borderWidth: 1, borderColor: colors.success }}>
                 <Play size={16} color={colors.success} />
@@ -624,7 +650,7 @@ export default function KitchenApp() {
               <RefreshCw size={18} color={colors.ink} />
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={printAllPending} style={{ height: 40, width: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.field, borderWidth: 1, borderColor: colors.line }}>
+            <TouchableOpacity disabled={printing} onPress={printAllPending} style={{ height: 40, width: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.field, borderWidth: 1, borderColor: colors.line }}>
               <Printer size={18} color={colors.ink} />
             </TouchableOpacity>
 
@@ -635,6 +661,16 @@ export default function KitchenApp() {
         </View>
       </View>
 
+      <View style={{ paddingHorizontal: 14, paddingVertical: 8, backgroundColor: colors.surface }}>
+        <Text style={{ color: printStatusError ? colors.danger : colors.muted, fontSize: 12 }}>
+          {printStatusError ? 'No se pudo consultar la cola de impresión.' : printStatus
+            ? `Impresión automática: ${printStatus.counts?.PENDIENTE || 0} en cola · ${printStatus.counts?.PROCESANDO || 0} procesando · ${printStatus.counts?.ENVIADO || 0} enviadas · ${printStatus.counts?.SIMULADO || 0} simuladas · ${(printStatus.counts?.ERROR || 0) + (printStatus.counts?.REVISAR || 0)} por revisar`
+            : 'Consultando impresión automática…'}
+        </Text>
+        {printStatus?.jobs?.filter((job) => ['ERROR', 'REVISAR'].includes(job.estado)).slice(0, 2).map((job) => (
+          <Text key={job.id} style={{ color: colors.danger, fontSize: 12, marginTop: 4 }}>Comanda #{job.pedido_id}: {job.error || job.estado}</Text>
+        ))}
+      </View>
       <View style={{ padding: isCompact ? 10 : 12, flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
         <View style={{
           width: '100%',
@@ -669,16 +705,16 @@ export default function KitchenApp() {
 
       {/* SOLUCIÓN: Scroll adaptable. Si es móvil, se hace todo de forma vertical apilando las columnas */}
       {viewMode === 'batch' ? renderBatchCooking() : (
-        <ScrollView 
-          horizontal={!isCompact} 
+        <ScrollView
+          horizontal={!isCompact}
           showsHorizontalScrollIndicator={false}
           showsVerticalScrollIndicator={false}
           decelerationRate="normal"
-          contentContainerStyle={{ 
-            paddingHorizontal: isCompact ? 12 : 16, 
-            paddingBottom: BOTTOM_INSET + 32, 
+          contentContainerStyle={{
+            paddingHorizontal: isCompact ? 12 : 16,
+            paddingBottom: BOTTOM_INSET + 32,
             gap: 16,
-            flexDirection: isCompact ? 'column' : 'row' 
+            flexDirection: isCompact ? 'column' : 'row'
           }}
           style={{ flex: 1 }}
         >
@@ -689,7 +725,7 @@ export default function KitchenApp() {
             const historyDays = isHistory ? Object.keys(grouped.ENTREGADO) : [];
             const itemsCount = isHistory ? Object.values(grouped.ENTREGADO).reduce((sum, arr) => sum + arr.length, 0) : list.length;
             const colColor = getColColor(col.key);
-            
+
             // Función auxiliar para renderizar el listado
             const renderColContent = () => (
               <View style={{ paddingBottom: 10 }}>
@@ -723,15 +759,15 @@ export default function KitchenApp() {
             );
 
             return (
-              <View key={col.key} style={{ 
-                  width: isCompact ? '100%' : 360, 
+              <View key={col.key} style={{
+                  width: isCompact ? '100%' : 360,
                   flex: isCompact ? 0 : 1, // En móvil no ocupa flex 1, sino el tamaño de su contenido
-                  borderRadius: 16, 
-                  padding: 12, 
-                  backgroundColor: colors.surface, 
-                  borderWidth: 1, 
-                  borderColor: colors.line, 
-                  ...modernShadow 
+                  borderRadius: 16,
+                  padding: 12,
+                  backgroundColor: colors.surface,
+                  borderWidth: 1,
+                  borderColor: colors.line,
+                  ...modernShadow
               }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, paddingBottom: 12, borderBottomWidth: 1, borderColor: colors.line }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -744,7 +780,7 @@ export default function KitchenApp() {
                     <Text style={{ color: colors.onAccent, fontSize: 12, fontWeight: '900' }}>{itemsCount}</Text>
                   </View>
                 </View>
-                
+
                 {/* En móvil no queremos ScrollView anidados horizontalmente ni verticalmente, dejamos fluir el contenido. En escritorio sí. */}
                 {isCompact ? renderColContent() : (
                   <ScrollView showsVerticalScrollIndicator={false}>
@@ -758,11 +794,11 @@ export default function KitchenApp() {
       )}
 
       {viewMode === 'tickets' && (
-        <View style={{ 
-          paddingHorizontal: 16, 
-          paddingVertical: isCompact ? 10 : 12, 
-          backgroundColor: colors.surface, 
-          borderTopWidth: 1, 
+        <View style={{
+          paddingHorizontal: 16,
+          paddingVertical: isCompact ? 10 : 12,
+          backgroundColor: colors.surface,
+          borderTopWidth: 1,
           borderColor: colors.line,
           flexDirection: 'row',
           alignItems: 'center',
@@ -771,9 +807,9 @@ export default function KitchenApp() {
           <Info size={16} color={colors.brand} style={{ marginRight: 10 }} />
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <Text style={{ fontSize: 12, fontWeight: '700', color: colors.ink }}>
-              <Text style={{ color: colors.success }}>Verde:</Text> 0-10m   •   
-              <Text style={{ color: colors.warning }}> Amarillo:</Text> 10-15m   •   
-              <Text style={{ color: colors.danger }}> Rojo:</Text> 15-20m   •   
+              <Text style={{ color: colors.success }}>Verde:</Text> 0-10m   •
+              <Text style={{ color: colors.warning }}> Amarillo:</Text> 10-15m   •
+              <Text style={{ color: colors.danger }}> Rojo:</Text> 15-20m   •
               <Text style={{ color: colors.danger, fontWeight: '900' }}> Parpadeo:</Text> +20m
             </Text>
           </ScrollView>

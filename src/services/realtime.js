@@ -1,5 +1,6 @@
 import { io } from 'socket.io-client';
-import { BASE_URL } from '../context/AuthContext';
+import { BASE_URL, onSessionChange } from '../context/AuthContext';
+import * as safeStorage from './storage';
 
 let socket = null;
 
@@ -30,10 +31,26 @@ export function getRealtimeSocket() {
       reconnectionDelay: 800,
       reconnectionDelayMax: 5000,
       timeout: 12000,
+      // El servidor rechaza conexiones sin JWT. Se lee en cada (re)conexion,
+      // asi un token renovado se usa sin recrear el socket.
+      auth: (callback) => {
+        safeStorage.getItem('token').then(token => callback({ token: token || '' }), () => callback({ token: '' }));
+      },
     });
   }
   return socket;
 }
+
+// Cierra la conexion al cerrar o cambiar de sesion para no reutilizar
+// la identidad del usuario anterior.
+export function resetRealtimeSocket() {
+  if (!socket) return;
+  socket.removeAllListeners();
+  socket.disconnect();
+  socket = null;
+}
+
+onSessionChange(resetRealtimeSocket);
 
 export function subscribeRealtime(event, handler) {
   const client = getRealtimeSocket();

@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { BASE_URL, useAuth } from './AuthContext';
 import { REALTIME_EVENTS, getRealtimeSocket, subscribeRealtime } from '../services/realtime';
@@ -32,14 +32,19 @@ export function AdminProvider({ children }) {
   const [configuracion, setConfiguracion] = useState(null);
   const [auditoria, setAuditoria] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [readError, setReadError] = useState('');
   const [syncStatus, setSyncStatus] = useState('connecting');
+  const cajaReadVersion = useRef(0);
+  const pedidosReadVersion = useRef(0);
 
   const fetchPedidos = useCallback(async () => {
+    const version = ++pedidosReadVersion.current;
     try {
       const res = await axios.get(`${BASE_URL}/pedidos`);
-      setPedidos(res.data);
+      if (version === pedidosReadVersion.current) setPedidos(res.data);
     } catch {
-      setPedidos([]);
+      // Preserve the last confirmed accounts on a transient read failure.
+      setReadError('No se pudieron actualizar los pedidos. Se conserva la última información recibida.');
     }
   }, []);
 
@@ -48,7 +53,7 @@ export function AdminProvider({ children }) {
       const res = await axios.get(`${BASE_URL}/productos?includeInactive=1`);
       setProductos(res.data);
     } catch {
-      setProductos([]);
+      setReadError('No se pudieron actualizar algunos datos. Se conserva la última información recibida.');
     }
   }, []);
 
@@ -57,7 +62,7 @@ export function AdminProvider({ children }) {
       const res = await axios.get(`${BASE_URL}/productos/categorias?includeInactive=1`);
       setCategorias(res.data);
     } catch {
-      setCategorias([]);
+      setReadError('No se pudieron actualizar algunos datos. Se conserva la última información recibida.');
     }
   }, []);
 
@@ -66,7 +71,7 @@ export function AdminProvider({ children }) {
       const res = await axios.get(`${BASE_URL}/mesas?includeInactive=1`);
       setMesas(res.data);
     } catch {
-      setMesas([]);
+      setReadError('No se pudieron actualizar algunos datos. Se conserva la última información recibida.');
     }
   }, []);
 
@@ -75,7 +80,7 @@ export function AdminProvider({ children }) {
       const res = await axios.get(`${BASE_URL}/ubicaciones?includeInactive=1`);
       setUbicaciones(res.data);
     } catch {
-      setUbicaciones([]);
+      setReadError('No se pudieron actualizar algunos datos. Se conserva la última información recibida.');
     }
   }, []);
 
@@ -88,16 +93,17 @@ export function AdminProvider({ children }) {
       const res = await axios.get(`${BASE_URL}/trabajadores`);
       setTrabajadores(res.data);
     } catch {
-      setTrabajadores([]);
+      setReadError('No se pudieron actualizar algunos datos. Se conserva la última información recibida.');
     }
   }, [user?.rol]);
 
   const fetchCaja = useCallback(async () => {
+    const version = ++cajaReadVersion.current;
     try {
       const res = await axios.get(`${BASE_URL}/caja/resumen`);
-      setCaja(res.data);
+      if (version === cajaReadVersion.current) setCaja(res.data);
     } catch {
-      setCaja(null);
+      setReadError('No se pudo actualizar la caja. Reintenta antes de operar.');
     }
   }, []);
 
@@ -106,7 +112,7 @@ export function AdminProvider({ children }) {
       const res = await axios.get(`${BASE_URL}/inventario`);
       setInventario(res.data);
     } catch {
-      setInventario([]);
+      setReadError('No se pudieron actualizar algunos datos. Se conserva la última información recibida.');
     }
   }, []);
 
@@ -115,7 +121,7 @@ export function AdminProvider({ children }) {
       const res = await axios.get(`${BASE_URL}/extras?includeInactive=1`);
       setExtras(res.data);
     } catch {
-      setExtras([]);
+      setReadError('No se pudieron actualizar algunos datos. Se conserva la última información recibida.');
     }
   }, []);
 
@@ -124,7 +130,7 @@ export function AdminProvider({ children }) {
       const res = await axios.get(`${BASE_URL}/configuracion`);
       setConfiguracion(res.data);
     } catch {
-      setConfiguracion(null);
+      setReadError('No se pudo cargar la configuración. Reintenta antes de editarla.');
     }
   }, []);
 
@@ -141,12 +147,13 @@ export function AdminProvider({ children }) {
       setAuditoria(rows);
       return rows;
     } catch {
-      setAuditoria([]);
+      setReadError('No se pudieron actualizar algunos datos. Se conserva la última información recibida.');
       return [];
     }
   }, [user?.rol]);
 
   const refreshAll = useCallback(async () => {
+    setReadError('');
     await Promise.all([
       fetchPedidos(),
       fetchProductos(),
@@ -171,7 +178,7 @@ export function AdminProvider({ children }) {
 
   useEffect(() => {
     const socket = getRealtimeSocket();
-    const handleConnect = () => setSyncStatus('connected');
+    const handleConnect = () => { setSyncStatus('connected'); refreshAll(); };
     const handleDisconnect = () => setSyncStatus('disconnected');
     const handleError = () => setSyncStatus('error');
 
@@ -181,7 +188,10 @@ export function AdminProvider({ children }) {
     setSyncStatus(socket.connected ? 'connected' : 'connecting');
 
     const applyOrder = (payload = {}) => {
+      fetchInventario();
+      fetchProductos();
       if (payload.pedido) {
+        pedidosReadVersion.current += 1;
         setPedidos((current) => upsertById(current, payload.pedido));
       } else {
         fetchPedidos();
@@ -222,7 +232,7 @@ export function AdminProvider({ children }) {
       socket.off('connect_error', handleError);
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, [fetchCaja, fetchMesas, fetchPedidos]);
+  }, [fetchCaja, fetchMesas, fetchPedidos, fetchInventario, fetchProductos, refreshAll]);
 
   const createProducto = async (payload) => {
     const res = await axios.post(`${BASE_URL}/productos`, payload);
@@ -292,12 +302,12 @@ export function AdminProvider({ children }) {
 
   const cobrarPedido = async (pedido_id, metodo = 'Efectivo', extra = {}) => {
     const res = await axios.post(`${BASE_URL}/caja/cobrar`, { pedido_id, metodo, ...extra });
-    await refreshAll();
+    refreshAll().catch(() => {});
     return res.data;
   };
 
   const cerrarCaja = async (monto_final, observacion = null) => {
-    await axios.post(`${BASE_URL}/caja/cerrar`, { monto_final, observacion });
+    await axios.post(`${BASE_URL}/caja/cerrar`, { caja_id: caja?.caja?.id, monto_final, observacion });
     await fetchCaja();
     await fetchAuditoria();
   };
@@ -319,22 +329,22 @@ export function AdminProvider({ children }) {
 
   const createInventarioItem = async (payload) => {
     await axios.post(`${BASE_URL}/inventario`, payload);
-    await fetchInventario();
+    await Promise.all([fetchInventario(), fetchProductos()]);
   };
 
   const updateInventarioItem = async (id, payload) => {
     await axios.put(`${BASE_URL}/inventario/${id}`, payload);
-    await fetchInventario();
+    await Promise.all([fetchInventario(), fetchProductos()]);
   };
 
   const movimientoInventario = async (id, payload) => {
     await axios.post(`${BASE_URL}/inventario/${id}/movimiento`, payload);
-    await fetchInventario();
+    await Promise.all([fetchInventario(), fetchProductos()]);
   };
 
   const deleteInventarioItem = async (id) => {
     await axios.delete(`${BASE_URL}/inventario/${id}`);
-    await fetchInventario();
+    await Promise.all([fetchInventario(), fetchProductos()]);
   };
 
   const createExtra = async (payload) => {
@@ -377,10 +387,10 @@ export function AdminProvider({ children }) {
     return res.data;
   };
 
-  const uploadLogoConfiguracion = async (file) => {
-    const data = new FormData();
-    data.append('logo', file);
-    const res = await axios.post(`${BASE_URL}/configuracion/logo`, data);
+  const uploadLogoConfiguracion = async (fileOrData) => {
+    const data = fileOrData instanceof FormData ? fileOrData : new FormData();
+    if (!(fileOrData instanceof FormData)) data.append('logo', fileOrData);
+    const res = await axios.post(`${BASE_URL}/configuracion/logo`, data, { headers: { 'Content-Type': 'multipart/form-data' } });
     setConfiguracion(res.data.config);
     await fetchAuditoria();
     return res.data;
@@ -402,6 +412,7 @@ export function AdminProvider({ children }) {
         auditoria,
         loading,
         syncStatus,
+        readError,
         fetchPedidos,
         fetchProductos,
         fetchCategorias,
