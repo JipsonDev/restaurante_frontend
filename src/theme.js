@@ -198,13 +198,14 @@ export const comandaPalette = {
     focus: 'rgba(214,59,32,0.35)', overlay: 'rgba(15,17,21,0.42)', shadow: 'rgba(16,24,40,0.08)', glass: 'rgba(255,255,255,0.82)',
   },
   dark: {
-    bg: '#0F1012', surface: '#1A1B1F', surfaceAlt: '#23252A', soft: '#2A2C32', softer: '#33363D',
-    line: '#2A2C32', lineStrong: '#3A3D45', text: '#F2F3F5', muted: '#A4AAB4', faint: '#7E848F',
-    primary: '#D63B20', primaryHover: '#E2492D', primaryPressed: '#BF3219', primarySoft: 'rgba(214,59,32,0.2)', primaryText: '#FF8A70', onPrimary: '#FFFFFF',
-    ink: '#F2F3F5', onInk: '#16171A',
-    green: '#5FD69A', greenDot: '#3CCB7F', greenSoft: 'rgba(95,214,154,0.14)', amber: '#F5C451', amberSoft: 'rgba(245,196,81,0.14)', red: '#FF8A70', redSoft: 'rgba(255,138,112,0.16)',
-    sky: '#8DB7F5', skySoft: 'rgba(141,183,245,0.14)', purple: '#B9A5FA', purpleSoft: 'rgba(185,165,250,0.16)', pink: '#F38BB7', pinkSoft: 'rgba(243,139,183,0.16)',
-    focus: 'rgba(255,106,77,0.45)', overlay: 'rgba(0,0,0,0.6)', shadow: 'rgba(0,0,0,0.5)', glass: 'rgba(26,27,31,0.8)',
+    // Grafito frío: sin tintes rojos/naranjas translúcidos sobre el fondo (se veían «café»).
+    bg: '#0E0F12', surface: '#191A1F', surfaceAlt: '#22242A', soft: '#2A2C33', softer: '#34373F',
+    line: '#2A2C33', lineStrong: '#3B3E47', text: '#F3F4F6', muted: '#A3A9B4', faint: '#7D838F',
+    primary: '#D63B20', primaryHover: '#E2492D', primaryPressed: '#BF3219', primarySoft: '#2A2C33', primaryText: '#FF6B52', onPrimary: '#FFFFFF',
+    ink: '#F3F4F6', onInk: '#14161A',
+    green: '#5FD69A', greenDot: '#3CCB7F', greenSoft: '#1C2A24', amber: '#F5C451', amberSoft: '#2A2720', red: '#FF6B6B', redSoft: '#2C1E23',
+    sky: '#8DB7F5', skySoft: '#1D2533', purple: '#B9A5FA', purpleSoft: '#252238', pink: '#F38BB7', pinkSoft: '#2C1F29',
+    focus: 'rgba(214,59,32,0.5)', overlay: 'rgba(0,0,0,0.62)', shadow: 'rgba(0,0,0,0.5)', glass: 'rgba(25,26,31,0.82)',
   },
 };
 
