@@ -184,27 +184,27 @@ export function AdminAppearance({ children }) {
   return <ThemeContext.Provider value={{ ...theme, c }}>{children}</ThemeContext.Provider>;
 }
 
-// App del mesero — dirección «Comanda»: la libreta de comandas del restaurante.
-// Papel y tinta; achiote para la acción principal y lo que requiere cobro; los estados también se
-// distinguen por forma (discontinuo = libre, sólido = ocupada, relleno = por cobrar, sello = reservada).
+// App del mesero — dirección «Suave»: fondo blanco, tarjetas redondeadas con sombras suaves,
+// el rojo de la marca (más vivo) para la acción principal y lo que hay que cobrar.
+// Los estados de mesa usan color + punto + texto (nunca solo color).
 export const comandaPalette = {
   light: {
-    bg: '#F7F4EE', surface: '#FFFDF8', surfaceAlt: '#F1ECE2', soft: '#ECE6DA', softer: '#E2DACB',
-    line: '#DDD5C6', lineStrong: '#B9AF9C', text: '#1F1D1A', muted: '#6B655C', faint: '#736C61',
-    primary: '#B8321A', primaryHover: '#9E2913', primaryPressed: '#86220F', primarySoft: '#F6E1D9', primaryText: '#9E2913', onPrimary: '#FFFFFF',
-    ink: '#1F1D1A', onInk: '#FFFDF8',
-    green: '#1F6B45', greenSoft: '#DDEEE2', amber: '#9A5B00', amberSoft: '#F6E7C8', red: '#B8321A', redSoft: '#F6E1D9',
-    sky: '#2F5D8A', skySoft: '#E1E9F2', purple: '#5B3FA8', purpleSoft: '#E9E3F6', pink: '#A23B6B', pinkSoft: '#F5E1EA',
-    focus: 'rgba(184,50,26,0.45)', overlay: 'rgba(31,29,26,0.45)', shadow: 'rgba(31,29,26,0.12)',
+    bg: '#FFFFFF', surface: '#FFFFFF', surfaceAlt: '#F4F5F7', soft: '#EEF0F3', softer: '#E4E7EC',
+    line: '#ECEEF2', lineStrong: '#D5D9E0', text: '#14161A', muted: '#5F6672', faint: '#8A919C',
+    primary: '#D63B20', primaryHover: '#C2341B', primaryPressed: '#A92C16', primarySoft: '#FDECE8', primaryText: '#B8321A', onPrimary: '#FFFFFF',
+    ink: '#14161A', onInk: '#FFFFFF',
+    green: '#0F7B3E', greenDot: '#12A150', greenSoft: '#E7F6EC', amber: '#A15C00', amberSoft: '#FFF3DC', red: '#C8341B', redSoft: '#FDECE8',
+    sky: '#2563C9', skySoft: '#E8F0FD', purple: '#6D4AD1', purpleSoft: '#F0EBFD', pink: '#B33A73', pinkSoft: '#FCEAF2',
+    focus: 'rgba(214,59,32,0.35)', overlay: 'rgba(15,17,21,0.42)', shadow: 'rgba(16,24,40,0.08)', glass: 'rgba(255,255,255,0.82)',
   },
   dark: {
-    bg: '#1A1917', surface: '#23211E', surfaceAlt: '#2A2825', soft: '#312E2A', softer: '#3A3631',
-    line: '#3A3631', lineStrong: '#4D4842', text: '#EDE8E0', muted: '#B3AB9F', faint: '#9C9488',
-    primary: '#E8664A', primaryHover: '#F07A5F', primaryPressed: '#D2573C', primarySoft: 'rgba(224,87,58,0.18)', primaryText: '#FF8A70', onPrimary: '#1A1917',
-    ink: '#EDE8E0', onInk: '#1A1917',
-    green: '#7BD9A6', greenSoft: 'rgba(123,217,166,0.14)', amber: '#F2C14E', amberSoft: 'rgba(242,193,78,0.14)', red: '#FF8A70', redSoft: 'rgba(255,138,112,0.16)',
-    sky: '#8FB8E8', skySoft: 'rgba(143,184,232,0.14)', purple: '#B7A6F5', purpleSoft: 'rgba(183,166,245,0.16)', pink: '#F08BB0', pinkSoft: 'rgba(240,139,176,0.16)',
-    focus: 'rgba(224,87,58,0.55)', overlay: 'rgba(0,0,0,0.6)', shadow: 'rgba(0,0,0,0.45)',
+    bg: '#0F1012', surface: '#1A1B1F', surfaceAlt: '#23252A', soft: '#2A2C32', softer: '#33363D',
+    line: '#2A2C32', lineStrong: '#3A3D45', text: '#F2F3F5', muted: '#A4AAB4', faint: '#7E848F',
+    primary: '#D63B20', primaryHover: '#E2492D', primaryPressed: '#BF3219', primarySoft: 'rgba(214,59,32,0.2)', primaryText: '#FF8A70', onPrimary: '#FFFFFF',
+    ink: '#F2F3F5', onInk: '#16171A',
+    green: '#5FD69A', greenDot: '#3CCB7F', greenSoft: 'rgba(95,214,154,0.14)', amber: '#F5C451', amberSoft: 'rgba(245,196,81,0.14)', red: '#FF8A70', redSoft: 'rgba(255,138,112,0.16)',
+    sky: '#8DB7F5', skySoft: 'rgba(141,183,245,0.14)', purple: '#B9A5FA', purpleSoft: 'rgba(185,165,250,0.16)', pink: '#F38BB7', pinkSoft: 'rgba(243,139,183,0.16)',
+    focus: 'rgba(255,106,77,0.45)', overlay: 'rgba(0,0,0,0.6)', shadow: 'rgba(0,0,0,0.5)', glass: 'rgba(26,27,31,0.8)',
   },
 };
 
@@ -214,13 +214,13 @@ export function WaiterAppearance({ children }) {
   return <ThemeContext.Provider value={{ ...theme, c }}>{children}</ThemeContext.Provider>;
 }
 
-// Estado de mesa en la dirección Comanda: etiqueta, forma del borde y colores.
+// Estado de mesa: etiqueta, punto de color y tinte de la tarjeta.
 export function comandaTableMeta(state, c) {
   const map = {
-    Libre: { label: 'Libre', shape: 'dashed', bg: 'transparent', border: c.lineStrong, text: c.muted, number: c.text },
-    Ocupada: { label: 'Ocupada', shape: 'solid', bg: c.surface, border: c.ink, text: c.text, number: c.text },
-    Cuenta: { label: 'Por cobrar', shape: 'filled', bg: c.primary, border: c.primary, text: c.onPrimary, number: c.onPrimary },
-    Reservada: { label: 'Reservada', shape: 'stamp', bg: c.surface, border: c.purple, text: c.purple, number: c.text },
+    Libre: { label: 'Libre', shape: 'free', bg: c.surface, border: c.line, text: c.green, dot: c.greenDot, tint: c.greenSoft, number: c.text },
+    Ocupada: { label: 'Ocupada', shape: 'busy', bg: c.surface, border: c.line, text: c.sky, dot: c.sky, tint: c.skySoft, number: c.text },
+    Cuenta: { label: 'Por cobrar', shape: 'filled', bg: c.primary, border: c.primary, text: c.onPrimary, dot: c.onPrimary, tint: c.primarySoft, number: c.onPrimary },
+    Reservada: { label: 'Reservada', shape: 'reserved', bg: c.surface, border: c.line, text: c.purple, dot: c.purple, tint: c.purpleSoft, number: c.text },
   };
   return map[state] || map.Libre;
 }

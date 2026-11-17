@@ -8,7 +8,7 @@ import OrderTracking from './OrderTracking';
 export default function OrderServicePanel({order,now,colors:c,alerts}) {
   const [tab,setTab]=useState('tiempos');
   if(!order?.id)return null;
-  return <View style={{marginBottom:22,borderWidth:1,borderColor:c.line,borderRadius:6,backgroundColor:c.surface,overflow:'hidden'}}>
+  return <View style={{marginBottom:22,borderRadius:24,backgroundColor:c.surfaceAlt||c.elevated,overflow:'hidden',paddingTop:6}}>
     <WaiterTabs colors={c} label="Información del servicio" value={tab} onChange={setTab} tabs={[{key:'tiempos',label:'Tiempos',Icon:Clock3},{key:'seguimiento',label:'Seguimiento',Icon:History}]}>
       <View style={{padding:14}}>{tab==='tiempos'?<OrderServiceTiming order={order} now={now} colors={c} alerts={alerts}/>:<OrderTracking order={order} colors={c} embedded/>}</View>
     </WaiterTabs>

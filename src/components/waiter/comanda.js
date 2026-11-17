@@ -1,10 +1,12 @@
-// Kit «Comanda» de la app del mesero: la libreta de comandas hecha interfaz.
-// Papel, tinta, achiote y sellos. Tipografía Archivo (texto) + JetBrains Mono (números y precios).
-// Microinteracciones siempre activas: presión que «hunde» el papel, contador que rueda, sello que cae,
-// hoja inferior que se arrastra, avisos que suben, indicador que se desliza. Vibración corta en Android/web.
+// Kit «Suave» de la app del mesero: moderno, redondeado y con sombras suaves.
+// Tipografía Plus Jakarta Sans (texto y cifras tabulares). Rojo de la marca para la acción principal.
+// Microinteracciones siempre activas: presión con resorte, píldora que se desliza en la barra,
+// números que ruedan, hojas con resorte que se arrastran, confirmación con check que rebota,
+// avisos flotantes y vibración corta en Android/web.
+// (Los nombres de los componentes se conservan para que todas las pantallas los usen sin cambios.)
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, Modal, PanResponder, Platform, Pressable, Text, TextInput, Vibration, View, useWindowDimensions } from 'react-native';
-import { X } from 'lucide-react-native';
+import { Check, X } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 
 // createPortal solo existe en web (react-dom); en nativo se usa el árbol normal.
@@ -13,13 +15,13 @@ if (Platform.OS === 'web') { try { createPortalSafe = require('react-dom').creat
 
 export const WEB = Platform.OS === 'web';
 const ND = !WEB; // useNativeDriver
-export const EASE = Easing.bezier(0.23, 1, 0.32, 1);
-export const EASE_IN_OUT = Easing.bezier(0.77, 0, 0.175, 1);
+export const EASE = Easing.bezier(0.22, 1, 0.36, 1);
+export const EASE_IN_OUT = Easing.bezier(0.65, 0, 0.35, 1);
 
 // ── Tipografía ─────────────────────────────────────────────────────────────
-export const FONT = WEB ? '"Archivo", "Segoe UI", system-ui, sans-serif' : undefined;
-export const NARROW = WEB ? '"Archivo Narrow", "Archivo", "Segoe UI", system-ui, sans-serif' : undefined;
-export const MONO = WEB ? '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace' : Platform.select({ ios: 'Menlo', android: 'monospace', default: undefined });
+export const FONT = WEB ? '"Plus Jakarta Sans", "Segoe UI", system-ui, -apple-system, sans-serif' : undefined;
+export const NARROW = FONT;
+export const MONO = FONT; // las cifras usan la misma letra con números tabulares
 
 let fontsInjected = false;
 export function useComandaFonts() {
@@ -28,29 +30,41 @@ export function useComandaFonts() {
     fontsInjected = true;
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Narrow:wght@600;700&family=JetBrains+Mono:wght@500;700&display=swap';
+    link.href = 'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap';
     document.head.appendChild(link);
   }, []);
 }
 
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, x3: 32 };
-export const radius = { sm: 4, md: 6, lg: 10, sheet: 16, pill: 999 };
+export const radius = { sm: 10, md: 14, lg: 20, xl: 24, sheet: 28, pill: 999 };
 export const TOUCH = 48;     // toque mínimo
 export const TOUCH_MAIN = 56; // acción principal
 
+// Sombra suave en capas (web) o elevación (nativo).
+export function elevate(c, level = 1) {
+  if (c.isDark) return WEB ? { boxShadow: level > 1 ? '0 12px 32px rgba(0,0,0,0.45)' : 'none' } : { elevation: level * 2 };
+  if (WEB) {
+    const s = { 1: '0 1px 2px rgba(16,24,40,0.05), 0 2px 8px rgba(16,24,40,0.06)', 2: '0 4px 10px rgba(16,24,40,0.06), 0 12px 28px rgba(16,24,40,0.10)', 3: '0 10px 24px rgba(16,24,40,0.10), 0 24px 56px rgba(16,24,40,0.16)' };
+    return { boxShadow: s[level] || s[1] };
+  }
+  return { shadowColor: '#101828', shadowOffset: { width: 0, height: 2 * level }, shadowOpacity: 0.08 + 0.02 * level, shadowRadius: 6 * level, elevation: 2 * level };
+}
+// Sombra de color para el botón principal.
+const glow = (color, c) => (WEB && !c.isDark ? { boxShadow: `0 6px 16px ${color}40, 0 2px 4px ${color}30` } : {});
+
 export function T({ style, size = 16, weight = '400', color, ...props }) {
   const { c } = useTheme();
-  return <Text {...props} style={[{ fontFamily: FONT, fontSize: size, lineHeight: Math.round(size * 1.35), fontWeight: weight, color: color || c.text }, style]} />;
+  return <Text {...props} style={[{ fontFamily: FONT, fontSize: size, lineHeight: Math.round(size * 1.38), fontWeight: weight, color: color || c.text, letterSpacing: size >= 22 ? -0.4 : 0 }, style]} />;
 }
-// Números y precios: monoespaciada con cifras tabulares.
-export function Num({ style, size = 16, weight = '500', color, ...props }) {
+// Cifras: misma letra con números tabulares para que no «bailen».
+export function Num({ style, size = 16, weight = '600', color, ...props }) {
   const { c } = useTheme();
-  return <Text {...props} style={[{ fontFamily: MONO, fontSize: size, lineHeight: Math.round(size * 1.3), fontWeight: weight, color: color || c.text, fontVariant: ['tabular-nums'] }, style]} />;
+  return <Text {...props} style={[{ fontFamily: FONT, fontSize: size, lineHeight: Math.round(size * 1.3), fontWeight: weight, color: color || c.text, fontVariant: ['tabular-nums'], letterSpacing: size >= 22 ? -0.5 : 0 }, style]} />;
 }
-// Rótulo estrecho en mayúsculas, como el encabezado impreso de la libreta.
-export function Label({ style, color, size = 13, ...props }) {
+// Rótulo de sección: texto normal (sin mayúsculas forzadas), semibold y atenuado.
+export function Label({ style, color, size = 14, ...props }) {
   const { c } = useTheme();
-  return <Text {...props} style={[{ fontFamily: NARROW, fontSize: size, lineHeight: size + 4, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', color: color || c.muted }, style]} />;
+  return <Text {...props} style={[{ fontFamily: FONT, fontSize: size, lineHeight: size + 6, fontWeight: '600', color: color || c.muted }, style]} />;
 }
 
 export const money = n => `$${Number(n || 0).toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -66,39 +80,40 @@ export function haptic(kind = 'tap') {
 }
 
 // ── Presión ────────────────────────────────────────────────────────────────
-// Al presionar, el papel «se hunde»: escala 0,98 y baja 1 px en 90 ms; al soltar vuelve con resorte.
+// Al presionar se encoge a 0,97 en 100 ms; al soltar vuelve con un pequeño rebote.
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
-export function Press({ children, style, onPress, onLongPress, disabled, scaleTo = 0.98, sink = 1, hapticKind, hoverStyle, ...props }) {
+export function Press({ children, style, onPress, onLongPress, disabled, scaleTo = 0.97, sink = 0, hapticKind, hoverStyle, ...props }) {
   const v = useRef(new Animated.Value(0)).current;
   const [hovered, setHovered] = useState(false);
-  const down = () => Animated.timing(v, { toValue: 1, duration: 90, easing: EASE, useNativeDriver: ND }).start();
-  const up = () => Animated.spring(v, { toValue: 0, speed: 28, bounciness: 6, useNativeDriver: ND }).start();
+  const down = () => Animated.timing(v, { toValue: 1, duration: 100, easing: EASE, useNativeDriver: ND }).start();
+  const up = () => Animated.spring(v, { toValue: 0, speed: 22, bounciness: 9, useNativeDriver: ND }).start();
   return <AnimatedPressable {...props} disabled={disabled} delayLongPress={400}
     onPress={e => { if (hapticKind) haptic(hapticKind); onPress?.(e); }} onLongPress={onLongPress ? e => { haptic('medium'); onLongPress(e); } : undefined}
     onPressIn={down} onPressOut={up} onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)}
     style={[typeof style === 'function' ? style({ hovered }) : style, hovered && !disabled ? hoverStyle : null,
       { transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, scaleTo] }) }, { translateY: v.interpolate({ inputRange: [0, 1], outputRange: [0, sink] }) }] },
-      WEB ? { cursor: disabled ? 'default' : 'pointer', userSelect: 'none', WebkitTapHighlightColor: 'transparent' } : null]}>
+      WEB ? { cursor: disabled ? 'default' : 'pointer', userSelect: 'none', WebkitTapHighlightColor: 'transparent', transitionProperty: 'background-color, box-shadow, border-color', transitionDuration: '160ms' } : null]}>
     {typeof children === 'function' ? children({ hovered }) : children}
   </AnimatedPressable>;
 }
 
 // ── Botones ────────────────────────────────────────────────────────────────
-// variant: primary (achiote) · ink (tinta) · outline (borde de tinta) · ghost · danger
+// variant: primary (rojo de la marca, con brillo) · ink (oscuro) · outline (tonal gris) · ghost · danger (tonal rojo)
 export function Button({ children, icon: Icon, iconRight: IconRight, variant = 'outline', size = 'md', onPress, disabled, loading, full, style, accessibilityLabel, hapticKind = 'tap' }) {
   const { c } = useTheme();
   const h = size === 'lg' ? TOUCH_MAIN : size === 'sm' ? 40 : TOUCH;
   const v = {
-    primary: { bg: c.primary, fg: c.onPrimary, border: c.primary, hover: c.primaryHover },
-    ink: { bg: c.ink, fg: c.onInk, border: c.ink, hover: c.isDark ? '#FFFFFF' : '#000000' },
-    outline: { bg: c.surface, fg: c.text, border: c.ink, hover: c.surfaceAlt },
-    ghost: { bg: 'transparent', fg: c.text, border: 'transparent', hover: c.soft },
-    danger: { bg: c.surface, fg: c.red, border: c.red, hover: c.redSoft },
+    primary: { bg: c.primary, fg: c.onPrimary, hover: c.primaryHover },
+    ink: { bg: c.ink, fg: c.onInk, hover: c.isDark ? '#FFFFFF' : '#2A2D33' },
+    outline: { bg: c.surfaceAlt, fg: c.text, hover: c.soft },
+    ghost: { bg: 'transparent', fg: c.text, hover: c.surfaceAlt },
+    danger: { bg: c.redSoft, fg: c.red, hover: c.redSoft },
   }[variant];
   const off = disabled || loading;
   return <Press accessibilityRole="button" accessibilityLabel={accessibilityLabel} accessibilityState={{ disabled: off, busy: !!loading }} disabled={off} onPress={onPress} hapticKind={hapticKind}
-    style={[{ minHeight: h, paddingHorizontal: size === 'sm' ? 12 : 16, borderRadius: radius.md, borderWidth: variant === 'outline' ? 1.5 : 1, borderColor: v.border, backgroundColor: v.bg,
-      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: off && !loading ? 0.45 : 1 }, full ? { alignSelf: 'stretch' } : { alignSelf: 'flex-start' }, style]}
+    style={[{ minHeight: h, paddingHorizontal: size === 'sm' ? 14 : size === 'lg' ? 22 : 18, borderRadius: radius.pill, backgroundColor: v.bg,
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: off && !loading ? 0.45 : 1 }, variant === 'primary' && !off ? glow(c.primary, c) : null,
+      full ? { alignSelf: 'stretch' } : { alignSelf: 'flex-start' }, style]}
     hoverStyle={{ backgroundColor: v.hover }}>
     {loading ? <ActivityIndicator size="small" color={v.fg} /> : Icon ? <Icon size={size === 'lg' ? 20 : 18} color={v.fg} strokeWidth={2.2} /> : null}
     {children != null ? (typeof children === 'string' || typeof children === 'number'
@@ -107,90 +122,105 @@ export function Button({ children, icon: Icon, iconRight: IconRight, variant = '
   </Press>;
 }
 
-export function IconButton({ icon: Icon, label, onPress, size = TOUCH, badge, tone, disabled, color }) {
+export function IconButton({ icon: Icon, label, onPress, size = TOUCH, badge, tone, disabled, color, filled }) {
   const { c } = useTheme();
-  return <Press accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress} hapticKind="tap" scaleTo={0.92} sink={0}
-    style={{ width: size, height: size, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.4 : 1 }} hoverStyle={{ backgroundColor: c.soft }}>
+  return <Press accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress} hapticKind="tap" scaleTo={0.9}
+    style={{ width: size, height: size, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.4 : 1, backgroundColor: filled ? c.surfaceAlt : 'transparent' }} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
     <Icon size={22} color={color || (tone === 'danger' ? c.red : c.text)} strokeWidth={2} />
-    {badge ? <View style={{ position: 'absolute', top: 6, right: 4, minWidth: 18, height: 18, paddingHorizontal: 4, borderRadius: 9, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: c.bg }}>
-      <Num size={10} weight="700" color={c.onPrimary}>{badge > 99 ? '99+' : badge}</Num>
+    {badge ? <View style={{ position: 'absolute', top: 5, right: 3, minWidth: 18, height: 18, paddingHorizontal: 4, borderRadius: 9, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: c.bg }}>
+      <Num size={10} weight="800" color={c.onPrimary}>{badge > 99 ? '99+' : badge}</Num>
     </View> : null}
   </Press>;
 }
 
-// Filtro o elección: la selección es tinta (nunca un color de estado).
+// Filtro o elección: píldora gris; seleccionada, oscura con texto blanco.
 export function Chip({ children, selected, onPress, count, icon: Icon, accessibilityLabel }) {
   const { c } = useTheme();
-  return <Press accessibilityRole="button" accessibilityLabel={accessibilityLabel} accessibilityState={{ selected }} onPress={onPress} hapticKind="select" scaleTo={0.96}
-    style={{ minHeight: 40, paddingHorizontal: 14, borderRadius: radius.pill, borderWidth: 1.5, borderColor: selected ? c.ink : c.lineStrong, backgroundColor: selected ? c.ink : 'transparent',
-      flexDirection: 'row', alignItems: 'center', gap: 6 }} hoverStyle={selected ? null : { borderColor: c.ink }}>
-    {Icon ? <Icon size={16} color={selected ? c.onInk : c.text} /> : null}
-    <T size={15} weight={selected ? '700' : '500'} color={selected ? c.onInk : c.text} numberOfLines={1}>{children}</T>
-    {count != null ? <Num size={13} color={selected ? c.onInk : c.muted}>{count}</Num> : null}
+  return <Press accessibilityRole="button" accessibilityLabel={accessibilityLabel} accessibilityState={{ selected }} onPress={onPress} hapticKind="select" scaleTo={0.94}
+    style={{ minHeight: 40, paddingHorizontal: 16, borderRadius: radius.pill, backgroundColor: selected ? c.ink : c.surfaceAlt,
+      flexDirection: 'row', alignItems: 'center', gap: 7 }} hoverStyle={selected ? null : { backgroundColor: c.soft }}>
+    {Icon ? <Icon size={16} color={selected ? c.onInk : c.text} strokeWidth={2.2} /> : null}
+    <T size={15} weight={selected ? '700' : '600'} color={selected ? c.onInk : c.text} numberOfLines={1}>{children}</T>
+    {count != null ? <View style={{ minWidth: 22, height: 20, paddingHorizontal: 6, borderRadius: 10, backgroundColor: selected ? 'rgba(255,255,255,0.18)' : c.bg, alignItems: 'center', justifyContent: 'center' }}>
+      <Num size={12} weight="700" color={selected ? c.onInk : c.muted}>{count}</Num>
+    </View> : null}
   </Press>;
 }
 
-// ── Papel ──────────────────────────────────────────────────────────────────
-// Hoja: superficie de papel con borde fino y esquinas casi rectas.
-export function Sheet({ children, style, ...props }) {
+// ── Superficies ────────────────────────────────────────────────────────────
+// Tarjeta: blanca, muy redondeada, con sombra suave (en oscuro, borde fino).
+export function Sheet({ children, style, level = 1, ...props }) {
   const { c } = useTheme();
-  return <View {...props} style={[{ backgroundColor: c.surface, borderRadius: radius.sm, borderWidth: 1, borderColor: c.line }, style]}>{children}</View>;
+  return <View {...props} style={[{ backgroundColor: c.surface, borderRadius: radius.lg, borderWidth: 1, borderColor: c.isDark ? c.line : 'rgba(16,24,40,0.04)' }, elevate(c, level), style]}>{children}</View>;
 }
-// Línea perforada (separador de comanda).
+// Separador fino.
 export function Perforation({ style }) {
   const { c } = useTheme();
-  return <View style={[{ height: 0, borderTopWidth: 1.5, borderStyle: 'dashed', borderColor: c.lineStrong }, style]} />;
+  return <View style={[{ height: 1, backgroundColor: c.line }, style]} />;
 }
-// Línea de comanda: «Batido de mora ····· 2,80».
-export function LeaderLine({ left, right, dim }) {
-  const { c } = useTheme();
-  return <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6 }}>
-    <View style={{ flexShrink: 1 }}>{left}</View>
-    <View style={{ flex: 1, minWidth: 12, marginBottom: 5, borderBottomWidth: 1.5, borderStyle: 'dotted', borderColor: dim ? c.line : c.lineStrong }} />
+// Fila con texto a la izquierda y valor a la derecha.
+export function LeaderLine({ left, right }) {
+  return <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+    <View style={{ flex: 1, minWidth: 0 }}>{left}</View>
     <View>{right}</View>
   </View>;
 }
 
-// ── Sello ──────────────────────────────────────────────────────────────────
-// Sello de goma: estático (etiqueta con borde) o animado al aparecer (cae: escala 1,15→1, gira −6°).
-export function Stamp({ children, color, animate, rotate = -6, size = 13, style }) {
+// ── Insignias ──────────────────────────────────────────────────────────────
+// Píldora de estado con tinte suave y punto. Con `animate`, aparece con un pequeño rebote.
+const SOFT = c => ({ [c.green]: c.greenSoft, [c.amber]: c.amberSoft, [c.red]: c.redSoft, [c.primary]: c.primarySoft, [c.purple]: c.purpleSoft, [c.sky]: c.skySoft, [c.muted]: c.surfaceAlt, [c.ink]: c.surfaceAlt, [c.text]: c.surfaceAlt });
+export function Stamp({ children, color, animate, size = 13, style, dot = true }) {
   const { c } = useTheme();
   const tone = color || c.primary;
+  const bg = SOFT(c)[tone] || c.surfaceAlt;
   const v = useRef(new Animated.Value(animate ? 0 : 1)).current;
-  useEffect(() => { if (animate) { v.setValue(0); haptic('success'); Animated.spring(v, { toValue: 1, speed: 16, bounciness: 9, useNativeDriver: ND }).start(); } }, [animate]);
-  return <Animated.View style={[{ alignSelf: 'flex-start', borderWidth: 2, borderColor: tone, borderRadius: radius.sm, paddingHorizontal: 6, paddingVertical: 1,
-    opacity: v, transform: [{ rotate: `${rotate}deg` }, { scale: v.interpolate({ inputRange: [0, 1], outputRange: [1.5, 1] }) }] }, style]}>
-    <Label size={size} color={tone}>{children}</Label>
+  useEffect(() => { if (animate) { v.setValue(0); haptic('success'); Animated.spring(v, { toValue: 1, speed: 14, bounciness: 12, useNativeDriver: ND }).start(); } }, [animate]);
+  return <Animated.View style={[{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: bg, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 3,
+    opacity: v, transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) }] }, style]}>
+    {dot ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: tone }} /> : null}
+    <T size={size} weight="700" color={tone} numberOfLines={1}>{typeof children === 'string' ? children.charAt(0) + children.slice(1).toLowerCase() : children}</T>
   </Animated.View>;
 }
 
-// Sello grande que cae en el centro de la pantalla (p. ej. «ENVIADA»): aparece, queda 900 ms y se desvanece.
+// Confirmación central (p. ej. «Enviada»): círculo que rebota con un check que se dibuja, y se desvanece.
 export function StampBurst({ text, visible, onDone, color }) {
   const { c } = useTheme();
   const v = useRef(new Animated.Value(0)).current;
+  const ring = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (!visible) return;
     haptic('success');
-    v.setValue(0);
-    Animated.sequence([
-      Animated.spring(v, { toValue: 1, speed: 14, bounciness: 10, useNativeDriver: ND }),
-      Animated.delay(900),
-      Animated.timing(v, { toValue: 2, duration: 220, easing: EASE, useNativeDriver: ND }),
+    v.setValue(0); ring.setValue(0);
+    Animated.parallel([
+      Animated.sequence([
+        Animated.spring(v, { toValue: 1, speed: 12, bounciness: 14, useNativeDriver: ND }),
+        Animated.delay(750),
+        Animated.timing(v, { toValue: 2, duration: 220, easing: EASE, useNativeDriver: ND }),
+      ]),
+      Animated.timing(ring, { toValue: 1, duration: 650, easing: EASE, useNativeDriver: ND }),
     ]).start(() => onDone?.());
   }, [visible]);
   if (!visible) return null;
-  const tone = color || c.primary;
+  const tone = color || c.green;
+  const label = typeof text === 'string' ? text.charAt(0) + text.slice(1).toLowerCase() : text;
   return <View pointerEvents="none" style={{ position: WEB ? 'fixed' : 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 20000 }}>
-    <Animated.View accessibilityLiveRegion="assertive" style={{ borderWidth: 4, borderColor: tone, borderRadius: radius.md, paddingHorizontal: 22, paddingVertical: 8, backgroundColor: c.isDark ? 'rgba(26,25,23,0.85)' : 'rgba(255,253,248,0.9)',
+    <Animated.View accessibilityLiveRegion="assertive" style={[{ alignItems: 'center', gap: 12, paddingHorizontal: 32, paddingVertical: 24, borderRadius: radius.xl, backgroundColor: c.surface,
       opacity: v.interpolate({ inputRange: [0, 1, 2], outputRange: [0, 1, 0] }),
-      transform: [{ rotate: '-8deg' }, { scale: v.interpolate({ inputRange: [0, 1, 2], outputRange: [1.6, 1, 0.96] }) }] }}>
-      <Label size={34} color={tone} style={{ lineHeight: 40, letterSpacing: 2 }}>{text}</Label>
+      transform: [{ scale: v.interpolate({ inputRange: [0, 1, 2], outputRange: [0.7, 1, 0.94] }) }] }, elevate(c, 3)]}>
+      <View style={{ width: 64, height: 64, alignItems: 'center', justifyContent: 'center' }}>
+        <Animated.View style={{ position: 'absolute', width: 64, height: 64, borderRadius: 32, borderWidth: 3, borderColor: tone,
+          opacity: ring.interpolate({ inputRange: [0, 1], outputRange: [0.7, 0] }), transform: [{ scale: ring.interpolate({ inputRange: [0, 1], outputRange: [1, 1.7] }) }] }} />
+        <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: tone, alignItems: 'center', justifyContent: 'center' }}>
+          <Check size={34} color="#FFFFFF" strokeWidth={3} />
+        </View>
+      </View>
+      <T size={20} weight="800">{label}</T>
     </Animated.View>
   </View>;
 }
 
 // ── Cifras ─────────────────────────────────────────────────────────────────
-// Número que rueda: al cambiar, el valor anterior sale hacia arriba y el nuevo entra desde abajo (180 ms).
+// Número que rueda: el valor anterior sale y el nuevo entra con desvanecido (200 ms).
 export function RollingNumber({ value, format = v => String(v), size = 16, weight = '700', color, style }) {
   const [shown, setShown] = useState(value);
   const [prev, setPrev] = useState(null);
@@ -200,35 +230,35 @@ export function RollingNumber({ value, format = v => String(v), size = 16, weigh
     if (value === shown) return;
     dir.current = Number(value) >= Number(shown) ? 1 : -1;
     setPrev(shown); setShown(value); v.setValue(0);
-    Animated.timing(v, { toValue: 1, duration: 180, easing: EASE, useNativeDriver: ND }).start(() => setPrev(null));
+    Animated.timing(v, { toValue: 1, duration: 200, easing: EASE, useNativeDriver: ND }).start(() => setPrev(null));
   }, [value]);
   const h = Math.round(size * 1.3);
   return <View style={[{ height: h, overflow: 'hidden', justifyContent: 'center' }, style]}>
-    {prev != null ? <Animated.View style={{ position: 'absolute', left: 0, right: 0, transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [0, -h * dir.current] }) }] }}>
+    {prev != null ? <Animated.View style={{ position: 'absolute', left: 0, right: 0, opacity: v.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }), transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [0, -h * dir.current] }) }] }}>
       <Num size={size} weight={weight} color={color}>{format(prev)}</Num></Animated.View> : null}
-    <Animated.View style={{ transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [prev != null ? h * dir.current : 0, 0] }) }] }}>
+    <Animated.View style={{ opacity: prev != null ? v : 1, transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [prev != null ? h * dir.current : 0, 0] }) }] }}>
       <Num size={size} weight={weight} color={color}>{format(shown)}</Num>
     </Animated.View>
   </View>;
 }
 
-// Cantidad − n +, con número que rueda.
+// Cantidad: píldora gris con botones redondos − n +.
 export function Tally({ value, onChange, min = 0, max = 99, label = 'Cantidad' }) {
   const { c } = useTheme();
   const btn = (delta, glyph, disabled) => <Press accessibilityRole="button" accessibilityLabel={`${delta > 0 ? 'Aumentar' : 'Disminuir'} ${label.toLowerCase()}`} disabled={disabled}
-    onPress={() => onChange(Math.max(min, Math.min(max, value + delta)))} hapticKind="select" scaleTo={0.9} sink={0}
-    style={{ width: TOUCH, height: TOUCH, alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.35 : 1 }}>
-    <Num size={22} weight="700">{glyph}</Num>
+    onPress={() => onChange(Math.max(min, Math.min(max, value + delta)))} hapticKind="select" scaleTo={0.86}
+    style={[{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: delta > 0 ? c.ink : c.surface, opacity: disabled ? 0.35 : 1 }, delta > 0 ? null : elevate(c, 1)]}>
+    <T size={22} weight="600" color={delta > 0 ? c.onInk : c.text} style={{ lineHeight: 24 }}>{glyph}</T>
   </Press>;
-  return <View accessibilityLabel={`${label}: ${value}`} style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: c.ink, borderRadius: radius.md, alignSelf: 'flex-start' }}>
+  return <View accessibilityLabel={`${label}: ${value}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, padding: 4, borderRadius: radius.pill, backgroundColor: c.surfaceAlt, alignSelf: 'flex-start' }}>
     {btn(-1, '−', value <= min)}
-    <View style={{ minWidth: 36, alignItems: 'center' }}><RollingNumber value={value} size={20} /></View>
+    <View style={{ minWidth: 34, alignItems: 'center' }}><RollingNumber value={value} size={18} weight="800" /></View>
     {btn(1, '+', value >= max)}
   </View>;
 }
 
 // ── Hoja inferior ──────────────────────────────────────────────────────────
-// Sube con resorte; se cierra arrastrando hacia abajo (1:1, cierra al 30 % o a > 0,6 px/ms) o tocando el fondo.
+// Sube con resorte; se cierra arrastrando hacia abajo (sigue al dedo, cierra al 30 % o con un tirón) o tocando el fondo.
 export function BottomSheet({ visible, onClose, title, subtitle, children, footer, maxHeight = '88%', busy }) {
   const { c } = useTheme();
   const { height: vh, width: vw } = useWindowDimensions();
@@ -238,8 +268,8 @@ export function BottomSheet({ visible, onClose, title, subtitle, children, foote
   const [mounted, setMounted] = useState(visible);
   const heightRef = useRef(600);
   useEffect(() => {
-    if (visible) { setMounted(true); drag.setValue(0); y.setValue(1); Animated.spring(y, { toValue: 0, speed: 16, bounciness: 3, useNativeDriver: ND }).start(); }
-    else if (mounted) Animated.timing(y, { toValue: 1, duration: 200, easing: EASE, useNativeDriver: ND }).start(() => setMounted(false));
+    if (visible) { setMounted(true); drag.setValue(0); y.setValue(1); Animated.spring(y, { toValue: 0, speed: 14, bounciness: 5, useNativeDriver: ND }).start(); }
+    else if (mounted) Animated.timing(y, { toValue: 1, duration: 220, easing: EASE, useNativeDriver: ND }).start(() => setMounted(false));
   }, [visible]);
   const close = () => { if (!busy) onClose?.(); };
   const pan = useMemo(() => PanResponder.create({
@@ -247,66 +277,67 @@ export function BottomSheet({ visible, onClose, title, subtitle, children, foote
     onPanResponderMove: (_, g) => drag.setValue(g.dy > 0 ? g.dy : g.dy * 0.2),
     onPanResponderRelease: (_, g) => {
       if (g.dy > heightRef.current * 0.3 || g.vy > 0.6) { haptic('light'); close(); }
-      else Animated.spring(drag, { toValue: 0, speed: 20, bounciness: 6, useNativeDriver: ND }).start();
+      else Animated.spring(drag, { toValue: 0, speed: 20, bounciness: 8, useNativeDriver: ND }).start();
     },
   }), [busy]);
   if (!mounted) return null;
+  const R = radius.sheet;
   return <Modal visible transparent animationType="none" onRequestClose={close}>
-    <Animated.View style={{ flex: 1, backgroundColor: c.overlay, opacity: y.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }), justifyContent: wide ? 'center' : 'flex-end', alignItems: 'center' }}>
+    <Animated.View style={[{ flex: 1, backgroundColor: c.overlay, opacity: y.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }), justifyContent: wide ? 'center' : 'flex-end', alignItems: 'center', padding: wide ? 24 : 0 },
+      null]}>
       <Pressable accessibilityLabel="Cerrar" onPress={close} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0 }} />
       <Animated.View onLayout={e => { heightRef.current = e.nativeEvent.layout.height; }} accessibilityViewIsModal
-        style={{ width: '100%', maxWidth: wide ? 560 : undefined, maxHeight, backgroundColor: c.surface, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet,
-          borderBottomLeftRadius: wide ? radius.sheet : 0, borderBottomRightRadius: wide ? radius.sheet : 0, overflow: 'hidden',
-          transform: [{ translateY: Animated.add(y.interpolate({ inputRange: [0, 1], outputRange: [0, Math.min(vh, 900)] }), drag) }],
-          ...(WEB ? { boxShadow: '0 -8px 30px rgba(0,0,0,0.18)' } : { elevation: 16 }) }}>
-        <View {...pan.panHandlers} style={{ paddingTop: 8, paddingHorizontal: space.lg, paddingBottom: title ? space.md : 4 }}>
-          <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: c.lineStrong, marginBottom: title ? space.md : 0 }} />
+        style={[{ width: '100%', maxWidth: wide ? 560 : undefined, maxHeight, backgroundColor: c.surface, borderTopLeftRadius: R, borderTopRightRadius: R,
+          borderBottomLeftRadius: wide ? R : 0, borderBottomRightRadius: wide ? R : 0, overflow: 'hidden',
+          transform: [{ translateY: Animated.add(y.interpolate({ inputRange: [0, 1], outputRange: [0, Math.min(vh, 900)] }), drag) }] }, elevate(c, 3)]}>
+        <View {...pan.panHandlers} style={{ paddingTop: 10, paddingHorizontal: space.xl, paddingBottom: title ? space.sm : 4 }}>
+          <View style={{ alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: c.softer, marginBottom: title ? space.md : 0 }} />
           {title ? <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.md }}>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <T size={20} weight="700" accessibilityRole="header">{title}</T>
+              <T size={21} weight="800" accessibilityRole="header">{title}</T>
               {subtitle ? <T size={15} color={c.muted}>{subtitle}</T> : null}
             </View>
-            <IconButton icon={X} label="Cerrar" onPress={close} size={40} disabled={busy} />
+            <IconButton icon={X} label="Cerrar" onPress={close} size={40} disabled={busy} filled />
           </View> : null}
         </View>
-        {title ? <Perforation /> : null}
-        <Animated.ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: space.lg, gap: space.lg }} style={{ flexShrink: 1 }}>{children}</Animated.ScrollView>
-        {footer ? <View style={{ paddingHorizontal: space.lg, paddingTop: space.md, paddingBottom: space.lg, borderTopWidth: 1, borderTopColor: c.line, backgroundColor: c.surface }}>{footer}</View> : null}
+        <Animated.ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingHorizontal: space.xl, paddingTop: space.md, paddingBottom: space.xl, gap: space.lg }} style={{ flexShrink: 1 }}>{children}</Animated.ScrollView>
+        {footer ? <View style={{ paddingHorizontal: space.xl, paddingTop: space.md, paddingBottom: space.xl, backgroundColor: c.surface, borderTopWidth: 1, borderTopColor: c.line }}>{footer}</View> : null}
       </Animated.View>
     </Animated.View>
   </Modal>;
 }
 
 // ── Avisos ─────────────────────────────────────────────────────────────────
-// Suben desde abajo (sobre la barra de navegación) con resorte; con acción duran 5 s.
+// Píldora flotante oscura que sube con resorte sobre la barra inferior; con acción dura 5 s.
 const ToastCtx = createContext({ show: () => {}, lift: () => {} });
 export const useComandaToast = () => useContext(ToastCtx);
-// Desplaza los avisos hacia arriba (p. ej. sobre una barra fija de acción).
 export const useToastLift = () => useContext(ToastCtx).lift;
 
-function ToastItem({ t, onDone, bottom }) {
+function ToastItem({ t, onDone }) {
   const { c } = useTheme();
   const v = useRef(new Animated.Value(0)).current;
-  const close = useCallback(() => Animated.timing(v, { toValue: 0, duration: 160, easing: EASE, useNativeDriver: ND }).start(() => onDone(t.id)), []);
+  const close = useCallback(() => Animated.timing(v, { toValue: 0, duration: 180, easing: EASE, useNativeDriver: ND }).start(() => onDone(t.id)), []);
   useEffect(() => {
-    Animated.spring(v, { toValue: 1, speed: 18, bounciness: 7, useNativeDriver: ND }).start();
+    Animated.spring(v, { toValue: 1, speed: 16, bounciness: 9, useNativeDriver: ND }).start();
     const timer = setTimeout(close, t.duration || (t.action ? 5000 : 3200));
     return () => clearTimeout(timer);
   }, []);
   const Icon = t.icon;
-  const tone = t.tone === 'error' ? c.red : t.tone === 'warning' ? c.amber : t.tone === 'success' ? c.green : null;
-  return <Animated.View accessibilityRole="alert" accessibilityLiveRegion="polite" style={{ opacity: v, transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [40, 0] }) }],
-    alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: 56, paddingLeft: space.lg, paddingRight: 6, borderRadius: radius.md,
-    backgroundColor: c.ink, ...(WEB ? { boxShadow: '0 8px 24px rgba(0,0,0,0.25)' } : { elevation: 12 }) }}>
-    {Icon ? <Icon size={20} color={tone || c.onInk} /> : tone ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: tone }} /> : null}
+  const tone = t.tone === 'error' ? '#FF8A70' : t.tone === 'warning' ? '#F5C451' : t.tone === 'success' ? '#5FD69A' : null;
+  const bg = c.isDark ? '#2A2C32' : '#16181D';
+  return <Animated.View accessibilityRole="alert" accessibilityLiveRegion="polite" style={[{ opacity: v, transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) }, { scale: v.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) }],
+    alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: 56, paddingLeft: space.lg, paddingRight: 6, borderRadius: radius.lg,
+    backgroundColor: bg }, WEB ? { boxShadow: '0 12px 32px rgba(0,0,0,0.28)' } : { elevation: 12 }]}>
+    {Icon ? <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}><Icon size={18} color={tone || '#FFFFFF'} /></View>
+      : tone ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: tone }} /> : null}
     <View style={{ flex: 1, minWidth: 0, paddingVertical: 10 }}>
-      <T size={15} weight="600" color={c.onInk}>{t.message}</T>
-      {t.detail ? <T size={13} color={c.onInk} style={{ opacity: 0.75 }}>{t.detail}</T> : null}
+      <T size={15} weight="700" color="#FFFFFF">{t.message}</T>
+      {t.detail ? <T size={13} color="#FFFFFF" style={{ opacity: 0.7 }}>{t.detail}</T> : null}
     </View>
-    {t.action ? <Press accessibilityRole="button" onPress={() => { t.action.onPress(); close(); }} hapticKind="tap" style={{ minHeight: TOUCH, paddingHorizontal: 12, justifyContent: 'center' }}>
-      <T size={15} weight="700" color={c.isDark ? c.primary : '#FFB199'} style={{ textDecorationLine: 'underline' }}>{t.action.label}</T>
+    {t.action ? <Press accessibilityRole="button" onPress={() => { t.action.onPress(); close(); }} hapticKind="tap" style={{ minHeight: 36, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.12)', justifyContent: 'center' }}>
+      <T size={14} weight="800" color="#FFFFFF">{t.action.label}</T>
     </Press> : null}
-    <Press accessibilityRole="button" accessibilityLabel="Cerrar aviso" onPress={close} style={{ width: 40, height: TOUCH, alignItems: 'center', justifyContent: 'center' }}><X size={18} color={c.onInk} /></Press>
+    <Press accessibilityRole="button" accessibilityLabel="Cerrar aviso" onPress={close} style={{ width: 40, height: TOUCH, alignItems: 'center', justifyContent: 'center' }}><X size={18} color="rgba(255,255,255,0.7)" /></Press>
   </Animated.View>;
 }
 
@@ -333,48 +364,57 @@ export function ComandaToastProvider({ children, bottomOffset = 84 }) {
 }
 
 // ── Navegación inferior ────────────────────────────────────────────────────
-// Barra de pestañas al alcance del pulgar; una raya de tinta se desliza sobre la pestaña activa (200 ms).
+// Barra flotante tipo píldora con vidrio esmerilado; una píldora roja suave se desliza bajo la pestaña activa
+// (resorte) y el icono activo da un pequeño salto.
+function TabItem({ item, active, onPress }) {
+  const { c } = useTheme();
+  const v = useRef(new Animated.Value(active ? 1 : 0)).current;
+  useEffect(() => { Animated.spring(v, { toValue: active ? 1 : 0, speed: 18, bounciness: 12, useNativeDriver: ND }).start(); }, [active]);
+  const Icon = item.icon;
+  return <Press accessibilityRole="tab" accessibilityLabel={item.badge ? `${item.label}, ${item.badge}` : item.label} accessibilityState={{ selected: active }}
+    onPress={onPress} hapticKind="select" scaleTo={0.88} style={{ flex: 1, minHeight: 58, alignItems: 'center', justifyContent: 'center', gap: 2 }}>
+    <Animated.View style={{ transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [0, -1] }) }, { scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }) }] }}>
+      <Icon size={22} color={active ? c.primary : c.muted} strokeWidth={active ? 2.4 : 1.9} />
+      {item.badge ? <View style={{ position: 'absolute', top: -6, right: -13, minWidth: 19, height: 19, paddingHorizontal: 5, borderRadius: 10, backgroundColor: item.badgeTone === 'ink' ? c.ink : c.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: c.surface }}>
+        <RollingNumber value={item.badge} size={10} weight="800" color={item.badgeTone === 'ink' ? c.onInk : c.onPrimary} />
+      </View> : null}
+    </Animated.View>
+    <T size={11} weight={active ? '800' : '600'} color={active ? c.primary : c.muted} numberOfLines={1}>{item.label}</T>
+  </Press>;
+}
+
 export function TabBar({ items, value, onChange, bottomInset = 0 }) {
   const { c } = useTheme();
   const [w, setW] = useState(0);
   const x = useRef(new Animated.Value(0)).current;
   const index = Math.max(0, items.findIndex(i => i.key === value));
-  useEffect(() => { if (w) Animated.timing(x, { toValue: index * (w / items.length), duration: 200, easing: EASE_IN_OUT, useNativeDriver: ND }).start(); }, [index, w, items.length]);
-  return <View onLayout={e => setW(e.nativeEvent.layout.width)} accessibilityRole="tablist"
-    style={{ flexDirection: 'row', backgroundColor: c.surface, borderTopWidth: 1, borderTopColor: c.line, paddingBottom: bottomInset }}>
-    {w ? <Animated.View pointerEvents="none" style={{ position: 'absolute', top: -1, left: 0, width: w / items.length, height: 3, alignItems: 'center', transform: [{ translateX: x }] }}>
-      <View style={{ width: 36, height: 3, borderRadius: 2, backgroundColor: c.ink }} />
-    </Animated.View> : null}
-    {items.map(item => {
-      const active = item.key === value;
-      const Icon = item.icon;
-      return <Press key={item.key} accessibilityRole="tab" accessibilityLabel={item.badge ? `${item.label}, ${item.badge}` : item.label} accessibilityState={{ selected: active }}
-        onPress={() => onChange(item.key)} hapticKind="select" scaleTo={0.92} sink={0} style={{ flex: 1, minHeight: 58, alignItems: 'center', justifyContent: 'center', gap: 2 }}>
-        <View>
-          <Icon size={22} color={active ? c.text : c.muted} strokeWidth={active ? 2.4 : 1.8} />
-          {item.badge ? <View style={{ position: 'absolute', top: -6, right: -14, minWidth: 20, height: 18, paddingHorizontal: 5, borderRadius: 9, backgroundColor: item.badgeTone === 'ink' ? c.ink : c.primary, alignItems: 'center', justifyContent: 'center' }}>
-            <RollingNumber value={item.badge} size={11} color={item.badgeTone === 'ink' ? c.onInk : c.onPrimary} />
-          </View> : null}
-        </View>
-        <T size={12} weight={active ? '700' : '500'} color={active ? c.text : c.muted} numberOfLines={1}>{item.label}</T>
-      </Press>;
-    })}
+  const seg = w / items.length;
+  useEffect(() => { if (w) Animated.spring(x, { toValue: index * seg, speed: 16, bounciness: 7, useNativeDriver: ND }).start(); }, [index, w, items.length]);
+  return <View style={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: Math.max(bottomInset, 10), backgroundColor: 'transparent' }}>
+    <View onLayout={e => setW(e.nativeEvent.layout.width - 12)} accessibilityRole="tablist"
+      style={[{ flexDirection: 'row', padding: 6, borderRadius: radius.pill, backgroundColor: c.glass, borderWidth: 1, borderColor: c.isDark ? c.line : 'rgba(16,24,40,0.06)', maxWidth: 560, width: '100%', alignSelf: 'center' },
+        WEB ? { backdropFilter: 'saturate(180%) blur(18px)', WebkitBackdropFilter: 'saturate(180%) blur(18px)' } : null, elevate(c, 2)]}>
+      {w ? <Animated.View pointerEvents="none" style={{ position: 'absolute', top: 6, bottom: 6, left: 6, width: seg, borderRadius: radius.pill, backgroundColor: c.primarySoft, transform: [{ translateX: x }] }} /> : null}
+      {items.map(item => <TabItem key={item.key} item={item} active={item.key === value} onPress={() => onChange(item.key)} />)}
+    </View>
   </View>;
 }
 
 // ── Varios ─────────────────────────────────────────────────────────────────
-// Punto de conexión: verde fijo en vivo; ámbar con latido cuando reconecta; rojo sin red.
+// Punto de conexión: verde con halo en vivo; ámbar con latido al reconectar; rojo sin red.
 export function ConnectionDot({ state = 'live', label }) {
   const { c } = useTheme();
   const v = useRef(new Animated.Value(1)).current;
   useEffect(() => {
-    if (state === 'live') { v.setValue(1); return; }
-    const loop = Animated.loop(Animated.sequence([Animated.timing(v, { toValue: 0.3, duration: 600, useNativeDriver: ND }), Animated.timing(v, { toValue: 1, duration: 600, useNativeDriver: ND })]));
+    const loop = Animated.loop(Animated.sequence([Animated.timing(v, { toValue: 0, duration: state === 'live' ? 1400 : 700, useNativeDriver: ND }), Animated.timing(v, { toValue: 1, duration: 0, useNativeDriver: ND })]));
     loop.start(); return () => loop.stop();
   }, [state]);
-  const color = state === 'live' ? c.green : state === 'offline' ? c.red : c.amber;
+  const color = state === 'live' ? c.greenDot : state === 'offline' ? c.red : c.amber;
   return <View accessibilityLabel={label} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-    <Animated.View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: color, opacity: v }} />
+    <View style={{ width: 10, height: 10, alignItems: 'center', justifyContent: 'center' }}>
+      <Animated.View style={{ position: 'absolute', width: 10, height: 10, borderRadius: 5, backgroundColor: color, opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0, 0.45] }), transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [2.4, 1] }) }] }} />
+      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />
+    </View>
     {label ? <T size={13} color={state === 'live' ? c.muted : color} weight="600" numberOfLines={1}>{label}</T> : null}
   </View>;
 }
@@ -385,37 +425,38 @@ export function Field({ label, hint, error, style, ...props }) {
   return <View style={[{ gap: 6 }, style]}>
     {label ? <Label color={c.text}>{label}</Label> : null}
     <TextInput placeholderTextColor={c.faint} {...props} onFocus={e => { setFocus(true); props.onFocus?.(e); }} onBlur={e => { setFocus(false); props.onBlur?.(e); }}
-      style={[{ minHeight: TOUCH, borderWidth: 1.5, borderColor: error ? c.red : focus ? c.ink : c.lineStrong, borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 10,
-        fontFamily: FONT, fontSize: 16, color: c.text, backgroundColor: c.surface, ...(WEB ? { outlineStyle: 'none' } : {}) }, props.multiline ? { minHeight: 88, textAlignVertical: 'top' } : null]} />
+      style={[{ minHeight: TOUCH, borderWidth: 2, borderColor: error ? c.red : focus ? c.primary : 'transparent', borderRadius: radius.md, paddingHorizontal: 16, paddingVertical: 10,
+        fontFamily: FONT, fontSize: 16, color: c.text, backgroundColor: focus ? c.surface : c.surfaceAlt, ...(WEB ? { outlineStyle: 'none', transitionProperty: 'border-color, background-color, box-shadow', transitionDuration: '160ms', boxShadow: focus ? `0 0 0 4px ${c.focus}` : 'none' } : {}) },
+        props.multiline ? { minHeight: 96, textAlignVertical: 'top' } : null]} />
     {error ? <T size={14} color={c.red} weight="600">{error}</T> : hint ? <T size={14} color={c.muted}>{hint}</T> : null}
   </View>;
 }
 
 export function EmptyState({ icon: Icon, title, description, action }) {
   const { c } = useTheme();
-  return <View style={{ alignItems: 'center', paddingVertical: space.x3, paddingHorizontal: space.xl, gap: space.sm }}>
-    {Icon ? <Icon size={32} color={c.faint} strokeWidth={1.5} /> : null}
-    <T size={18} weight="700" style={{ textAlign: 'center' }}>{title}</T>
+  return <Appear style={{ alignItems: 'center', paddingVertical: space.x3, paddingHorizontal: space.xl, gap: space.sm }}>
+    {Icon ? <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center', marginBottom: 4 }}><Icon size={30} color={c.muted} strokeWidth={1.8} /></View> : null}
+    <T size={18} weight="800" style={{ textAlign: 'center' }}>{title}</T>
     {description ? <T size={15} color={c.muted} style={{ textAlign: 'center', maxWidth: 360 }}>{description}</T> : null}
     {action ? <View style={{ marginTop: space.sm }}>{action}</View> : null}
-  </View>;
+  </Appear>;
 }
 
-// Aparición corta al montar o al cambiar `trigger` (sube 8 px y aparece en 220 ms).
-export function Appear({ children, trigger, delay = 0, style, offset = 8 }) {
+// Aparición al montar o al cambiar `trigger`: sube 12 px, escala 0,98→1 y aparece en 320 ms.
+export function Appear({ children, trigger, delay = 0, style, offset = 12 }) {
   const v = useRef(new Animated.Value(0)).current;
-  useEffect(() => { v.setValue(0); Animated.timing(v, { toValue: 1, duration: 220, delay, easing: EASE, useNativeDriver: ND }).start(); }, [trigger]);
-  return <Animated.View style={[style, { opacity: v, transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [offset, 0] }) }] }]}>{children}</Animated.View>;
+  useEffect(() => { v.setValue(0); Animated.timing(v, { toValue: 1, duration: 320, delay, easing: EASE, useNativeDriver: ND }).start(); }, [trigger]);
+  return <Animated.View style={[style, { opacity: v, transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [offset, 0] }) }, { scale: v.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1] }) }] }]}>{children}</Animated.View>;
 }
 
-// Anillo que se expande una vez (cambio de estado por tiempo real): escala 1→1,08, opacidad 0,6→0, 450 ms.
-export function Ping({ trigger, color, radius: r = radius.sm }) {
+// Halo que se expande una vez cuando una tarjeta cambia de estado en tiempo real.
+export function Ping({ trigger, color, radius: r = radius.lg }) {
   const v = useRef(new Animated.Value(1)).current;
   const first = useRef(true);
   useEffect(() => {
     if (first.current) { first.current = false; return; }
-    v.setValue(0); Animated.timing(v, { toValue: 1, duration: 450, easing: EASE, useNativeDriver: ND }).start();
+    v.setValue(0); Animated.timing(v, { toValue: 1, duration: 600, easing: EASE, useNativeDriver: ND }).start();
   }, [trigger]);
-  return <Animated.View pointerEvents="none" style={{ position: 'absolute', top: -2, left: -2, right: -2, bottom: -2, borderRadius: r + 2, borderWidth: 2, borderColor: color,
-    opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.6, 0] }), transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }) }] }} />;
+  return <Animated.View pointerEvents="none" style={{ position: 'absolute', top: -2, left: -2, right: -2, bottom: -2, borderRadius: r + 2, borderWidth: 3, borderColor: color,
+    opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.7, 0] }), transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] }) }] }} />;
 }

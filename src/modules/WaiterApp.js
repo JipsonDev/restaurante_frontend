@@ -268,6 +268,7 @@ function App() {
     action: palette.primary, onAccent: palette.onPrimary, promotion: palette.purple, promotionSoft: palette.purpleSoft,
     danger: palette.red, success: palette.green, successSoft: palette.greenSoft, warning: palette.amber, warningSoft: palette.amberSoft,
     info: palette.sky, infoSoft: palette.skySoft, isDark: palette.isDark,
+    surfaceAlt: palette.surfaceAlt, primary: palette.primary, onPrimary: palette.onPrimary, primarySoft: palette.primarySoft, text: palette.text,
   }), [palette]);
 
   const [step, setStep] = useState('mesas');
@@ -1383,8 +1384,8 @@ function App() {
                   return <TouchableOpacity key={item.splitKey} accessibilityRole="button" accessibilityState={{ selected: mine }} accessibilityLabel={`${item.nombre}, comensal ${assignedTo}`}
                     onPress={() => setItemAssignments(prev => ({ ...prev, [item.splitKey]: activeGuest }))}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52, borderBottomWidth: 1, borderColor: colors.line }}>
-                    <View style={{ minWidth: 34, height: 26, paddingHorizontal: 4, borderRadius: 4, borderWidth: 1.5, borderColor: colors.ink, backgroundColor: mine ? colors.ink : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
-                      <CNum size={13} weight="700" color={mine ? colors.surface : colors.ink}>C{assignedTo}</CNum>
+                    <View style={{ minWidth: 38, height: 30, paddingHorizontal: 6, borderRadius: 15, backgroundColor: mine ? colors.primary : colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+                      <CNum size={13} weight="800" color={mine ? colors.onPrimary : colors.text}>C{assignedTo}</CNum>
                     </View>
                     <View style={{ flex: 1 }}><CLeaderLine left={<CT size={16} weight={mine ? '600' : '400'} numberOfLines={1}>{item.nombre}</CT>} right={<CNum size={15}>{cMoney(item.unitPrice)}</CNum>} /></View>
                   </TouchableOpacity>;
@@ -1435,10 +1436,10 @@ function App() {
     <View style={{ gap: 8, marginBottom: 12 }}>
       {loadError ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Reintentar carga del catálogo" onPress={loadData} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: colors.danger, fontSize: 14, fontWeight: '600' }}>No se pudo cargar el catálogo. Toca para reintentar.</Text></TouchableOpacity> : null}
       <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Destino: ${catalog.label}. ${catalog.editable ? 'Cambiar' : 'Elegir destino'}`} onPress={() => setTargetOpen(true)}
-        style={{ minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, borderRadius: 6, borderWidth: 1.5, borderStyle: catalog.editable ? 'solid' : 'dashed', borderColor: catalog.editable ? colors.ink : colors.line, backgroundColor: colors.surface }}>
+        style={{ minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, borderRadius: 24, backgroundColor: catalog.editable ? colors.primarySoft : colors.surfaceAlt }}>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' }}>{catalog.editable ? 'Pidiendo para' : 'Sin destino'}</Text>
-          <Text numberOfLines={1} style={{ color: colors.ink, fontSize: 16, fontWeight: '700' }}>{isExpressOrder && !selectedExpressPedidoId ? `${pickupTypeLabel(pickupType)} · borrador` : catalog.label}</Text>
+          <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '600' }}>{catalog.editable ? 'Pidiendo para' : 'Sin destino'}</Text>
+          <Text numberOfLines={1} style={{ color: colors.ink, fontSize: 18, fontWeight: '800' }}>{isExpressOrder && !selectedExpressPedidoId ? `${pickupTypeLabel(pickupType)} · borrador` : catalog.label}</Text>
           {!catalog.editable ? <Text style={{ color: colors.muted, fontSize: 13, marginTop: 2 }}>{ catalog.reason === 'closed-express' ? 'Puedes consultar el menú. Selecciona otro destino para un nuevo pedido.' : catalog.reason === 'advance' ? 'Esta cuenta tiene abonos. Gestiona el saldo en caja antes de modificarla.' : 'Consulta el menú y elige un destino cuando quieras pedir.'}</Text> : null}
         </View>
         <Text style={{ color: colors.brand, fontWeight: '700', fontSize: 15 }}>{catalog.editable ? 'Cambiar' : 'Elegir'}</Text>
@@ -1652,7 +1653,7 @@ function App() {
         <MenuSearch value={promoBusqueda} onChangeText={setPromoBusqueda} placeholder="Buscar promociones" />
         {promoCategorias.length > 2 ? renderCategoryTabs(promoCategorias, promoCategoria, setPromoCategoria) : null}
         <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
-          <Text style={{ color: colors.ink, fontSize: 13, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' }}>Promociones</Text>
+          <Text style={{ color: colors.ink, fontSize: 20, fontWeight: '800' }}>Promociones</Text>
           <Text style={{ color: colors.muted, fontSize: 13 }}>{promocionesFiltradas.length} {promocionesFiltradas.length === 1 ? 'promo' : 'promos'}</Text>
         </View>
       </View>
@@ -1744,11 +1745,13 @@ function App() {
           </PastRound>;
         })}
         {paid ? <CT size={15} weight="600" color={colors.success} style={{ marginTop: 12 }}>{pedidoActual.pendiente_entrega ? 'Pago completo · falta la entrega' : 'Pedido completado · guardado en el historial'}</CT> : null}
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16 }}>
-          {catalog.editable && !showingCart ? <CButton variant="primary" icon={Plus} onPress={() => setStep('productos')} style={{ flexGrow: 1 }}>Nueva ronda</CButton> : null}
-          <CButton icon={PieChart} disabled={paid} onPress={() => setSplitOpen(true)} style={{ flexGrow: 1 }}>Dividir</CButton>
-          {!isExpressOrder ? <CButton icon={ArrowRightLeft} onPress={() => setTransferOpen(true)} style={{ flexGrow: 1 }}>Mover</CButton> : null}
-          <CButton variant="ink" icon={Printer} disabled={paid} onPress={solicitarCobroCaja} style={{ flexGrow: 1 }} accessibilityLabel="Solicitar cobro en caja">{paid ? 'Pago completado' : 'Pedir cobro en caja'}</CButton>
+        <View style={{ gap: 8, marginTop: 16 }}>
+          {catalog.editable && !showingCart ? <CButton variant="primary" size="lg" icon={Plus} full onPress={() => setStep('productos')}>Nueva ronda</CButton> : null}
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <CButton icon={PieChart} disabled={paid} onPress={() => setSplitOpen(true)} style={{ flex: 1, paddingHorizontal: 8 }}>Dividir</CButton>
+            {!isExpressOrder ? <CButton icon={ArrowRightLeft} onPress={() => setTransferOpen(true)} style={{ flex: 1, paddingHorizontal: 8 }}>Mover</CButton> : null}
+            <CButton icon={Printer} disabled={paid} onPress={solicitarCobroCaja} style={{ flex: 1, paddingHorizontal: 8 }} accessibilityLabel="Solicitar cobro en caja">{paid ? 'Pagado' : 'Cobrar'}</CButton>
+          </View>
         </View>
       </View>
     );
@@ -1808,7 +1811,7 @@ function App() {
 
         {cartItems.length || !pedidoActual ? <SectionLabel right={cartCount ? <CNum size={14} color={colors.muted}>{cartCount} art.</CNum> : null}>{pendingSend ? 'Ronda en cola · sin confirmar' : 'Ronda nueva'}</SectionLabel> : null}
         {cartItems.length ? cartItems.map(item => renderOrderItem(item, true)) : pedidoActual ? null : (
-          <View style={{ paddingVertical: 20, borderWidth: 1.5, borderStyle: 'dashed', borderColor: colors.line, borderRadius: 6, alignItems: 'center', gap: 10 }}>
+          <View style={{ paddingVertical: 28, borderRadius: 24, backgroundColor: colors.surfaceAlt, alignItems: 'center', gap: 12 }}>
             <CT size={15} color={colors.muted}>{catalog.editable ? 'Sin productos en esta ronda.' : 'Esta cuenta ya no admite rondas nuevas.'}</CT>
             {catalog.editable && !split ? <CButton variant="primary" icon={Plus} onPress={() => setStep('productos')} style={{ alignSelf: 'center' }}>Elegir productos</CButton> : null}
           </View>

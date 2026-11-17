@@ -4,7 +4,7 @@ import { ScrollView, View } from 'react-native';
 import { BellRing, Grid2X2, Grid3X3, RefreshCw, Search } from 'lucide-react-native';
 import { useTheme } from '../theme';
 import { serviceRounds } from '../utils/serviceTiming.mjs';
-import { Appear, Button, Chip, EmptyState, IconButton, Label, Num, T, space } from './waiter/comanda';
+import { Appear, Button, Chip, EmptyState, IconButton, Label, Num, T, radius, space } from './waiter/comanda';
 import { AttentionStrip, SearchToggle, TableTile, ZoneTabs, minutesSince } from './waiter/salon';
 
 const FILTERS = [['Todas', 'Todas'], ['Disponibles', 'Libres'], ['Ocupadas', 'Ocupadas'], ['Cuenta', 'Por cobrar'], ['Reservadas', 'Reservadas']];
@@ -18,7 +18,7 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
   }, []);
   const layoutWidth = Math.min(width, measuredWidth ?? width);
   const padding = layoutWidth < 600 ? 12 : layoutWidth >= 1024 ? 28 : 20;
-  const gap = layoutWidth < 600 ? 8 : 10;
+  const gap = layoutWidth < 600 ? 10 : 12;
   const available = Math.max(0, layoutWidth - padding * 2);
   // Celular: 3 columnas (2 si la pantalla es muy estrecha). Tableta y escritorio: tantas como quepan.
   const minTile = layoutWidth < 600 ? (compact ? 84 : 100) : compact ? 108 : 128;
@@ -56,24 +56,24 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
   const summary = `${counts.Disponibles} ${counts.Disponibles === 1 ? 'libre' : 'libres'} de ${counts.Todas} mesas`;
   return <View onLayout={measure} style={{ minWidth: 0, paddingHorizontal: padding, paddingTop: space.md, paddingBottom: space.x3 }}>
     {/* Cabecera compacta: resumen + bandeja + búsqueda + densidad + actualizar */}
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, minHeight: 48, marginBottom: space.sm }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, minHeight: 56, marginBottom: space.lg }}>
       {!search ? <View style={{ flex: 1, minWidth: 0 }}>
-        <Label color={c.muted}>Salón</Label>
-        <T size={15} weight="600" numberOfLines={1}>{summary}</T>
+        <T size={28} weight="800" accessibilityRole="header">Mesas</T>
+        <T size={15} weight="500" color={c.muted} numberOfLines={1}>{summary}</T>
       </View> : null}
       <SearchToggle value={search} onChange={setSearch} />
       <IconButton icon={compact ? Grid2X2 : Grid3X3} label={compact ? 'Casillas normales' : 'Casillas compactas'} onPress={() => setCompact(!compact)} />
       <IconButton icon={RefreshCw} label="Actualizar mesas" disabled={refreshing} color={refreshing ? c.faint : c.text} onPress={refresh} />
     </View>
 
-    {loadError ? <Appear><View style={{ borderWidth: 1.5, borderColor: c.red, borderRadius: 4, padding: space.md, marginBottom: space.md, flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+    {loadError ? <Appear><View style={{ borderRadius: radius.lg, backgroundColor: c.redSoft, padding: space.md, paddingLeft: space.lg, marginBottom: space.md, flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
       <T size={14} weight="600" color={c.red} style={{ flex: 1 }}>No se pudieron actualizar las mesas. Lo que ves puede estar desactualizado.</T>
-      <Button size="sm" variant="danger" onPress={refresh}>Reintentar</Button>
+      <Button size="sm" variant="primary" onPress={refresh}>Reintentar</Button>
     </View></Appear> : null}
 
     <AttentionStrip items={attention} onOpen={it => selectTable(it.mesa)} />
 
-    <ScrollView horizontal style={{ flexGrow: 0 }} showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.sm, paddingBottom: space.sm }}>
+    <ScrollView horizontal style={{ flexGrow: 0 }} showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.sm, paddingBottom: space.md }}>
       {FILTERS.map(([key, label]) => <Chip key={key} selected={filter === key} onPress={() => setFilter(key)} count={counts[key]} accessibilityLabel={`${label}: ${counts[key]}`}>{label}</Chip>)}
     </ScrollView>
 
@@ -83,9 +83,9 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
       description={counts.Todas ? undefined : 'Configura las mesas desde administración.'}
       action={counts.Todas ? <Button onPress={clear}>Limpiar filtros</Button> : null} /> : null}
 
-    {groups.map(group => <View key={group.name} style={{ marginTop: space.md }}>
+    {groups.map(group => <View key={group.name} style={{ marginTop: space.lg }}>
       {groups.length > 1 || zone === 'Todas' ? <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: space.sm, marginBottom: space.sm }}>
-        <Label color={c.text}>{group.name}</Label><Num size={13} color={c.muted}>{group.mesas.length}</Num>
+        <T size={17} weight="800">{group.name}</T><Num size={14} weight="600" color={c.faint}>{group.mesas.length}</Num>
       </View> : null}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap }}>
         {group.mesas.map(mesa => {

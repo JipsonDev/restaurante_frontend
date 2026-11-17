@@ -1,6 +1,6 @@
-// Salón del mesero — dirección «Comanda».
-// Casillas de mesa con el estado por FORMA (discontinuo = libre, tinta sólida = ocupada,
-// relleno achiote = por cobrar, sello = reservada), bandeja «Listo», acciones rápidas y transferir.
+// Salón del mesero — dirección «Suave».
+// Tarjetas de mesa redondeadas con sombra suave y píldora de estado (punto + texto);
+// «Por cobrar» se rellena con el rojo de la marca. Bandeja «Listo», acciones rápidas y transferir.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, ScrollView, TextInput, View } from 'react-native';
 import axios from 'axios';
@@ -9,7 +9,7 @@ import { comandaTableMeta, useTheme } from '../../theme';
 import { BASE_URL } from '../../context/AuthContext';
 import { serviceDate, serviceDuration, serviceRounds } from '../../utils/serviceTiming.mjs';
 import { addDays, dayOf, localStamp, minutesUntil, nextByTable, timeOf } from '../../utils/reservationLogic.mjs';
-import { Appear, BottomSheet, Button, Chip, EASE, EmptyState, IconButton, Label, Num, Perforation, Ping, Press, Stamp, T, TOUCH, haptic, money, radius, space } from './comanda';
+import { Appear, BottomSheet, Button, Chip, EASE, EmptyState, IconButton, Label, Num, Perforation, Ping, Press, Stamp, T, TOUCH, elevate, haptic, money, radius, space } from './comanda';
 
 // Minutos desde una fecha (o null).
 export function minutesSince(value, now = Date.now()) {
@@ -61,27 +61,30 @@ export function TableTile({ mesa, state, order, width, now, selected, ready, ale
   const resMinutes = reservation ? minutesUntil(reservation) : null;
   const muted = filled ? c.onPrimary : c.muted;
   const label = `Mesa ${mesa.numero}, ${meta.label}${order ? `, saldo ${money(balance)}, abierta hace ${opened ?? 0} minutos` : ''}${ready ? `, ${ready} ${ready === 1 ? 'ronda lista' : 'rondas listas'}` : ''}${reservation ? `, reserva ${timeOf(reservation.fecha_hora)}` : ''}`;
+  const free = state === 'Libre';
   return <Press accessibilityRole="button" accessibilityLabel={label} accessibilityHint="Toca para abrir la mesa; mantén presionado para acciones rápidas" accessibilityState={{ selected }}
-    onPress={() => onPress(mesa)} onLongPress={onLongPress ? () => onLongPress(mesa) : undefined} hapticKind="tap"
-    style={{ width, minHeight: 92, padding: 10, borderRadius: radius.sm, backgroundColor: filled ? meta.bg : state === 'Libre' ? 'transparent' : c.surface,
-      borderWidth: state === 'Ocupada' ? 1.5 : filled ? 1.5 : 1.5, borderStyle: meta.shape === 'dashed' ? 'dashed' : 'solid',
-      borderColor: selected ? c.primary : meta.border, justifyContent: 'space-between', gap: 4 }}>
-    <Ping trigger={state} color={filled ? c.primary : c.ink} />
+    onPress={() => onPress(mesa)} onLongPress={onLongPress ? () => onLongPress(mesa) : undefined} hapticKind="tap" scaleTo={0.95}
+    style={[{ width, minHeight: 108, padding: 12, borderRadius: radius.lg, backgroundColor: filled ? meta.bg : free ? c.surfaceAlt : c.surface,
+      borderWidth: 2, borderColor: selected ? c.primary : filled ? meta.bg : free ? c.surfaceAlt : (c.isDark ? c.line : 'rgba(16,24,40,0.04)'), justifyContent: 'space-between', gap: 6 },
+      free ? null : elevate(c, filled ? 2 : 1), filled && typeof document !== 'undefined' && !c.isDark ? { boxShadow: `0 8px 20px ${c.primary}38` } : null]}>
+    <Ping trigger={state} color={filled ? c.primary : meta.dot} radius={radius.lg} />
     <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 4 }}>
-      <View>
-        <Num size={24} weight="700" color={meta.number} style={{ lineHeight: 28 }}>{String(mesa.numero).padStart(2, '0')}</Num>
-        {mesa.capacidad ? <Num size={12} color={muted}>{mesa.capacidad} p.</Num> : null}
-      </View>
-      {order && opened != null ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-        {late ? <Clock3 size={13} color={filled ? c.onPrimary : c.red} /> : null}
-        <Num size={13} weight={late ? '700' : '500'} color={late && !filled ? c.red : muted} numberOfLines={1}>{shortMinutes(opened)}</Num>
-      </View> : null}
+      <Num size={26} weight="800" color={meta.number} style={{ lineHeight: 30 }}>{mesa.numero}</Num>
+      {order && opened != null && opened < 1440 ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, paddingVertical: 2, borderRadius: radius.pill, backgroundColor: filled ? 'rgba(255,255,255,0.2)' : late ? c.redSoft : c.surfaceAlt }}>
+        <Clock3 size={11} color={filled ? c.onPrimary : late ? c.red : c.muted} />
+        <Num size={11} weight="700" color={filled ? c.onPrimary : late ? c.red : c.muted} numberOfLines={1}>{shortMinutes(opened)}</Num>
+      </View> : mesa.capacidad ? <Num size={12} weight="600" color={muted}>{mesa.capacidad} p.</Num> : null}
     </View>
-    {ready ? <Stamp color={filled ? c.onPrimary : c.green} rotate={-4} size={12}>{ready > 1 ? `${ready} listas` : 'Lista'}</Stamp> : null}
-    {state === 'Reservada' || (state === 'Libre' && reservation && resMinutes != null && resMinutes <= 90) ? <Stamp color={c.purple} rotate={-5} size={12}>{`R ${timeOf(reservation?.fecha_hora) || ''}`.trim()}</Stamp> : null}
-    <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'flex-end' }}>
-      {order ? <Num size={15} weight="700" color={filled ? c.onPrimary : c.text}>{money(balance)}</Num>
-        : <T size={14} weight="600" color={state === 'Libre' ? c.muted : meta.text}>{state === 'Libre' ? 'Libre' : meta.label}</T>}
+    {ready ? <Stamp color={filled ? c.onPrimary : c.green} size={12} animate={false}>{ready > 1 ? `${ready} listas` : 'Lista'}</Stamp> : null}
+    {state === 'Reservada' || (free && reservation && resMinutes != null && resMinutes <= 90) ? <Stamp color={c.purple} size={12}>{`Reserva ${timeOf(reservation?.fecha_hora) || ''}`.trim()}</Stamp> : null}
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+      {order ? <>
+        <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: meta.dot }} />
+        <Num size={16} weight="800" color={filled ? c.onPrimary : c.text}>{money(balance)}</Num>
+      </> : <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: meta.dot }} />
+        <T size={14} weight="700" color={meta.text}>{meta.label}</T>
+      </View>}
     </View>
   </Press>;
 }
@@ -92,15 +95,22 @@ export function AttentionStrip({ items, onOpen }) {
   const { c } = useTheme();
   if (!items.length) return null;
   return <Appear>
-    <View style={{ marginBottom: space.md }}>
-      <Label style={{ marginBottom: 6 }} color={c.primary}>Atender ahora · {items.length}</Label>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.sm }}>
-        {items.map(it => <Press key={it.key} accessibilityRole="button" accessibilityLabel={`${it.title}, ${it.detail}`} onPress={() => onOpen(it)} hapticKind="tap"
-          style={{ minHeight: TOUCH, paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.sm, borderWidth: 1.5, borderColor: it.tone === 'ready' ? c.green : it.tone === 'late' ? c.red : c.primary,
-            backgroundColor: c.surface, justifyContent: 'center' }}>
-          <T size={15} weight="700">{it.title}</T>
-          <T size={13} weight="600" color={it.tone === 'ready' ? c.green : it.tone === 'late' ? c.red : c.primary}>{it.detail}</T>
-        </Press>)}
+    <View style={{ marginBottom: space.lg }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: c.primary }} />
+        <T size={15} weight="800">Atender ahora</T>
+        <View style={{ paddingHorizontal: 8, borderRadius: radius.pill, backgroundColor: c.primarySoft }}><Num size={13} weight="800" color={c.primaryText}>{items.length}</Num></View>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.sm, paddingVertical: 4, paddingRight: 8 }}>
+        {items.map(it => {
+          const tone = it.tone === 'ready' ? c.green : it.tone === 'late' ? c.red : c.primary;
+          const soft = it.tone === 'ready' ? c.greenSoft : it.tone === 'late' ? c.redSoft : c.primarySoft;
+          return <Press key={it.key} accessibilityRole="button" accessibilityLabel={`${it.title}, ${it.detail}`} onPress={() => onOpen(it)} hapticKind="tap" scaleTo={0.95}
+            style={{ minHeight: 56, paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.lg, backgroundColor: soft, justifyContent: 'center', minWidth: 120 }}>
+            <T size={15} weight="800">{it.title}</T>
+            <T size={13} weight="700" color={tone}>{it.detail}</T>
+          </Press>;
+        })}
       </ScrollView>
     </View>
   </Appear>;
@@ -116,21 +126,21 @@ export function ZoneTabs({ zones, value, onChange, counts = {} }) {
   const move = (key, instant) => {
     const l = layouts.current[key]; if (!l) return;
     if (instant) { x.setValue(l.x); w.setValue(l.width); return; }
-    Animated.parallel([Animated.timing(x, { toValue: l.x, duration: 180, easing: EASE, useNativeDriver: false }), Animated.timing(w, { toValue: l.width, duration: 180, easing: EASE, useNativeDriver: false })]).start();
+    Animated.parallel([Animated.spring(x, { toValue: l.x, speed: 16, bounciness: 6, useNativeDriver: false }), Animated.spring(w, { toValue: l.width, speed: 16, bounciness: 6, useNativeDriver: false })]).start();
   };
   useEffect(() => { move(value); }, [value]);
-  return <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, borderBottomWidth: 1, borderBottomColor: c.line }}>
-    <View accessibilityRole="tablist" style={{ flexDirection: 'row', gap: space.lg }}>
+  return <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>
+    <View accessibilityRole="tablist" style={{ flexDirection: 'row', gap: 2, padding: 4, borderRadius: radius.pill, backgroundColor: c.surfaceAlt }}>
+      {ready ? <Animated.View pointerEvents="none" style={[{ position: 'absolute', top: 4, bottom: 4, borderRadius: radius.pill, backgroundColor: c.surface, left: x, width: w }, elevate(c, 1)]} /> : null}
       {zones.map(z => {
         const active = z === value;
         return <Press key={z} accessibilityRole="tab" accessibilityState={{ selected: active }} onPress={() => onChange(z)} hapticKind="select" scaleTo={0.96} sink={0}
           onLayout={e => { layouts.current[z] = e.nativeEvent.layout; if (active) { move(z, true); setReady(true); } }}
-          style={{ minHeight: TOUCH, justifyContent: 'center', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <Label size={14} color={active ? c.text : c.muted}>{z === 'Todas' ? 'Todo el salón' : z}</Label>
-          {counts[z] != null ? <Num size={12} color={c.faint}>{counts[z]}</Num> : null}
+          style={{ minHeight: 40, paddingHorizontal: 14, borderRadius: radius.pill, justifyContent: 'center', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <T size={14} weight={active ? '800' : '600'} color={active ? c.text : c.muted}>{z === 'Todas' ? 'Todo' : z}</T>
+          {counts[z] != null ? <Num size={12} weight="700" color={c.faint}>{counts[z]}</Num> : null}
         </Press>;
       })}
-      {ready ? <Animated.View pointerEvents="none" style={{ position: 'absolute', bottom: 0, height: 3, borderRadius: 2, backgroundColor: c.ink, left: x, width: w }} /> : null}
     </View>
   </ScrollView>;
 }
@@ -141,8 +151,8 @@ export function TableActionsSheet({ mesa, state, order, onClose, actions }) {
   const meta = mesa ? comandaTableMeta(state, c) : null;
   const balance = order ? Number(order.saldo_pendiente ?? Math.max(0, Number(order.total || 0) - Number(order.abonado || 0))) : 0;
   const row = (Icon, label, detail, onPress, disabled) => <Press key={label} accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={() => { onClose(); onPress(); }} hapticKind="tap"
-    style={{ minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.sm, borderRadius: radius.md, opacity: disabled ? 0.4 : 1 }} hoverStyle={{ backgroundColor: c.soft }}>
-    <Icon size={22} color={c.text} />
+    style={{ minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.sm, borderRadius: radius.md, opacity: disabled ? 0.4 : 1 }} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
+    <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><Icon size={20} color={c.text} /></View>
     <View style={{ flex: 1 }}><T size={17} weight="600">{label}</T>{detail ? <T size={14} color={c.muted}>{detail}</T> : null}</View>
   </Press>;
   return <BottomSheet visible={!!mesa} onClose={onClose} title={mesa ? `Mesa ${mesa.numero}` : ''} subtitle={mesa ? `${meta.label}${order ? ` · saldo ${money(balance)}` : ''}${mesa.capacidad ? ` · ${mesa.capacidad} puestos` : ''}` : ''}>
@@ -166,10 +176,9 @@ export function TransferSheet({ open, from, mesas, stateFor, onPick, onClose, bu
         const free = state === 'Libre';
         const meta = comandaTableMeta(state, c);
         return <Press key={m.id} accessibilityRole="button" accessibilityLabel={`${free ? 'Transferir a' : 'Unir con'} mesa ${m.numero}`} disabled={busy} onPress={() => onPick(m)} hapticKind="medium"
-          style={{ width: '31%', minWidth: 96, minHeight: 72, padding: 10, borderRadius: radius.sm, borderWidth: 1.5, borderStyle: meta.shape === 'dashed' ? 'dashed' : 'solid',
-            borderColor: meta.border, backgroundColor: meta.shape === 'filled' ? meta.bg : c.surface, justifyContent: 'space-between' }}>
-          <Num size={20} weight="700" color={meta.shape === 'filled' ? c.onPrimary : c.text}>{String(m.numero).padStart(2, '0')}</Num>
-          <T size={13} weight="700" color={meta.shape === 'filled' ? c.onPrimary : c.text}>{free ? 'Mover aquí' : 'Unir'}</T>
+          style={{ width: '31%', minWidth: 96, minHeight: 76, padding: 12, borderRadius: radius.lg, backgroundColor: meta.shape === 'filled' ? meta.bg : free ? c.greenSoft : c.surfaceAlt, justifyContent: 'space-between' }}>
+          <Num size={22} weight="800" color={meta.shape === 'filled' ? c.onPrimary : c.text}>{m.numero}</Num>
+          <T size={13} weight="700" color={meta.shape === 'filled' ? c.onPrimary : free ? c.green : c.text}>{free ? 'Mover aquí' : 'Unir'}</T>
         </Press>;
       })}
     </View>
@@ -193,7 +202,7 @@ export function ReadyTray({ open, onClose, ready, alerts, activity, onDeliver, d
     </View>
     {tab === 'listo' ? (ready.length ? <View style={{ gap: space.sm }}>
       {ready.map(({ round, pedido, minutes }, i) => <Appear key={round.id} delay={i * 40}>
-        <View style={{ borderWidth: 1.5, borderColor: c.green, borderRadius: radius.sm, padding: space.md, backgroundColor: c.surface, gap: 6 }}>
+        <View style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.greenSoft, gap: 6 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
             <T size={18} weight="700" style={{ flex: 1 }}>{placeOf(pedido)}</T>
             <Num size={14} weight="700" color={minutes != null && minutes >= (alerts.limits?.lista || 5) ? c.red : c.green}>{minutes ? `lista hace ${shortMinutes(minutes)}` : 'recién lista'}</Num>
@@ -207,13 +216,13 @@ export function ReadyTray({ open, onClose, ready, alerts, activity, onDeliver, d
       </Appear>)}
     </View> : <EmptyState icon={CheckCheck} title="Pase vacío" description="Cuando cocina marque una ronda como lista aparecerá aquí, con vibración." />) : null}
     {tab === 'demoras' ? <View style={{ gap: space.sm }}>
-      {alerts.error ? <View style={{ borderWidth: 1.5, borderColor: c.amber, borderRadius: radius.sm, padding: space.md, gap: space.sm }}>
+      {alerts.error ? <View style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.amberSoft, gap: space.sm }}>
         <T size={15} weight="600" color={c.amber}>No se pudieron revisar las demoras.{alerts.items.length ? ' Se muestra la última consulta.' : ''}</T>
         <Button variant="outline" size="sm" onPress={alerts.refresh}>Reintentar</Button>
       </View> : null}
       {!alerts.error && !late.length ? <EmptyState icon={Clock3} title={alerts.limits?.enabled === false ? 'Avisos en pausa' : 'Sin demoras'} description={alerts.limits?.enabled === false ? 'Las alertas de demora están desactivadas en Ajustes.' : `Se avisa cuando cocina pasa de ${alerts.limits?.espera ?? 20} min.`} /> : null}
       {late.map(item => <Press key={item.id} accessibilityRole="button" onPress={() => onOpen(item)} hapticKind="tap"
-        style={{ borderWidth: 1.5, borderColor: c.red, borderRadius: radius.sm, padding: space.md, backgroundColor: c.surface, gap: 4 }}>
+        style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.redSoft, gap: 4 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
           <T size={17} weight="700" style={{ flex: 1 }}>{placeOf(null, item)}</T>
           <Num size={15} weight="700" color={c.red}>{serviceDuration(item.minutos)}</Num>
@@ -227,7 +236,7 @@ export function ReadyTray({ open, onClose, ready, alerts, activity, onDeliver, d
       {activity.map((item, i) => <View key={item.id}>
         {i ? <Perforation /> : null}
         <Press accessibilityRole="button" onPress={() => onOpen(item)} hapticKind="tap" style={{ minHeight: 56, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: item.read ? c.line : c.green }} />
+          <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: item.read ? c.softer : c.primary }} />
           <View style={{ flex: 1 }}>
             <T size={15} weight={item.read ? '400' : '700'}>{item.title}</T>
             {item.body ? <T size={13} color={c.muted} numberOfLines={2}>{item.body}</T> : null}
@@ -246,7 +255,7 @@ export function SearchToggle({ value, onChange }) {
   const v = useRef(new Animated.Value(value ? 1 : 0)).current;
   useEffect(() => { Animated.timing(v, { toValue: open ? 1 : 0, duration: 180, easing: EASE, useNativeDriver: false }).start(); }, [open]);
   if (!open) return <IconButton icon={Search} label="Buscar mesa" onPress={() => { haptic('tap'); setOpen(true); }} />;
-  return <Animated.View style={{ flex: 1, opacity: v, flexDirection: 'row', alignItems: 'center', minHeight: TOUCH, borderWidth: 1.5, borderColor: c.ink, borderRadius: radius.md, paddingLeft: 12, backgroundColor: c.surface }}>
+  return <Animated.View style={{ flex: 1, opacity: v, flexDirection: 'row', alignItems: 'center', minHeight: TOUCH, borderRadius: radius.pill, paddingLeft: 16, backgroundColor: c.surfaceAlt }}>
     <Search size={18} color={c.muted} />
     <TextInput autoFocus value={value} onChangeText={onChange} placeholder="Mesa o zona" placeholderTextColor={c.faint} accessibilityLabel="Buscar mesa por número o zona"
       style={{ flex: 1, minWidth: 0, fontSize: 16, color: c.text, paddingHorizontal: 8, paddingVertical: 10, ...(typeof document !== 'undefined' ? { outlineStyle: 'none' } : {}) }} />
