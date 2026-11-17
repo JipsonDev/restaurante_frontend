@@ -9,7 +9,7 @@ import { extrasForProduct, toModifier, unitPrice } from '../../utils/waiterFavor
 import { T, Num, Label, Press, Button, Tally, Field, BottomSheet, Perforation, money, TOUCH, radius, space } from './comanda';
 
 const GROUPS = [
-  ['EXTRA', 'Extras'], ['EXCLUSION', 'Sin'], ['TERMINO', 'Término'], ['NOTA', 'Indicaciones'],
+  ['EXTRA', 'Extras'], ['EXCLUSION', 'Quitar'], ['TERMINO', 'Término'], ['NOTA', 'Indicaciones'],
 ];
 const groupOf = extra => {
   const t = String(extra.tipo || 'EXTRA').toUpperCase();
@@ -24,13 +24,14 @@ function Option({ extra, selected, onPress, radio }) {
   const { c } = useTheme();
   const cost = Number(extra.precio_extra ?? extra.precio ?? 0);
   return <Press accessibilityRole={radio ? 'radio' : 'checkbox'} accessibilityState={{ checked: selected }} accessibilityLabel={`${extra.nombre}${cost ? `, más ${money(cost)}` : ''}`}
-    onPress={onPress} hapticKind="select" scaleTo={0.99} sink={0} hoverStyle={{ backgroundColor: c.soft }}
-    style={{ minHeight: TOUCH + 4, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.sm, borderBottomWidth: 1, borderBottomColor: c.line }}>
-    <View style={{ width: 24, height: 24, borderRadius: radio ? 12 : radius.sm, borderWidth: 2, borderColor: selected ? c.ink : c.lineStrong, backgroundColor: selected ? c.ink : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
-      {selected ? radio ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: c.onInk }} /> : <Check size={16} color={c.onInk} strokeWidth={3} /> : null}
+    onPress={onPress} hapticKind="select" scaleTo={0.98} hoverStyle={{ backgroundColor: selected ? c.primarySoft : c.soft }}
+    style={{ minHeight: TOUCH + 8, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.md, marginBottom: 6, borderRadius: radius.lg, borderWidth: 2,
+      borderColor: selected ? c.primary : 'transparent', backgroundColor: selected ? c.primarySoft : c.surfaceAlt }}>
+    <View style={{ width: 24, height: 24, borderRadius: radio ? 12 : 8, borderWidth: 2, borderColor: selected ? c.primary : c.lineStrong, backgroundColor: selected ? c.primary : c.surface, alignItems: 'center', justifyContent: 'center' }}>
+      {selected ? radio ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: c.onPrimary }} /> : <Check size={16} color={c.onPrimary} strokeWidth={3} /> : null}
     </View>
     <T size={16} weight={selected ? '700' : '500'} style={{ flex: 1 }}>{extra.nombre}</T>
-    {cost ? <Num size={15} color={c.muted}>+{money(cost)}</Num> : null}
+    {cost ? <Num size={15} weight="700" color={selected ? c.primaryText : c.muted}>+{money(cost)}</Num> : null}
   </Press>;
 }
 
@@ -58,14 +59,13 @@ export default function CustomizeSheet({ visible, product, extras = [], inCart =
       {`Añadir ${qty} · ${money(unit * qty)}`}
     </Button>}>
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.md }}>
-      <Label color={c.text}>Cantidad</Label>
+      <T size={16} weight="800">Cantidad</T>
       <Tally value={qty} onChange={setQty} min={1} max={max} />
     </View>
-    {groups.map(([key, title, list]) => <View key={key} style={{ gap: 2 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <Label>{title}</Label>{key === 'TERMINO' ? <T size={13} color={c.faint}>elige uno</T> : null}
+    {groups.map(([key, title, list]) => <View key={key} style={{ gap: 4 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+        <T size={16} weight="800">{title.charAt(0) + title.slice(1).toLowerCase()}</T>{key === 'TERMINO' ? <T size={13} color={c.faint}>elige uno</T> : null}
       </View>
-      <Perforation style={{ marginTop: 4 }} />
       {list.map(o => <Option key={`${o.id ?? o.nombre}`} extra={o} radio={key === 'TERMINO'} selected={picked.includes(o.nombre)} onPress={() => toggle(o, key === 'TERMINO')} />)}
     </View>)}
     <Field label="Nota para cocina" placeholder="Ej.: sin hielo, bien caliente, alérgico a…" value={note} onChangeText={setNote} maxLength={140} multiline />

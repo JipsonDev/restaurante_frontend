@@ -39,7 +39,7 @@ export default function OrderTracking({order,colors:c,embedded=false}){
           <WText style={{color:c.ink,fontSize:12}}>{event.actor.nombre}{event.actor.rol?` · ${event.actor.rol}`:''}</WText>
           {ids.length>1||event.pedido_origen_id&&Number(event.pedido_origen_id)!==Number(event.pedido_id)?<WText style={{color:c.muted,fontSize:11}}>Cuenta #{event.pedido_origen_id||event.pedido_id}</WText>:null}
           {event.items?.length?<WText style={{color:c.muted,fontSize:12,lineHeight:18}}>{event.items.map(item=>`${item.cantidad} × ${item.nombre}`).join(', ')}</WText>:null}
-          {event.monto!==undefined?<WText style={{color:c.muted,fontSize:12}}>${Number(event.monto).toFixed(2)}{event.metodo?` · ${event.metodo}`:''}{event.estado?` · ${event.estado}`:''}</WText>:null}
+          {event.monto!==undefined?<WText style={{color:c.muted,fontSize:12}}>${Number(event.monto).toLocaleString('es-EC',{minimumFractionDigits:2,maximumFractionDigits:2})}{event.metodo?` · ${event.metodo}`:''}{event.estado?` · ${event.estado}`:''}</WText>:null}
         </View>)}
         <WButton colors={c} label="Actualizar seguimiento del pedido" Icon={RefreshCw} onPress={()=>setAttempt(value=>value+1)} style={{alignSelf:'flex-start'}}>Actualizar seguimiento</WButton>
       </>}

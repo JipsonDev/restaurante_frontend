@@ -1,820 +1,516 @@
-import { kitchenRounds } from '../utils/kitchenLogic.mjs';
-import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
+// Cocina (KDS) — dirección «Suave», la misma familia visual que la app del mesero.
+// Tablet: tablero de 3 columnas (Nuevas · En preparación · Listas). Celular: pestañas con una columna.
+// «Por plato» suma cada producto pendiente. Historial e impresión viven en hojas, no ocupan pantalla.
+// Funciones: sonido y vibración al llegar rondas, semáforo según el límite de Ajustes › Atención,
+// platos que se tachan, deslizar para avanzar, deshacer «Listo», avisar al mesero y pantalla siempre encendida.
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Platform, ScrollView, View, useWindowDimensions } from 'react-native';
 import {
-  ActivityIndicator, Animated, Platform, SafeAreaView, ScrollView,
-  Text as RNText, TouchableOpacity, View, useWindowDimensions, Vibration
-} from 'react-native';
-import {
-  Bell, CheckCircle2, ChefHat, Clock, Flame, LogOut, Moon,
-  PackageCheck, Printer, RefreshCw, Soup, Sun, Timer, Info,
-  Layers, LayoutGrid, Megaphone, Volume2, VolumeX, X, Play
+  BellRing, Check, ChefHat, History, Layers, LayoutGrid, LogOut, Moon, MoreHorizontal, Printer,
+  RefreshCw, RotateCcw, Soup, Sun, Sunrise, Volume2, VolumeX, CheckCheck, Inbox, Ban, MapPin, Search,
 } from 'lucide-react-native';
 import axios from 'axios';
-import { normalizeKitchenState as normalize, kitchenColumn, pendingSignature, createRefreshQueue } from '../utils/kitchenLogic.mjs';
-
-// TUS RUTAS Y CONTEXTOS REALES
 import { BASE_URL, useAuth } from '../context/AuthContext';
-import { useTheme, operationalColors as UI_COLORS, tableStatusMeta } from '../theme';
+import { WaiterAppearance, useTheme } from '../theme';
 import { BOTTOM_INSET, TOP_INSET } from '../utils/safeArea';
 import { REALTIME_EVENTS, getRealtimeSocket, subscribeRealtime } from '../services/realtime';
 import { ALERT_TONES, installWebAudioUnlock, playWebAlertTone, unlockWebAudio } from '../services/webAudioAlerts';
+import { allDayItems, createRefreshQueue, isCriticalNote, kitchenBoard, kitchenRounds, pendingSignature, shortDuration, waitMinutes } from '../utils/kitchenLogic.mjs';
+import { KitchenTicket, itemDone, ticketTarget } from '../components/kitchen/ticket';
+import { normalize as normalizeText } from '../utils/waiterFavorites.mjs';
+import {
+  Appear, BottomSheet, Button, Chip, ComandaToastProvider, ConnectionDot, EmptyState, IconButton, Num, Press, RollingNumber,
+  Field, T, elevate, haptic, radius, space, useComandaFonts, useComandaToast,
+} from '../components/waiter/comanda';
 
-const WAITER_FONT = Platform.select({
-  web: 'Inter, "Segoe UI", system-ui, sans-serif',
-  ios: 'System',
-  android: 'sans-serif',
-  default: undefined,
-});
+// Estación de un plato: la del producto o «Cocina» si no tiene.
+const GENERAL = 'Cocina';
+const stationOf = item => item?.estacion || GENERAL;
 
-const Text = ({ style, ...props }) => (
-  <RNText {...props} style={[WAITER_FONT ? { fontFamily: WAITER_FONT } : null, style]} />
-);
-
-
-
-const modernShadow = Platform.select({
-  web: { boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.15), 0 2px 4px -2px rgb(0 0 0 / 0.15)' },
-  default: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 4 }
-});
-
-const softShadow = Platform.select({
-  web: { boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.1)' },
-  default: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 1 }
-});
-
-const isToday = (date) => new Date(date).toDateString() === new Date().toDateString();
-
-const money = (value) => `$${Number(value || 0).toFixed(2)}`;
-const modifierLabel = (mod) => `${mod.nombre}${Number(mod.precio_extra || 0) ? ` +${money(mod.precio_extra)}` : ''}`;
-
-const isPickupOrder = (order) => !order?.mesa_id || ['Para llevar', 'Delivery'].includes(order?.tipo);
-const orderTargetLabel = (order) => (
-  isPickupOrder(order)
-    ? `${order?.tipo === 'Delivery' ? 'Delivery' : 'Para llevar'} #${order?.pedido_id || order?.id || '-'} ${order?.cliente_nombre || ''}`.trim()
-    : `Mesa ${order?.mesa_numero || order?.mesa_id || '-'}`
-);
-const orderPickupDetail = (order) => {
-  if (!isPickupOrder(order)) return '';
-  if (order?.tipo === 'Delivery') {
-    return [
-      order.delivery_telefono,
-      order.delivery_direccion,
-      order.delivery_referencia,
-      order.cliente_dato,
-    ].filter(Boolean).join(' - ') || 'Delivery';
-  }
-  return order?.cliente_dato || 'Para recoger';
-};
-
-const COLUMNS = [
-  { key: 'PENDIENTE', title: 'Nuevos', icon: Bell, action: 'Tomar orden', next: 'PREPARANDO' },
-  { key: 'PREPARANDO', title: 'Preparando', icon: Soup, action: 'Despachar', next: 'LISTO' },
-  { key: 'LISTO', title: 'Listos (Entrega)', icon: CheckCircle2, action: null, next: null },
-  { key: 'ENTREGADO', title: 'Historial', icon: Printer, action: null, next: null },
+const WEB = Platform.OS === 'web';
+const COLS = [
+  { key: 'PENDIENTE', title: 'Nuevas', short: 'Nuevas', hint: 'Toca «Empezar» o desliza →', tone: 'primary' },
+  { key: 'PREPARANDO', title: 'En preparación', short: 'En curso', hint: 'Tacha los platos; «Listo» avisa al mesero', tone: 'amber' },
+  { key: 'LISTO', title: 'Listas para servir', short: 'Listas', hint: 'Esperando al mesero', tone: 'green' },
 ];
+const NEW_MS = 90000; // una ronda se marca «Nueva» durante 90 s
 
-const BlinkingTicket = ({ children, isSOS }) => {
-  const fadeAnim = useRef(new Animated.Value(1)).current;
-
+// Pantalla siempre encendida (Wake Lock API). Se vuelve a pedir al regresar a la pestaña.
+function useWakeLock(enabled) {
+  const [active, setActive] = useState(false);
   useEffect(() => {
-    let loop;
-    if (isSOS) {
-      loop = Animated.loop(
-        Animated.sequence([
-          Animated.timing(fadeAnim, { toValue: 0.4, duration: 600, useNativeDriver: true }),
-          Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true })
-        ])
-      );
-      loop.start();
-    } else {
-      fadeAnim.setValue(1);
-    }
-    return () => loop && loop.stop();
-  }, [isSOS, fadeAnim]);
+    if (!WEB || typeof navigator === 'undefined' || !navigator.wakeLock || !enabled) { setActive(false); return undefined; }
+    let lock = null; let cancelled = false;
+    const request = async () => {
+      try { lock = await navigator.wakeLock.request('screen'); if (!cancelled) setActive(true); lock.addEventListener?.('release', () => setActive(false)); }
+      catch { setActive(false); }
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') request(); };
+    request();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { cancelled = true; document.removeEventListener('visibilitychange', onVisible); lock?.release?.().catch(() => {}); };
+  }, [enabled]);
+  return { supported: WEB && typeof navigator !== 'undefined' && !!navigator.wakeLock, active };
+}
 
-  return <Animated.View style={{ opacity: fadeAnim }}>{children}</Animated.View>;
-};
-
-export default function KitchenApp() {
+function Kitchen() {
+  useComandaFonts();
+  const { c, isDark, toggle: toggleTheme } = useTheme();
   const { logout } = useAuth();
-  const { isDark, toggle } = useTheme();
+  const toast = useComandaToast();
   const { width } = useWindowDimensions();
-  const colors = isDark ? UI_COLORS.dark : UI_COLORS.light;
+  const board3 = width >= 900;
+  const phone = width < 600;
+  const pad = phone ? 12 : 20;
 
-  const isWide = width >= 1100;
-  const isCompact = width < 900;
-
-  const [orders, setOrders] = useState([]);
+  const [rounds, setRounds] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [lastRefresh, setLastRefresh] = useState(null);
-  const [viewMode, setViewMode] = useState('tickets');
-  const [sosOrdersList, setSosOrdersList] = useState(new Set());
-
-  const [toast, setToast] = useState(null);
-  const toastTimer = useRef(null);
-  const actionLocks = useRef(new Set());
-  const [busyOrders, setBusyOrders] = useState(new Set());
-  const [printing, setPrinting] = useState(false);
-  const printLock = useRef(false);
+  const [loadError, setLoadError] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  const [view, setView] = useState('tablero'); // tablero | platos
+  const [tab, setTab] = useState('PENDIENTE');
+  const [muted, setMuted] = useState(() => { try { return localStorage.getItem('mm-kds-muted') === '1'; } catch { return false; } });
+  const [keepAwake, setKeepAwake] = useState(() => { try { return localStorage.getItem('mm-kds-awake') !== '0'; } catch { return true; } });
+  const [limits, setLimits] = useState({ espera: 20, lista: 5, activas: true });
+  const [realtime, setRealtime] = useState('connecting');
+  const [busy, setBusy] = useState(() => new Set());
+  const [optimistic, setOptimistic] = useState({}); // ronda -> estado mientras responde el servidor
+  const [newIds, setNewIds] = useState({}); // ronda -> hora de llegada
   const [printStatus, setPrintStatus] = useState(null);
-  const [printStatusError, setPrintStatusError] = useState(false);
-  const [clockNow, setClockNow] = useState(Date.now());
+  const [sheet, setSheet] = useState(null); // 'menu' | 'historial' | 'impresion' | 'estacion' | 'agotados'
+  const [station, setStation] = useState(() => { try { return localStorage.getItem('mm-kds-estacion') || 'Todas'; } catch { return 'Todas'; } });
+  useEffect(() => { try { localStorage.setItem('mm-kds-estacion', station); } catch {} }, [station]);
+  const [itemOpt, setItemOpt] = useState({}); // plato -> listo mientras responde el servidor
+  const [products, setProducts] = useState([]);
+  const [productQuery, setProductQuery] = useState('');
+  const [toSoldOut, setToSoldOut] = useState(null); // plato elegido con pulsación larga
   const refreshQueue = useRef(null);
-  const [realtimeStatus, setRealtimeStatus] = useState('connecting');
+  const prevSignatures = useRef(null);
+  const lateSeen = useRef(new Set());
+  const mutedRef = useRef(muted);
+  useEffect(() => { mutedRef.current = muted; try { localStorage.setItem('mm-kds-muted', muted ? '1' : '0'); } catch {} }, [muted]);
+  useEffect(() => { try { localStorage.setItem('mm-kds-awake', keepAwake ? '1' : '0'); } catch {} }, [keepAwake]);
+  const wake = useWakeLock(keepAwake);
 
-  const [isMuted, setIsMuted] = useState(false);
-  const [audioEnabled, setAudioEnabled] = useState(true);
-  const isMutedRef = useRef(isMuted);
-  const prevPendingIds = useRef(new Set());
-  const isFirstLoad = useRef(true);
-  const realtimeStatusRef = useRef('connecting');
+  const sound = useCallback(tone => {
+    if (mutedRef.current) return;
+    if (WEB) playWebAlertTone(tone);
+  }, []);
 
+  // ── Datos ────────────────────────────────────────────────────────────────
   useEffect(() => {
     installWebAudioUnlock();
-  }, []);
-
-  useEffect(() => {
-    isMutedRef.current = isMuted;
-  }, [isMuted]);
-
-  const showToast = useCallback((title, message, isError = false) => {
-    clearTimeout(toastTimer.current);
-    setToast({ title, message, isError });
-    toastTimer.current = setTimeout(() => setToast(null), 4000);
-  }, []);
-
-  const loadOrders = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    await refreshQueue.current?.refresh();
-    if (!silent) setLoading(false);
-  }, []);
-
-  const loadPrintStatus = useCallback(async () => {
-    try {
-      const { data } = await axios.get(`${BASE_URL}/impresiones/estado`);
-      setPrintStatus(data);
-      setPrintStatusError(false);
-    } catch { setPrintStatusError(true); }
-  }, []);
-
-  useEffect(() => {
     refreshQueue.current = createRefreshQueue(
       async () => {
         const { data } = await axios.get(`${BASE_URL}/pedidos?cocina=1`);
-        if (!Array.isArray(data)) throw new Error('Respuesta de pedidos invalida.');
+        if (!Array.isArray(data)) throw new Error('Respuesta de pedidos inválida.');
         return data;
       },
-      (data) => { setOrders(kitchenRounds(data)); setLastRefresh(new Date()); },
-      (error) => showToast('Error de conexión', error.response?.data?.message || 'No se pudo actualizar cocina.', true),
+      data => { setRounds(kitchenRounds(data)); setLoadError(false); setLoading(false); setOptimistic({}); setItemOpt({}); },
+      () => { setLoadError(true); setLoading(false); },
     );
-    loadOrders();
-    loadPrintStatus();
-    const timer = setInterval(() => { loadOrders(true); loadPrintStatus(); }, 15000);
-    const clockTimer = setInterval(() => setClockNow(Date.now()), 10000);
+    const load = () => refreshQueue.current?.refresh();
+    load();
+    axios.get(`${BASE_URL}/configuracion`).then(({ data }) => setLimits({
+      espera: Number(data?.alerta_espera_minutos) || 20, lista: Number(data?.alerta_lista_minutos) || 5, activas: String(data?.alertas_demora_activas ?? '1') !== '0',
+    })).catch(() => {});
+    const loadPrint = () => axios.get(`${BASE_URL}/impresiones/estado`).then(({ data }) => setPrintStatus(data)).catch(() => setPrintStatus(s => s ? { ...s, error: true } : { error: true }));
+    loadPrint();
+    const poll = setInterval(() => { load(); loadPrint(); }, 20000);
+    const clock = setInterval(() => setNow(Date.now()), 15000);
     const client = getRealtimeSocket();
-    const onConnect = () => {
-      setRealtimeStatus('connected');
-      loadOrders(true);
-    };
-    const onDisconnect = () => setRealtimeStatus('disconnected');
-    const onConnectError = () => setRealtimeStatus('error');
-
-    setRealtimeStatus(client.connected ? 'connected' : 'connecting');
-    client.on('connect', onConnect);
-    client.on('disconnect', onDisconnect);
-    client.on('connect_error', onConnectError);
-
-    const unsubscribers = [
-      subscribeRealtime(REALTIME_EVENTS.ORDER_CREATED, () => loadOrders(true)),
-      subscribeRealtime(REALTIME_EVENTS.ORDER_UPDATED, () => loadOrders(true)),
-      subscribeRealtime(REALTIME_EVENTS.PRINT_COMANDA, () => loadOrders(true)),
-    ];
+    const onConnect = () => { setRealtime('connected'); load(); };
+    const onDisconnect = () => setRealtime('disconnected');
+    const onError = () => setRealtime('error');
+    setRealtime(client.connected ? 'connected' : 'connecting');
+    client.on('connect', onConnect); client.on('disconnect', onDisconnect); client.on('connect_error', onError);
+    const loadProducts = () => axios.get(`${BASE_URL}/productos`).then(({ data }) => Array.isArray(data) && setProducts(data)).catch(() => {});
+    loadProducts();
+    const unsub = [REALTIME_EVENTS.ORDER_CREATED, REALTIME_EVENTS.ORDER_UPDATED, REALTIME_EVENTS.PRINT_COMANDA].map(ev => subscribeRealtime(ev, () => load()));
+    unsub.push(subscribeRealtime(REALTIME_EVENTS.CATALOG_UPDATED, (payload = {}) => {
+      if (!payload.producto_id) return;
+      setProducts(prev => prev.map(p => Number(p.id) === Number(payload.producto_id) ? { ...p, agotado: payload.agotado ? 1 : 0 } : p));
+    }));
     return () => {
-      clearInterval(timer);
-      clearInterval(clockTimer);
-      clearTimeout(toastTimer.current);
-      refreshQueue.current.stop();
-      client.off('connect', onConnect);
-      client.off('disconnect', onDisconnect);
-      client.off('connect_error', onConnectError);
-      unsubscribers.forEach((unsubscribe) => unsubscribe && unsubscribe());
+      clearInterval(poll); clearInterval(clock); refreshQueue.current?.stop();
+      client.off('connect', onConnect); client.off('disconnect', onDisconnect); client.off('connect_error', onError);
+      unsub.forEach(u => u && u());
     };
-  }, [loadOrders, loadPrintStatus, showToast]);
+  }, []);
 
-  const prepMinutes = (order) => {
-    const start = order.preparando_at || order.created_at;
-    return Math.max(0, Math.round((clockNow - new Date(start).getTime()) / 60000));
-  };
+  const live = useMemo(() => rounds.map(r => optimistic[r.id] ? { ...r, estado: optimistic[r.id] } : r), [rounds, optimistic]);
+  // Estaciones conocidas: las de los productos y las de los platos en curso.
+  const stations = useMemo(() => {
+    const set = new Set([GENERAL]);
+    products.forEach(p => p.estacion && set.add(p.estacion));
+    live.forEach(r => (r.items || []).forEach(i => i.estacion && set.add(i.estacion)));
+    return [...set].sort((a, b) => a === GENERAL ? -1 : b === GENERAL ? 1 : a.localeCompare(b, 'es'));
+  }, [products, live]);
+  // Con una estación elegida, cada ronda muestra solo sus platos; si no tiene ninguno, no aparece.
+  // Su columna depende de esos platos: todos listos → «Listas», aunque el resto de la ronda siga en cocina.
+  const scoped = useMemo(() => {
+    if (station === 'Todas') return live;
+    return live.map(r => {
+      const items = (r.items || []).filter(i => stationOf(i) === station && Number(i.cantidad || 0) > 0);
+      if (!items.length) return null;
+      const st = String(r.estado).toUpperCase();
+      let estado = st;
+      if (st === 'PREPARANDO' || st === 'LISTO') estado = items.every(i => itemDone(i, itemOpt)) ? 'LISTO' : 'PREPARANDO';
+      return { ...r, estado, items, _roundEstado: st };
+    }).filter(Boolean);
+  }, [live, station, itemOpt]);
+  const board = useMemo(() => kitchenBoard(scoped), [scoped]);
+  const dishes = useMemo(() => allDayItems(scoped, ticketTarget), [scoped]);
+  const counts = { PENDIENTE: board.PENDIENTE.length, PREPARANDO: board.PREPARANDO.length, LISTO: board.LISTO.length };
+  const roundsPerAccount = useMemo(() => {
+    const m = {}; for (const r of [...board.PENDIENTE, ...board.PREPARANDO, ...board.LISTO]) m[r.pedido_id] = (m[r.pedido_id] || 0) + 1; return m;
+  }, [board]);
 
+  const prevStation = useRef(station);
+  // Llegan rondas nuevas: sonido, vibración, aviso y marca «Nueva».
   useEffect(() => {
-    const currentSos = new Set();
-    let newSosDetected = false;
-
-    orders.forEach(o => {
-      const state = normalize(o.estado);
-
-      if (state === 'PENDIENTE' || state === 'PREPARANDO') {
-        if (prepMinutes(o) >= 20) {
-          currentSos.add(o.id);
-          if (!sosOrdersList.has(o.id)) newSosDetected = true;
-        }
-      }
-    });
-
-    if (newSosDetected && !isMutedRef.current && audioEnabled) {
-      if (Platform.OS === 'web') {
-        playWebAlertTone({ ...ALERT_TONES.SYNC_ERROR, frequencies: [988, 784, 988], type: 'triangle', volume: 0.28 });
-      } else {
-        Vibration.vibrate([500, 500, 500]);
-      }
-    }
-    setSosOrdersList(currentSos);
-  }, [orders, audioEnabled, clockNow]);
-
-  const tableCounts = useMemo(() => {
-    const counts = {};
-    orders.forEach(o => {
-      const state = normalize(o.estado);
-      const hasItems = (o.items || []).some((item) => Number(item.cantidad || 0) > 0);
-      if (hasItems && ['PENDIENTE', 'PREPARANDO', 'LISTO'].includes(state)) {
-        const tableId = orderTargetLabel(o);
-        counts[tableId] = (counts[tableId] || 0) + 1;
-      }
-    });
-    return counts;
-  }, [orders]);
-
-  const grouped = useMemo(() => {
-    const result = { PENDIENTE: [], PREPARANDO: [], LISTO: [], ENTREGADO: {} };
-    for (const order of orders) {
-      const state = normalize(order.estado);
-      const isOrderToday = isToday(order.created_at);
-      const hasItems = (order.items || []).some((item) => Number(item.cantidad || 0) > 0);
-      if (!hasItems) continue;
-
-      if (kitchenColumn(order) === 'ENTREGADO') {
-        let dayStr = 'Hoy';
-        if (!isOrderToday) {
-          const d = new Date(order.created_at);
-          dayStr = d.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'short' });
-          dayStr = dayStr.charAt(0).toUpperCase() + dayStr.slice(1);
-        }
-        if (!result.ENTREGADO[dayStr]) result.ENTREGADO[dayStr] = [];
-        result.ENTREGADO[dayStr].push(order);
-      } else if (result[state]) {
-        result[state].push(order);
-      }
-    }
-    return result;
-  }, [orders]);
-
-  useEffect(() => {
-    const pendingOrders = grouped.PENDIENTE || [];
-    const currentPendingIds = new Set(pendingOrders.map(pendingSignature));
-
-    if (!lastRefresh) return;
-    if (isFirstLoad.current) {
-      isFirstLoad.current = false;
-      prevPendingIds.current = currentPendingIds;
-      return;
-    }
-
-    const newOrders = pendingOrders.filter((order) => !prevPendingIds.current.has(pendingSignature(order)));
-
-    if (newOrders.length) {
-      if (!isMutedRef.current && audioEnabled) {
-        if (Platform.OS === 'web') {
-          const hasPickup = newOrders.some(isPickupOrder);
-          playWebAlertTone(hasPickup ? ALERT_TONES.PICKUP_NEW : ALERT_TONES.ORDER_NEW);
-        } else {
-          Vibration.vibrate([200, 100, 200]);
-        }
-      }
-      const hasPickup = newOrders.some(isPickupOrder);
-      showToast(
-        hasPickup ? 'Nuevo pedido para llevar/delivery' : 'Nuevo pedido de mesa',
-        newOrders.map(orderTargetLabel).slice(0, 2).join(', ')
-      );
-    }
-    prevPendingIds.current = currentPendingIds;
-  }, [grouped.PENDIENTE, audioEnabled, lastRefresh]);
-
-  useEffect(() => {
-    const previous = realtimeStatusRef.current;
-    realtimeStatusRef.current = realtimeStatus;
-    if (previous === realtimeStatus || realtimeStatus === 'connected' || realtimeStatus === 'connecting') return;
-
-    if (!isMutedRef.current && audioEnabled && Platform.OS === 'web') {
-      playWebAlertTone(ALERT_TONES.SYNC_ERROR);
-    }
-    showToast(
-      'Error de sincronizacion',
-      realtimeStatus === 'error' ? 'No se pudo conectar con el servidor.' : 'La cocina perdio conexion en tiempo real.',
-      true
-    );
-  }, [realtimeStatus, audioEnabled]);
-
-  const updateOrder = async (order, estado) => {
-    if (actionLocks.current.has(order.id)) return;
-    actionLocks.current.add(order.id);
-    setBusyOrders(new Set(actionLocks.current));
-    try {
-      await axios.put(`${BASE_URL}/pedidos/${order.pedido_id}/rondas/${order.ronda_id}`, {
-        estado,
-      });
-    } catch (error) {
-      showToast('Error', error.response?.data?.message || 'No se pudo actualizar.', true);
-    } finally {
-      await loadOrders(true);
-      actionLocks.current.delete(order.id);
-      setBusyOrders(new Set(actionLocks.current));
-    }
-  };
-
-  const pingWaiter = async (order) => {
-    if (actionLocks.current.has(order.id)) return;
-    actionLocks.current.add(order.id);
-    setBusyOrders(new Set(actionLocks.current));
-    try {
-      await axios.post(`${BASE_URL}/pedidos/${order.pedido_id}/ping`);
-      showToast('¡Aviso Enviado!', `Se notificó al mesero: ${orderTargetLabel(order)}.`);
-    } catch (error) {
-      showToast('Error', error.response?.data?.message || 'No se pudo enviar el aviso al mesero.', true);
-    } finally {
-      actionLocks.current.delete(order.id);
-      setBusyOrders(new Set(actionLocks.current));
-    }
-  };
-
-  const printOrders = async (selected) => {
-    if (printLock.current) return;
-    if (!selected.length) return showToast('Sin comandas', 'No hay comandas pendientes para imprimir.', true);
-    printLock.current = true;
-    setPrinting(true);
-    let sent = 0;
-    try {
-      for (const order of selected) {
-        await axios.post(`${BASE_URL}/pedidos/${order.pedido_id}/imprimir-comanda`, { ronda_id: order.ronda_id });
-        sent += 1;
-      }
-      showToast('Comandas en cola', `${sent} comandas pendientes del agente de impresión.`);
-    } catch (error) {
-      showToast('Error de impresión', `${sent} en cola. ${error.response?.data?.message || 'No se pudieron enviar las restantes.'}`, true);
-    } finally {
-      printLock.current = false;
-      setPrinting(false);
-      loadPrintStatus();
-    }
-  };
-
-  const printAllPending = () => printOrders([...grouped.PENDIENTE, ...grouped.PREPARANDO]);
-
-  const batchItems = useMemo(() => {
-    const itemsMap = {};
-    orders.forEach(order => {
-      const state = normalize(order.estado);
-
-      if (state === 'PENDIENTE' || state === 'PREPARANDO') {
-        (order.items || []).forEach(item => {
-          const modsString = (item.modificadores || []).map(m => modifierLabel(m)).sort().join(' | ');
-          const key = `${item.nombre}::${item.notas || ''}::${modsString}`;
-          if (!itemsMap[key]) {
-            itemsMap[key] = { id: key, nombre: item.nombre, notas: item.notas, modificadores: item.modificadores || [], cantidad: 0, mesas: new Set() };
-          }
-          itemsMap[key].cantidad += Number(item.cantidad || 0);
-          itemsMap[key].mesas.add(orderTargetLabel(order));
+    if (loading) return;
+    const sigs = new Set(board.PENDIENTE.map(pendingSignature));
+    // Cambiar de estación no es «llegar»: se reinicia la referencia sin sonar.
+    if (prevStation.current !== station) { prevStation.current = station; prevSignatures.current = sigs; return; }
+    if (prevSignatures.current) {
+      const fresh = board.PENDIENTE.filter(r => !prevSignatures.current.has(pendingSignature(r)));
+      if (fresh.length) {
+        const pickup = fresh.some(r => !r.mesa_id);
+        sound(pickup ? ALERT_TONES.PICKUP_NEW : ALERT_TONES.ORDER_NEW);
+        haptic('success');
+        const at = Date.now();
+        setNewIds(prev => { const n = { ...prev }; fresh.forEach(r => { n[r.id] = at; }); return n; });
+        toast.show(fresh.length === 1 ? `Nueva ronda: ${ticketTarget(fresh[0])}` : `${fresh.length} rondas nuevas`, {
+          tone: 'success', icon: BellRing, detail: fresh.length > 1 ? fresh.slice(0, 3).map(ticketTarget).join(' · ') : `${(fresh[0].items || []).reduce((s, i) => s + Number(i.cantidad || 0), 0)} platos`,
+          action: board3 || tab === 'PENDIENTE' ? undefined : { label: 'Ver', onPress: () => setTab('PENDIENTE') },
         });
       }
-    });
-    return Object.values(itemsMap).sort((a, b) => b.cantidad - a.cantidad);
-  }, [orders]);
-
-  const stats = {
-    nuevos: grouped.PENDIENTE.length,
-    prep: grouped.PREPARANDO.length,
-    listos: grouped.LISTO.length,
-    completados: (grouped.ENTREGADO['Hoy'] || []).length,
-  };
-
-  const elapsed = (createdAt) => {
-    const mins = Math.max(0, Math.round((clockNow - new Date(createdAt).getTime()) / 60000));
-    if (mins < 1) return 'Hace segs';
-    if (mins >= 60) {
-      const hours = Math.floor(mins / 60);
-      const remainingMins = mins % 60;
-      return `Hace ${hours}h ${remainingMins}m`;
     }
-    return `Hace ${mins} min`;
+    prevSignatures.current = sigs;
+  }, [board.PENDIENTE, loading, station]);
+
+  // Se olvida la marca «Nueva» pasado un rato.
+  useEffect(() => { setNewIds(prev => { const n = {}; for (const [k, t] of Object.entries(prev)) if (now - t < NEW_MS) n[k] = t; return Object.keys(n).length === Object.keys(prev).length ? prev : n; }); }, [now]);
+
+  // Demora: una alerta por ronda cuando pasa el límite configurado.
+  const lateReady = useRef(false); // las que ya venían tarde al abrir la pantalla no suenan
+  useEffect(() => {
+    if (!limits.activas || loading) return;
+    for (const r of [...board.PENDIENTE, ...board.PREPARANDO]) {
+      if (waitMinutes(r, now) >= limits.espera && !lateSeen.current.has(r.id)) {
+        lateSeen.current.add(r.id);
+        if (lateReady.current) {
+          sound({ ...ALERT_TONES.SYNC_ERROR, frequencies: [988, 784, 988], type: 'triangle', volume: 0.28 });
+          haptic('warning');
+          toast.show(`${ticketTarget(r)} pasa de ${limits.espera} min`, { tone: 'warning', icon: History });
+        }
+      }
+    }
+    lateReady.current = true;
+  }, [now, board.PENDIENTE, board.PREPARANDO, limits, loading]);
+
+  // ── Acciones ─────────────────────────────────────────────────────────────
+  const setBusyFor = (id, on) => setBusy(prev => { const n = new Set(prev); if (on) n.add(id); else n.delete(id); return n; });
+  const move = useCallback(async (r, estado, { quiet } = {}) => {
+    if (busy.has(r.id)) return false;
+    setBusyFor(r.id, true);
+    setOptimistic(prev => ({ ...prev, [r.id]: estado })); // la tarjeta cambia de columna al instante
+    try {
+      await axios.put(`${BASE_URL}/pedidos/${r.pedido_id}/rondas/${r.ronda_id || r.id}`, { estado });
+      return true;
+    } catch (error) {
+      setOptimistic(prev => { const n = { ...prev }; delete n[r.id]; return n; });
+      if (!quiet) toast.show(error.response?.data?.message || 'No se pudo actualizar la ronda.', { tone: 'error' });
+      return false;
+    } finally {
+      setBusyFor(r.id, false);
+      refreshQueue.current?.refresh();
+    }
+  }, [busy]);
+
+  const start = r => move(r, 'PREPARANDO');
+  // Marca o desmarca platos sueltos en el servidor (se ve igual en todas las tablets).
+  const setItems = useCallback(async (r, ids, listo, { quiet } = {}) => {
+    if (!ids.length) return null;
+    setItemOpt(prev => { const n = { ...prev }; ids.forEach(id => { n[id] = listo; }); return n; });
+    try {
+      const { data } = await axios.put(`${BASE_URL}/pedidos/${r.pedido_id}/rondas/${r.ronda_id || r.id}/platos`, { ids, listo });
+      return data;
+    } catch (error) {
+      setItemOpt(prev => { const n = { ...prev }; ids.forEach(id => { delete n[id]; }); return n; });
+      if (!quiet) toast.show(error.response?.data?.message || 'No se pudo marcar el plato.', { tone: 'error' });
+      return null;
+    } finally { refreshQueue.current?.refresh(); }
+  }, []);
+  const toggleItem = async (r, item) => {
+    const next = !itemDone(item, itemOpt);
+    const data = await setItems(r, [item.id], next);
+    if (data?.ronda_lista && station === 'Todas') toast.show(`${ticketTarget(r)} lista`, { tone: 'success', icon: CheckCheck, detail: 'Todos los platos listos · se avisó al mesero', action: { label: 'Deshacer', onPress: () => setItems(r, [item.id], false) } });
+  };
+  // Con estación: «Marcar lista» marca solo los platos de esa estación.
+  const markReady = async r => {
+    if (station !== 'Todas') {
+      const ids = (r.items || []).filter(i => !itemDone(i, itemOpt)).map(i => i.id);
+      const data = await setItems(r, ids, true);
+      if (data) toast.show(`${station}: ${ticketTarget(r)} lista`, { tone: 'success', icon: CheckCheck, detail: data.ronda_lista ? 'Ronda completa · se avisó al mesero' : 'Se avisó al mesero de estos platos', action: { label: 'Deshacer', onPress: () => setItems(r, ids, false) } });
+      return;
+    }
+    const ok = await move(r, 'LISTO');
+    if (!ok) return;
+    toast.show(`${ticketTarget(r)} lista`, { tone: 'success', icon: CheckCheck, detail: 'Se avisó al mesero', action: { label: 'Deshacer', onPress: () => recall(r) } });
+  };
+  const recall = async r => {
+    if (station !== 'Todas') { const data = await setItems(r, (r.items || []).map(i => i.id), false); if (data) toast.show(`${ticketTarget(r)} volvió a preparación`, { icon: RotateCcw }); return; }
+    const ok = await move(r, 'PREPARANDO'); if (ok) toast.show(`${ticketTarget(r)} volvió a preparación`, { icon: RotateCcw });
+  };
+  // Agotado: el mesero lo ve al instante como «Agotado» y no se puede pedir.
+  const setSoldOut = async (productId, agotado) => {
+    setProducts(prev => prev.map(p => Number(p.id) === Number(productId) ? { ...p, agotado: agotado ? 1 : 0 } : p));
+    try {
+      const { data } = await axios.put(`${BASE_URL}/productos/${productId}/agotado`, { agotado });
+      haptic(agotado ? 'warning' : 'success');
+      toast.show(agotado ? `${data.nombre} agotado` : `${data.nombre} disponible otra vez`, { tone: agotado ? 'warning' : 'success', icon: Ban, detail: agotado ? 'Los meseros ya lo ven como «Agotado»' : null,
+        action: { label: 'Deshacer', onPress: () => setSoldOut(productId, !agotado) } });
+    } catch (error) {
+      setProducts(prev => prev.map(p => Number(p.id) === Number(productId) ? { ...p, agotado: agotado ? 0 : 1 } : p));
+      toast.show(error.response?.data?.message || 'No se pudo cambiar el producto.', { tone: 'error' });
+    }
+  };
+  const ping = async r => {
+    if (busy.has(r.id)) return;
+    setBusyFor(r.id, true);
+    try { await axios.post(`${BASE_URL}/pedidos/${r.pedido_id}/ping`); toast.show(`Aviso enviado: ${ticketTarget(r)}`, { tone: 'success', icon: BellRing }); }
+    catch (error) { toast.show(error.response?.data?.message || 'No se pudo avisar al mesero.', { tone: 'error' }); }
+    finally { setBusyFor(r.id, false); }
+  };
+  const [printing, setPrinting] = useState(false);
+  const print = async list => {
+    if (printing || !list.length) { if (!list.length) toast.show('No hay comandas pendientes para imprimir.', { tone: 'warning' }); return; }
+    setPrinting(true); let sent = 0;
+    try {
+      for (const r of list) { await axios.post(`${BASE_URL}/pedidos/${r.pedido_id}/imprimir-comanda`, { ronda_id: r.ronda_id || r.id }); sent += 1; }
+      toast.show(sent === 1 ? 'Comanda enviada a la impresora' : `${sent} comandas enviadas a la impresora`, { tone: 'success', icon: Printer });
+    } catch (error) { toast.show(`${sent} enviadas. ${error.response?.data?.message || 'No se pudieron enviar las demás.'}`, { tone: 'error' }); }
+    finally { setPrinting(false); }
+  };
+  const printErrors = Number(printStatus?.counts?.ERROR || 0) + Number(printStatus?.counts?.REVISAR || 0);
+
+  const colTone = key => key === 'PENDIENTE' ? c.primary : key === 'PREPARANDO' ? c.amber : c.green;
+  // ── Piezas ───────────────────────────────────────────────────────────────
+  const ticket = (r, compact) => {
+    const state = String(r.estado).toUpperCase();
+    const isBusy = busy.has(r.id);
+    const common = { key: r.id, round: r, items: r.items, now, limit: limits.espera, listoLimit: limits.lista, busy: isBusy, isNew: !!newIds[r.id], extraRound: roundsPerAccount[r.pedido_id] > 1, compact,
+      optimistic: itemOpt, onToggleItem: toggleItem, onLongPressItem: item => setToSoldOut(item),
+      station: station === 'Todas' && r._roundEstado == null ? null : station !== 'Todas' && r._roundEstado === 'PREPARANDO' && state === 'LISTO' ? 'El resto sigue en cocina' : null };
+    const printBtn = { icon: Printer, label: `Imprimir comanda de ${ticketTarget(r)}`, onPress: () => print([r]) };
+    if (state === 'PENDIENTE') return <KitchenTicket {...common} secondary={[printBtn]}
+      action={{ label: 'Empezar', icon: Soup, variant: isDark ? 'outline' : 'ink', onPress: () => start(r) }}
+      swipe={{ label: 'Empezar', icon: Soup, color: c.primary, onSwipe: () => start(r) }} />;
+    if (state === 'PREPARANDO') return <KitchenTicket {...common} secondary={[printBtn]}
+      action={{ label: 'Marcar lista', allDoneLabel: 'Todo listo · avisar', icon: Check, variant: 'primary', haptic: 'success', onPress: () => markReady(r) }}
+      swipe={{ label: 'Lista', icon: Check, color: c.greenDot, onSwipe: () => markReady(r) }} />;
+    return <KitchenTicket {...common} secondary={[{ icon: RotateCcw, text: 'Volver', label: `Volver a preparación: ${ticketTarget(r)}`, onPress: () => recall(r) }]}
+      action={{ label: 'Avisar', icon: BellRing, variant: 'primary', onPress: () => ping(r) }} />;
   };
 
-  const kitchenSemaphore = (order) => {
-    const state = normalize(order.estado);
-    if (state !== 'PREPARANDO' && state !== 'PENDIENTE') return { borderColor: colors.line, backgroundColor: colors.surface, borderWidth: 1 };
+  const emptyFor = key => key === 'PENDIENTE'
+    ? <EmptyState icon={Inbox} title="Sin rondas nuevas" description="Cuando un mesero envíe una ronda sonará y aparecerá aquí." />
+    : key === 'PREPARANDO' ? <EmptyState icon={ChefHat} title="Nada en preparación" description="Toca «Empezar» en una ronda nueva." />
+      : <EmptyState icon={CheckCheck} title="Todo servido" description="Las rondas listas esperan aquí al mesero." />;
 
-    const mins = prepMinutes(order);
-    if (mins >= 20) return { borderColor: colors.danger, backgroundColor: isDark ? '#450A0A' : '#fee2e2', borderWidth: 2 };
-    if (mins >= 15) return { borderColor: colors.danger, backgroundColor: isDark ? '#450A0A' : colors.danger + '1A', borderWidth: 2 };
-    if (mins >= 10) return { borderColor: colors.warning, backgroundColor: colors.warningSoft, borderWidth: 2 };
-    return { borderColor: colors.success, backgroundColor: colors.successSoft, borderWidth: 2 };
-  };
-
-  const getColColor = (key) => {
-    if (key === 'PENDIENTE') return colors.danger;
-    if (key === 'PREPARANDO') return colors.warning;
-    if (key === 'LISTO') return colors.success;
-    return colors.muted;
-  };
-
-  const renderMetric = (label, value, IconComponent, colorKey) => {
-    const color = getColColor(colorKey);
-    return (
-      <View style={{ flexGrow: 1, flexBasis: isCompact ? '47%' : 150, minWidth: isCompact ? 0 : 150, backgroundColor: colors.surface, borderRadius: 12, padding: isCompact ? 10 : 16, borderWidth: 1, borderColor: colors.line, ...softShadow, flexDirection: 'row', alignItems: 'center' }}>
-        <View style={{ width: isCompact ? 36 : 48, height: isCompact ? 36 : 48, borderRadius: isCompact ? 10 : 16, alignItems: 'center', justifyContent: 'center', marginRight: 10, backgroundColor: `${color}1f` }}>
-          <IconComponent size={isCompact ? 18 : 24} color={color} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: isCompact ? 18 : 20, fontWeight: '900', color }}>{value}</Text>
-          <Text style={{ fontWeight: '800', fontSize: isCompact ? 12 : 14, color: colors.ink }} numberOfLines={1}>{label}</Text>
-        </View>
+  const column = col => <View key={col.key} style={{ flex: 1, minWidth: 0, backgroundColor: c.isDark ? '#141519' : c.surfaceAlt, borderRadius: radius.xl, overflow: 'hidden' }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: space.lg, paddingTop: space.md, paddingBottom: space.sm }}>
+      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: colTone(col.key) }} />
+      <T size={17} weight="800" style={{ flex: 1 }} numberOfLines={1}>{col.title}</T>
+      <View style={{ minWidth: 30, height: 26, paddingHorizontal: 8, borderRadius: 13, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' }}>
+        <RollingNumber value={counts[col.key]} size={14} weight="800" />
       </View>
-    );
-  };
-
-  const renderOrder = (order, col) => {
-    const itemCount = (order.items || []).reduce((sum, item) => sum + Number(item.cantidad || 0), 0);
-    const semaphore = kitchenSemaphore(order);
-    const colColor = getColColor(col.key);
-    const isSOS = sosOrdersList.has(order.id);
-
-    const tableId = orderTargetLabel(order);
-    const isAdicional = tableCounts[tableId] > 1;
-
-    return (
-      <BlinkingTicket isSOS={isSOS} key={`ticket-${order.id}`}>
-        <View style={{ borderRadius: 14, padding: 14, marginBottom: 12, borderWidth: semaphore.borderWidth, borderColor: semaphore.borderColor, backgroundColor: semaphore.backgroundColor, ...softShadow }}>
-
-          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-            {isSOS && (
-              <View style={{ backgroundColor: colors.danger, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, flexDirection: 'row', alignItems: 'center' }}>
-                <Flame size={12} color={colors.onAccent} />
-                <Text style={{ color: colors.onAccent, fontSize: 10, fontWeight: '900', marginLeft: 4 }}>RETRASO CRÍTICO</Text>
-              </View>
-            )}
-            {isAdicional && (
-              <View style={{ backgroundColor: colors.warningSoft, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: colors.warning }}>
-                <Text style={{ color: colors.warning, fontSize: 10, fontWeight: '900' }}>+ ADICIONAL</Text>
-              </View>
-            )}
-          </View>
-
-          <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
-            <View style={{ flexShrink: 1 }}>
-              <Text style={{ fontWeight: '900', fontSize: 16, color: colColor }} numberOfLines={1}>{tableId}</Text>
-              <Text style={{ fontSize: 12, fontWeight: '600', color: colors.muted, marginTop: 2 }}>Ronda #{order.ronda_id} · {itemCount} productos · {order.estado_cobro === 'PAGADO' ? 'Pagado' : 'Por cobrar'}</Text>
-              {isPickupOrder(order) ? (
-                <Text style={{ fontSize: 11, fontWeight: '700', color: colors.muted, marginTop: 2 }} numberOfLines={1}>{orderPickupDetail(order)}</Text>
-              ) : null}
-            </View>
-            <Text style={{ fontSize: 12, fontWeight: '800', color: colors.muted }}>{new Date(order.created_at).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}</Text>
-          </View>
-
-          {!['PAGADO', 'CANCELADO', 'ENTREGADO'].includes(normalize(order.estado)) && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-              <Timer size={14} color={isSOS ? colors.danger : colColor} />
-              <Text style={{ marginLeft: 6, fontSize: 12, fontWeight: '900', color: isSOS ? colors.danger : colColor }}>{elapsed(order.preparando_at || order.created_at)}</Text>
-            </View>
-          )}
-
-          <View style={{ marginBottom: 12 }}>
-            {(order.items || []).map((item, idx) => (
-              <View key={`${order.id}-${idx}`} style={{ marginBottom: 8 }}>
-                <Text style={{ fontSize: 14, fontWeight: '800', color: colors.ink }}>{item.cantidad}x {item.nombre}</Text>
-                {(item.modificadores || []).map((mod) => (
-                  <Text key={`${order.id}-${idx}-${mod.id || mod.nombre}`} style={{ fontSize: 12, fontWeight: '600', color: colors.muted, marginTop: 2, paddingLeft: 8 }}>{mod.tipo === 'EXTRA' ? '+' : mod.tipo === 'EXCLUSION' ? '-' : '*'} {modifierLabel(mod)}</Text>
-                ))}
-                {item.notas ? <Text style={{ fontSize: 12, fontWeight: '700', color: colors.warning, marginTop: 2, paddingLeft: 8 }}>Nota: {item.notas}</Text> : null}
-              </View>
-            ))}
-          </View>
-
-          {order.notas ? (
-            <View style={{ backgroundColor: colors.field, borderRadius: 10, padding: 10, marginBottom: 12 }}>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: colors.ink }}>{order.notas}</Text>
-            </View>
-          ) : null}
-
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            <TouchableOpacity disabled={printing} onPress={() => printOrders([order])} style={{ borderRadius: 10, paddingHorizontal: 14, height: 40, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.field, borderWidth: 1, borderColor: colors.line }}>
-              <Printer size={16} color={colors.ink} />
-            </TouchableOpacity>
-
-            {normalize(order.estado) === 'LISTO' && (
-               <TouchableOpacity disabled={busyOrders.has(order.id)} onPress={() => pingWaiter(order)} style={{ flex: 1, minWidth: '40%', height: 40, borderRadius: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.infoSoft, borderWidth: 1, borderColor: colors.info }}>
-                 <Megaphone size={14} color={colors.info} />
-                 <Text style={{ color: colors.info, fontSize: 12, fontWeight: '900', marginLeft: 6 }}>Avisar</Text>
-               </TouchableOpacity>
-            )}
-
-            {col.action ? (
-              <TouchableOpacity disabled={busyOrders.has(order.id)} onPress={() => updateOrder(order, col.next)} style={{ flex: 1, minWidth: '40%', height: 40, borderRadius: 10, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: colColor }}>
-                <Text style={{ color: colors.onAccent, fontSize: 13, fontWeight: '900' }}>{busyOrders.has(order.id) ? 'Actualizando…' : col.action}</Text>
-              </TouchableOpacity>
-            ) : (
-              normalize(order.estado) !== 'LISTO' && (
-                <View style={{ flex: 1, alignItems: 'flex-end', justifyContent: 'center', paddingRight: 8 }}>
-                  <Text style={{ fontSize: 12, fontWeight: '800', color: colors.muted }}>{normalize(order.estado)}</Text>
-                </View>
-              )
-            )}
-          </View>
-        </View>
-      </BlinkingTicket>
-    );
-  };
-
-  const renderBatchCooking = () => (
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: isCompact ? 12 : 16, paddingBottom: BOTTOM_INSET + 32 }}>
-      <View style={{ backgroundColor: colors.surface, borderRadius: 16, padding: isCompact ? 14 : 24, borderWidth: 1, borderColor: colors.line, ...modernShadow }}>
-        <View style={{ flexDirection: isCompact ? 'column' : 'row', alignItems: isCompact ? 'flex-start' : 'center', marginBottom: 24, borderBottomWidth: 1, borderColor: colors.line, paddingBottom: 16 }}>
-          <View style={{ width: 48, height: 48, borderRadius: 16, backgroundColor: colors.softOrange, alignItems: 'center', justifyContent: 'center', marginRight: isCompact ? 0 : 16, marginBottom: isCompact ? 10 : 0 }}>
-            <Layers size={24} color={colors.brand} />
-          </View>
-          <View style={{ minWidth: 0 }}>
-            <Text style={{ fontSize: 22, fontWeight: '900', color: colors.ink }}>Resumen de Plancha</Text>
-            <Text style={{ fontSize: 14, color: colors.muted, fontWeight: '600', marginTop: 2 }}>Total de productos agrupados (Nuevos + Preparando)</Text>
-          </View>
-        </View>
-
-        {batchItems.length === 0 ? (
-           <View style={{ alignItems: 'center', paddingVertical: 60 }}>
-              <CheckCircle2 size={64} color={colors.line} />
-              <Text style={{ color: colors.ink, fontSize: 18, fontWeight: '900', marginTop: 16 }}>Todo bajo control</Text>
-              <Text style={{ color: colors.muted, fontWeight: '600', marginTop: 8 }}>No hay productos pendientes por preparar.</Text>
-           </View>
-        ) : (
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
-            {batchItems.map(item => (
-              <View key={item.id} style={{ flexBasis: isCompact ? '100%' : '48%', flexGrow: 1, minWidth: 0, backgroundColor: colors.field, borderRadius: 14, padding: isCompact ? 12 : 16, borderWidth: 1, borderColor: colors.line }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                   <View style={{ flex: 1, paddingRight: 16 }}>
-                      <Text style={{ fontSize: 18, fontWeight: '900', color: colors.ink }}>{item.nombre}</Text>
-                      {item.notas ? (
-                        <View style={{ backgroundColor: colors.warningSoft, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginTop: 8 }}>
-                          <Text style={{ fontSize: 13, fontWeight: '800', color: colors.warning }}>Nota: {item.notas}</Text>
-                        </View>
-                      ) : null}
-                      {item.modificadores.length > 0 ? (
-                        <View style={{ marginTop: 8 }}>
-                          {item.modificadores.map((mod, idx) => (
-                             <Text key={idx} style={{ fontSize: 13, color: colors.muted, fontWeight: '700', marginTop: 2 }}>• {modifierLabel(mod)}</Text>
-                          ))}
-                        </View>
-                      ) : null}
-                   </View>
-                   <View style={{ backgroundColor: colors.brand, borderRadius: 12, minWidth: 48, paddingHorizontal: 12, paddingVertical: 8, alignItems: 'center', justifyContent: 'center', ...softShadow }}>
-                      <Text style={{ fontSize: 22, fontWeight: '900', color: colors.onAccent }}>{item.cantidad}</Text>
-                   </View>
-                </View>
-                <View style={{ marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderColor: colors.line, flexDirection: 'row', alignItems: 'center' }}>
-                   <Text style={{ fontSize: 13, color: colors.muted, fontWeight: '700' }}>Para Mesas: </Text>
-                   <Text style={{ fontSize: 14, color: colors.ink, fontWeight: '900' }}>{Array.from(item.mesas).sort((a,b)=>a-b).join(', ')}</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-      </View>
+    </View>
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: space.md, paddingTop: 4, gap: space.md, paddingBottom: space.xl }} showsVerticalScrollIndicator={false}>
+      {board[col.key].length ? board[col.key].map(r => <Appear key={r.id}>{ticket(r, width < 1200)}</Appear>) : emptyFor(col.key)}
     </ScrollView>
-  );
+  </View>;
 
-  if (loading) {
-    return (
-      <SafeAreaView style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: TOP_INSET, backgroundColor: colors.pageBg }}>
-        <ActivityIndicator size="large" color={colors.brand} />
-      </SafeAreaView>
-    );
-  }
-
-  return (
-    <SafeAreaView style={{ flex: 1, paddingTop: TOP_INSET, backgroundColor: colors.pageBg }}>
-
-      {toast && (
-        <View style={{ position: 'absolute', top: TOP_INSET + 10, alignSelf: 'center', zIndex: 100, elevation: 10 }}>
-          <View style={{ backgroundColor: toast.isError ? colors.danger : colors.surface, padding: 14, borderRadius: 12, flexDirection: 'row', alignItems: 'center', ...modernShadow, minWidth: 280, maxWidth: '90%', borderWidth: 1, borderColor: toast.isError ? colors.danger : colors.line }}>
-            {toast.isError ? <X size={18} color={colors.onAccent} /> : <CheckCircle2 size={18} color={colors.success} />}
-            <View style={{ marginLeft: 10, flex: 1 }}>
-              <Text style={{ fontSize: 13, fontWeight: '900', color: toast.isError ? colors.onAccent : colors.ink }}>{toast.title}</Text>
-              <Text style={{ fontSize: 12, color: toast.isError ? colors.onAccent : colors.muted, marginTop: 2 }}>{toast.message}</Text>
-            </View>
+  const dishesView = <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: pad, gap: space.md, paddingBottom: BOTTOM_INSET + 32, flexDirection: board3 ? 'row' : 'column', flexWrap: 'wrap' }}>
+    {!dishes.length ? <View style={{ width: '100%' }}><EmptyState icon={LayoutGrid} title="Nada por preparar" description="Aquí se suman los platos de todas las rondas nuevas y en preparación." /></View> : null}
+    {dishes.map((d, i) => <Appear key={d.key} delay={Math.min(i, 10) * 25} style={board3 ? { width: width >= 1300 ? '32.4%' : '48.9%' } : null}>
+      <View style={[{ flexDirection: 'row', gap: space.md, padding: space.lg, borderRadius: radius.xl, backgroundColor: c.surface, borderWidth: 1, borderColor: c.isDark ? c.line : 'rgba(16,24,40,0.05)' }, elevate(c, 1)]}>
+        <View style={{ width: 68, height: 68, borderRadius: 22, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+          <Num size={32} weight="800">{d.cantidad}</Num>
+        </View>
+        <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+          <T size={21} weight="800">{d.nombre}</T>
+          {d.modificadores.length ? <T size={14} weight="600" color={c.muted}>{d.modificadores.join(' · ')}</T> : null}
+          {d.notas ? <T size={14} weight="800" color={isCriticalNote(d.notas) ? c.red : c.amber}>{isCriticalNote(d.notas) ? '⚠ ' : ''}{d.notas}</T> : null}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+            {d.destinos.map(x => <View key={x.nombre} style={{ paddingHorizontal: 10, paddingVertical: 3, borderRadius: radius.pill, backgroundColor: c.surfaceAlt }}>
+              <T size={14} weight="700">{x.nombre} · {x.cantidad}</T>
+            </View>)}
+            {d.nuevas ? <View style={{ paddingHorizontal: 10, paddingVertical: 3, borderRadius: radius.pill, backgroundColor: c.primary }}><T size={13} weight="800" color={c.onPrimary}>{d.nuevas} sin empezar</T></View> : null}
           </View>
         </View>
-      )}
+      </View>
+    </Appear>)}
+  </ScrollView>;
 
-      {/* HEADER */}
-      <View style={{ paddingHorizontal: 16, paddingVertical: 14, backgroundColor: colors.surface, borderBottomWidth: 1, borderColor: colors.line, zIndex: 10 }}>
-        <View style={{ flexDirection: isCompact ? 'column' : 'row', alignItems: isCompact ? 'flex-start' : 'center', justifyContent: 'space-between' }}>
+  // ── Pantalla ─────────────────────────────────────────────────────────────
+  const conn = realtime === 'connected' && !loadError ? { state: 'live', label: 'En vivo' } : loadError || realtime === 'error' ? { state: 'offline', label: 'Sin conexión' } : { state: 'reconnecting', label: 'Reconectando…' };
+  const header = <View style={{ paddingTop: TOP_INSET, backgroundColor: c.bg }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 64, paddingHorizontal: pad }}>
+      <View style={{ width: 40, height: 40, borderRadius: 14, backgroundColor: c.primarySoft, alignItems: 'center', justifyContent: 'center' }}><ChefHat size={21} color={c.primaryText} /></View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <T size={phone ? 20 : 22} weight="800" accessibilityRole="header" numberOfLines={1}>{station === 'Todas' ? 'Cocina' : station}</T>
+        <ConnectionDot state={conn.state} label={conn.label} />
+      </View>
+      <Press accessibilityRole="button" accessibilityLabel={`Estación: ${station === 'Todas' ? 'todas' : station}. Cambiar`} onPress={() => setSheet('estacion')} hapticKind="tap" scaleTo={0.95}
+        style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: phone ? 10 : 14, borderRadius: radius.pill, backgroundColor: station === 'Todas' ? c.surfaceAlt : c.skySoft }}>
+        <MapPin size={16} color={station === 'Todas' ? c.text : c.sky} />
+        {!phone ? <T size={14} weight="800" color={station === 'Todas' ? c.text : c.sky}>{station === 'Todas' ? 'Todas las estaciones' : station}</T> : null}
+      </Press>
+      {!phone ? <View style={{ flexDirection: 'row', gap: 4, padding: 4, borderRadius: radius.pill, backgroundColor: c.surfaceAlt }}>
+        {[['tablero', 'Tablero', Layers], ['platos', 'Por plato', LayoutGrid]].map(([k, l, I]) => <Chip key={k} selected={view === k} icon={I} onPress={() => setView(k)}>{l}</Chip>)}
+      </View> : <IconButton icon={view === 'tablero' ? LayoutGrid : Layers} label={view === 'tablero' ? 'Ver por plato' : 'Ver tablero'} onPress={() => setView(view === 'tablero' ? 'platos' : 'tablero')} />}
+      <IconButton icon={muted ? VolumeX : Volume2} label={muted ? 'Activar sonido' : 'Silenciar'} color={muted ? c.red : c.text} onPress={() => { unlockWebAudio().catch(() => {}); setMuted(m => !m); }} />
+      {!phone || printErrors ? <IconButton icon={Printer} label={printErrors ? `Impresión: ${printErrors} con error` : 'Impresión'} badge={printErrors || null} onPress={() => setSheet('impresion')} /> : null}
+      {!phone ? <IconButton icon={History} label="Entregadas hoy" onPress={() => setSheet('historial')} /> : null}
+      <IconButton icon={MoreHorizontal} label="Más opciones" onPress={() => setSheet('menu')} />
+    </View>
+    {!board3 && view === 'tablero' ? <View accessibilityRole="tablist" style={{ flexDirection: 'row', gap: 4, marginHorizontal: pad, marginBottom: space.sm, padding: 4, borderRadius: radius.pill, backgroundColor: c.surfaceAlt }}>
+      {COLS.map(col => {
+        const on = tab === col.key;
+        return <Press key={col.key} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={`${col.title}: ${counts[col.key]}`} onPress={() => setTab(col.key)} hapticKind="select" scaleTo={0.95}
+          style={[{ flex: 1, minHeight: 44, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: on ? c.surface : 'transparent' }, on ? elevate(c, 1) : null]}>
+          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colTone(col.key) }} />
+          <T size={14} weight={on ? '800' : '600'} numberOfLines={1}>{col.short}</T>
+          <Num size={13} weight="800" color={on ? c.text : c.muted}>{counts[col.key]}</Num>
+        </Press>;
+      })}
+    </View> : null}
+  </View>;
 
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: isCompact ? 14 : 0, marginRight: isCompact ? 0 : 16, flexShrink: 1 }}>
-            <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: colors.softOrange, alignItems: 'center', justifyContent: 'center' }}>
-              <ChefHat size={22} color={colors.brand} />
-            </View>
-            <View style={{ marginLeft: 12, flexShrink: 1 }}>
-              <Text style={{ fontSize: 20, fontWeight: '900', color: colors.ink }} numberOfLines={1}>Cocina</Text>
-              <Text style={{ fontSize: 12, fontWeight: '600', color: colors.muted }} numberOfLines={1}>Gestiona los pedidos</Text>
-            </View>
+  if (loading) return <View style={{ flex: 1, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+    <ActivityIndicator size="large" color={c.primary} /><T color={c.muted}>Cargando la cocina…</T>
+  </View>;
+
+  const history = board.ENTREGADO.filter(r => new Date(String(r.created_at).replace(' ', 'T')).toDateString() === new Date().toDateString());
+  const pendingToPrint = [...board.PENDIENTE, ...board.PREPARANDO];
+  const soldOut = products.filter(p => Number(p.agotado) === 1);
+  const productList = products
+    .filter(p => !productQuery || normalizeText(`${p.nombre} ${p.estacion || ''} ${p.categoria_nombre || ''}`).includes(normalizeText(productQuery)))
+    .filter(p => station === 'Todas' || (p.estacion || GENERAL) === station || Number(p.agotado) === 1)
+    .sort((a, b) => Number(b.agotado || 0) - Number(a.agotado || 0) || String(a.nombre).localeCompare(String(b.nombre), 'es'));
+  const productOfItem = item => products.find(p => Number(p.id) === Number(item?.producto_id));
+  const menuRow = (Icon, label, detail, onPress, tone) => <Press key={label} accessibilityRole="button" onPress={() => { setSheet(null); onPress(); }} hapticKind="tap"
+    style={{ minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.sm, borderRadius: 18 }} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
+    <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: tone === c.red ? c.redSoft : c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><Icon size={20} color={tone || c.text} /></View>
+    <View style={{ flex: 1 }}><T size={17} weight="700" color={tone || c.text}>{label}</T>{detail ? <T size={14} color={c.muted}>{detail}</T> : null}</View>
+  </Press>;
+
+  return <View style={{ flex: 1, backgroundColor: c.bg }}>
+    {header}
+    {loadError ? <Appear style={{ marginHorizontal: pad, marginBottom: space.sm }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, padding: space.md, paddingLeft: space.lg, borderRadius: radius.lg, backgroundColor: c.redSoft }}>
+        <T size={14} weight="700" color={c.red} style={{ flex: 1 }}>No se pudo actualizar la cocina. Lo que ves puede estar desactualizado.</T>
+        <Button size="sm" variant="primary" icon={RefreshCw} onPress={() => refreshQueue.current?.refresh()}>Reintentar</Button>
+      </View>
+    </Appear> : null}
+    {view === 'platos' ? dishesView : board3
+      ? <View style={{ flex: 1, flexDirection: 'row', gap: space.md, paddingHorizontal: pad, paddingBottom: Math.max(BOTTOM_INSET, space.lg) }}>{COLS.map(column)}</View>
+      : <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: pad, paddingTop: 4, paddingBottom: BOTTOM_INSET + 32, gap: space.md }}>
+        <T size={13} color={c.muted}>{COLS.find(x => x.key === tab)?.hint}</T>
+        {board[tab].length ? board[tab].map(r => <Appear key={r.id}>{ticket(r, true)}</Appear>) : emptyFor(tab)}
+      </ScrollView>}
+
+    <BottomSheet visible={sheet === 'menu'} onClose={() => setSheet(null)} title="Cocina" subtitle={conn.label}>
+      <View>
+        {phone ? menuRow(History, 'Entregadas hoy', `${history.length} rondas`, () => setTimeout(() => setSheet('historial'), 250)) : null}
+        {phone ? menuRow(Printer, 'Impresión de comandas', printErrors ? `${printErrors} con error` : 'Estado de la cola', () => setTimeout(() => setSheet('impresion'), 250)) : null}
+        {menuRow(Ban, 'Agotar productos', `${soldOut.length ? `${soldOut.length} agotados ahora` : 'Marca lo que se acabó; los meseros lo ven al instante'}`, () => setTimeout(() => setSheet('agotados'), 250))}
+        {menuRow(MapPin, 'Estación de esta tablet', station === 'Todas' ? 'Todas las estaciones' : station, () => setTimeout(() => setSheet('estacion'), 250))}
+        {menuRow(Printer, 'Imprimir pendientes', `${pendingToPrint.length} comandas nuevas y en preparación`, () => print(pendingToPrint))}
+        {wake.supported ? menuRow(Sunrise, keepAwake ? 'Pantalla siempre encendida: sí' : 'Pantalla siempre encendida: no', keepAwake ? (wake.active ? 'La tablet no se apagará sola' : 'Se activa al tocar la pantalla') : 'La tablet puede apagarse sola', () => setKeepAwake(v => !v)) : null}
+        {menuRow(isDark ? Sun : Moon, isDark ? 'Usar tema claro' : 'Usar tema oscuro', null, toggleTheme)}
+        {menuRow(RefreshCw, 'Actualizar', 'Vuelve a traer las rondas', () => refreshQueue.current?.refresh())}
+      </View>
+      <View style={{ height: 1, backgroundColor: c.line }} />
+      {menuRow(LogOut, 'Cerrar sesión', null, logout, c.red)}
+    </BottomSheet>
+
+    <BottomSheet visible={sheet === 'estacion'} onClose={() => setSheet(null)} title="Estación de esta tablet" subtitle="Cada tablet muestra solo los platos de su estación. Se guarda en este equipo.">
+      <View style={{ gap: space.sm }}>
+        {['Todas', ...stations].map(st => <Press key={st} accessibilityRole="radio" accessibilityState={{ checked: station === st }} onPress={() => { setStation(st); setSheet(null); haptic('select'); }} hapticKind={null}
+          style={{ minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.md, borderRadius: radius.lg, borderWidth: 2,
+            borderColor: station === st ? c.primary : 'transparent', backgroundColor: station === st ? c.primarySoft : c.surfaceAlt }}>
+          <MapPin size={18} color={station === st ? c.primaryText : c.muted} />
+          <View style={{ flex: 1 }}>
+            <T size={17} weight="800">{st === 'Todas' ? 'Todas las estaciones' : st}</T>
+            <T size={13} color={c.muted}>{st === 'Todas' ? 'Ve las rondas completas' : st === GENERAL ? 'Platos sin estación asignada' : `${products.filter(p => p.estacion === st).length} productos`}</T>
           </View>
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, alignItems: 'center' }} style={isCompact ? { width: '100%' } : { flexShrink: 0 }}>
-
-            {!audioEnabled && (
-              <TouchableOpacity onPress={() => { setAudioEnabled(true); unlockWebAudio().catch(() => null); showToast('Sonido Activado', 'Las alertas sonoras están listas.'); }} style={{ height: 40, paddingHorizontal: 12, borderRadius: 10, flexDirection: 'row', alignItems: 'center', backgroundColor: colors.successSoft, borderWidth: 1, borderColor: colors.success }}>
-                <Play size={16} color={colors.success} />
-                {!isCompact && <Text style={{ fontWeight: '900', fontSize: 13, marginLeft: 6, color: colors.success }}>Audio</Text>}
-              </TouchableOpacity>
-            )}
-
-            <TouchableOpacity onPress={() => setIsMuted(!isMuted)} style={{ height: 40, width: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: isMuted ? colors.danger + '1A' : colors.field, borderWidth: 1, borderColor: isMuted ? colors.danger : colors.line }}>
-              {isMuted ? <VolumeX size={18} color={colors.danger} /> : <Volume2 size={18} color={colors.ink} />}
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={() => setViewMode(viewMode === 'tickets' ? 'batch' : 'tickets')} style={{ height: 40, paddingHorizontal: 12, borderRadius: 10, flexDirection: 'row', alignItems: 'center', backgroundColor: viewMode === 'batch' ? colors.softOrange : colors.field, borderWidth: 1, borderColor: viewMode === 'batch' ? colors.brand : colors.line }}>
-              {viewMode === 'tickets' ? <Layers size={16} color={colors.brand} /> : <LayoutGrid size={16} color={colors.brand} />}
-              {!isCompact && <Text style={{ fontWeight: '900', fontSize: 13, marginLeft: 6, color: viewMode === 'batch' ? colors.brand : colors.ink }}>{viewMode === 'tickets' ? 'Plancha' : 'Tickets'}</Text>}
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={toggle} style={{ height: 40, width: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.field, borderWidth: 1, borderColor: colors.line }}>
-              {isDark ? <Sun size={18} color={colors.ink} /> : <Moon size={18} color={colors.ink} />}
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={() => loadOrders()} style={{ height: 40, width: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.field, borderWidth: 1, borderColor: colors.line }}>
-              <RefreshCw size={18} color={colors.ink} />
-            </TouchableOpacity>
-
-            <TouchableOpacity disabled={printing} onPress={printAllPending} style={{ height: 40, width: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.field, borderWidth: 1, borderColor: colors.line }}>
-              <Printer size={18} color={colors.ink} />
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={logout} style={{ height: 40, width: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: isDark ? '#450A0A' : colors.danger }}>
-              <LogOut size={18} color={colors.onAccent} />
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
+          {station === st ? <Check size={20} color={c.primaryText} /> : null}
+        </Press>)}
       </View>
+      <T size={13} color={c.muted}>Las estaciones se asignan a cada producto en el panel de administración (Menú › editar producto › Estación).</T>
+    </BottomSheet>
 
-      <View style={{ paddingHorizontal: 14, paddingVertical: 8, backgroundColor: colors.surface }}>
-        <Text style={{ color: printStatusError ? colors.danger : colors.muted, fontSize: 12 }}>
-          {printStatusError ? 'No se pudo consultar la cola de impresión.' : printStatus
-            ? `Impresión automática: ${printStatus.counts?.PENDIENTE || 0} en cola · ${printStatus.counts?.PROCESANDO || 0} procesando · ${printStatus.counts?.ENVIADO || 0} enviadas · ${printStatus.counts?.SIMULADO || 0} simuladas · ${(printStatus.counts?.ERROR || 0) + (printStatus.counts?.REVISAR || 0)} por revisar`
-            : 'Consultando impresión automática…'}
-        </Text>
-        {printStatus?.jobs?.filter((job) => ['ERROR', 'REVISAR'].includes(job.estado)).slice(0, 2).map((job) => (
-          <Text key={job.id} style={{ color: colors.danger, fontSize: 12, marginTop: 4 }}>Comanda #{job.pedido_id}: {job.error || job.estado}</Text>
-        ))}
+    <BottomSheet visible={sheet === 'agotados'} onClose={() => { setSheet(null); setProductQuery(''); }} title="Agotar productos" subtitle={soldOut.length ? `${soldOut.length} agotados · los meseros los ven como «Agotado»` : 'Toca un producto cuando se acabe; los meseros lo ven al instante.'}>
+      <Field value={productQuery} onChangeText={setProductQuery} placeholder="Buscar producto" accessibilityLabel="Buscar producto para agotar" />
+      <View style={{ gap: 6 }}>
+        {productList.slice(0, 120).map(p => {
+          const out = Number(p.agotado) === 1;
+          return <Press key={p.id} accessibilityRole="switch" accessibilityState={{ checked: out }} accessibilityLabel={`${p.nombre}: ${out ? 'agotado' : 'disponible'}`} onPress={() => setSoldOut(p.id, !out)} hapticKind={null}
+            style={{ minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.md, borderRadius: radius.lg, backgroundColor: out ? c.redSoft : c.surfaceAlt }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <T size={16} weight="800" numberOfLines={1} color={out ? c.red : c.text}>{p.nombre}</T>
+              <T size={13} color={c.muted} numberOfLines={1}>{[p.estacion || GENERAL, p.categoria_nombre].filter(Boolean).join(' · ')}</T>
+            </View>
+            <View style={{ paddingHorizontal: 12, height: 32, borderRadius: radius.pill, justifyContent: 'center', backgroundColor: out ? c.primary : c.surface }}>
+              <T size={13} weight="800" color={out ? c.onPrimary : c.muted}>{out ? 'Agotado' : 'Disponible'}</T>
+            </View>
+          </Press>;
+        })}
+        {!productList.length ? <EmptyState icon={Search} title="Sin productos" description="Prueba con otro nombre." /> : null}
       </View>
-      <View style={{ padding: isCompact ? 10 : 12, flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-        <View style={{
-          width: '100%',
-          borderRadius: 10,
-          borderWidth: 1,
-          borderColor: realtimeStatus === 'connected' ? colors.success : colors.warning,
-          backgroundColor: realtimeStatus === 'connected' ? colors.successSoft : colors.warningSoft,
-          paddingHorizontal: 12,
-          paddingVertical: 10,
-          flexDirection: 'row',
-          alignItems: 'center',
-        }}>
-          <View style={{
-            width: 10,
-            height: 10,
-            borderRadius: 5,
-            backgroundColor: realtimeStatus === 'connected' ? colors.success : colors.warning,
-            marginRight: 10,
-          }} />
-          <Text style={{ color: colors.ink, fontWeight: '900', flex: 1 }}>
-            {realtimeStatus === 'connected' ? 'Cocina sincronizada en tiempo real' : 'Reconectando cocina al servidor...'}
-          </Text>
-          <TouchableOpacity onPress={() => loadOrders(true)}>
-            <Text style={{ color: colors.brand, fontWeight: '900' }}>Actualizar</Text>
-          </TouchableOpacity>
+    </BottomSheet>
+
+    <BottomSheet visible={!!toSoldOut} onClose={() => setToSoldOut(null)} title={toSoldOut ? `¿Se acabó ${toSoldOut.nombre}?` : ''} subtitle="Los meseros lo verán como «Agotado» y no podrán pedirlo hasta que lo vuelvas a habilitar."
+      footer={<View style={{ flexDirection: 'row', gap: space.sm }}>
+        <Button variant="outline" size="lg" style={{ flex: 1 }} onPress={() => setToSoldOut(null)}>Cancelar</Button>
+        <Button variant="primary" size="lg" icon={Ban} style={{ flex: 2 }} onPress={() => { const prod = productOfItem(toSoldOut); setToSoldOut(null); if (prod) setSoldOut(prod.id, true); else toast.show('No se encontró el producto en el menú.', { tone: 'error' }); }}>Marcar agotado</Button>
+      </View>}>{null}</BottomSheet>
+
+    <BottomSheet visible={sheet === 'historial'} onClose={() => setSheet(null)} title="Entregadas hoy" subtitle={`${history.length} ${history.length === 1 ? 'ronda' : 'rondas'}`}>
+      {history.length ? history.slice(0, 80).map(r => <View key={r.id} style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: c.line }}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <T size={16} weight="800" numberOfLines={1}>{ticketTarget(r)}</T>
+          <T size={13} color={c.muted} numberOfLines={1}>{(r.items || []).map(i => `${i.cantidad}× ${i.nombre}`).join(' · ')}</T>
         </View>
-        {renderMetric('Nuevos', stats.nuevos, Flame, 'PENDIENTE')}
-        {renderMetric('Preparando', stats.prep, Soup, 'PREPARANDO')}
-        {renderMetric('Listos', stats.listos, PackageCheck, 'LISTO')}
-        {renderMetric('Entregados', stats.completados, Printer, 'ENTREGADO')}
-      </View>
+        <T size={13} weight="700" color={c.muted}>{new Date(String(r.created_at).replace(' ', 'T')).toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}</T>
+      </View>) : <EmptyState icon={History} title="Aún no hay entregas hoy" />}
+    </BottomSheet>
 
-      {/* SOLUCIÓN: Scroll adaptable. Si es móvil, se hace todo de forma vertical apilando las columnas */}
-      {viewMode === 'batch' ? renderBatchCooking() : (
-        <ScrollView
-          horizontal={!isCompact}
-          showsHorizontalScrollIndicator={false}
-          showsVerticalScrollIndicator={false}
-          decelerationRate="normal"
-          contentContainerStyle={{
-            paddingHorizontal: isCompact ? 12 : 16,
-            paddingBottom: BOTTOM_INSET + 32,
-            gap: 16,
-            flexDirection: isCompact ? 'column' : 'row'
-          }}
-          style={{ flex: 1 }}
-        >
-          {COLUMNS.map((col) => {
-            const Icon = col.icon;
-            const isHistory = col.key === 'ENTREGADO';
-            const list = isHistory ? [] : (grouped[col.key] || []);
-            const historyDays = isHistory ? Object.keys(grouped.ENTREGADO) : [];
-            const itemsCount = isHistory ? Object.values(grouped.ENTREGADO).reduce((sum, arr) => sum + arr.length, 0) : list.length;
-            const colColor = getColColor(col.key);
+    <BottomSheet visible={sheet === 'impresion'} onClose={() => setSheet(null)} title="Impresión de comandas" subtitle="Cola automática del agente de impresión"
+      footer={<Button variant="ink" size="lg" full icon={Printer} loading={printing} onPress={() => print(pendingToPrint)}>{`Imprimir pendientes (${pendingToPrint.length})`}</Button>}>
+      {printStatus?.error && !printStatus?.counts ? <T size={15} weight="700" color={c.red}>No se pudo consultar la cola de impresión.</T> : null}
+      {printStatus?.counts ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
+        {[['PENDIENTE', 'En cola', c.sky], ['PROCESANDO', 'Imprimiendo', c.amber], ['ENVIADO', 'Impresas', c.green], ['ERROR', 'Con error', c.red], ['REVISAR', 'Por revisar', c.red]].map(([k, l, tone]) =>
+          <View key={k} style={{ minWidth: 96, flexGrow: 1, padding: space.md, borderRadius: radius.lg, backgroundColor: c.surfaceAlt }}>
+            <Num size={24} weight="800" color={Number(printStatus.counts[k] || 0) && (k === 'ERROR' || k === 'REVISAR') ? tone : c.text}>{Number(printStatus.counts[k] || 0)}</Num>
+            <T size={13} weight="600" color={c.muted}>{l}</T>
+          </View>)}
+      </View> : !printStatus ? <ActivityIndicator color={c.primary} /> : null}
+      {(printStatus?.jobs || []).filter(j => ['ERROR', 'REVISAR'].includes(j.estado)).slice(0, 5).map(j => <View key={j.id} style={{ padding: space.md, borderRadius: radius.md, backgroundColor: c.redSoft }}>
+        <T size={14} weight="700" color={c.red}>Comanda del pedido #{j.pedido_id}: {j.error || j.estado}</T>
+      </View>)}
+    </BottomSheet>
+  </View>;
+}
 
-            // Función auxiliar para renderizar el listado
-            const renderColContent = () => (
-              <View style={{ paddingBottom: 10 }}>
-                {isHistory ? (
-                  historyDays.length > 0 ? (
-                    historyDays.map(day => (
-                      <View key={day} style={{ marginBottom: 16 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                           <View style={{ height: 1, flex: 1, backgroundColor: colors.line }} />
-                           <Text style={{ marginHorizontal: 10, fontSize: 11, fontWeight: '800', color: colors.muted, textTransform: 'uppercase' }}>{day}</Text>
-                           <View style={{ height: 1, flex: 1, backgroundColor: colors.line }} />
-                        </View>
-                        {grouped.ENTREGADO[day].map((order) => renderOrder(order, col))}
-                      </View>
-                    ))
-                  ) : (
-                    <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 30 }}>
-                      <Clock size={32} color={colors.line} />
-                      <Text style={{ fontWeight: '800', fontSize: 13, marginTop: 10, color: colors.muted }}>Sin historial</Text>
-                    </View>
-                  )
-                ) : (
-                  list.length ? list.map((order) => renderOrder(order, col)) : (
-                    <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 30 }}>
-                      <Clock size={32} color={colors.line} />
-                      <Text style={{ fontWeight: '800', fontSize: 13, marginTop: 10, color: colors.muted }}>Vacío</Text>
-                    </View>
-                  )
-                )}
-              </View>
-            );
-
-            return (
-              <View key={col.key} style={{
-                  width: isCompact ? '100%' : 360,
-                  flex: isCompact ? 0 : 1, // En móvil no ocupa flex 1, sino el tamaño de su contenido
-                  borderRadius: 16,
-                  padding: 12,
-                  backgroundColor: colors.surface,
-                  borderWidth: 1,
-                  borderColor: colors.line,
-                  ...modernShadow
-              }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, paddingBottom: 12, borderBottomWidth: 1, borderColor: colors.line }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: `${colColor}1f`, alignItems: 'center', justifyContent: 'center' }}>
-                      <Icon size={16} color={colColor} />
-                    </View>
-                    <Text style={{ fontWeight: '900', fontSize: 15, marginLeft: 10, color: colors.ink }}>{col.title}</Text>
-                  </View>
-                  <View style={{ borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: colColor }}>
-                    <Text style={{ color: colors.onAccent, fontSize: 12, fontWeight: '900' }}>{itemsCount}</Text>
-                  </View>
-                </View>
-
-                {/* En móvil no queremos ScrollView anidados horizontalmente ni verticalmente, dejamos fluir el contenido. En escritorio sí. */}
-                {isCompact ? renderColContent() : (
-                  <ScrollView showsVerticalScrollIndicator={false}>
-                    {renderColContent()}
-                  </ScrollView>
-                )}
-              </View>
-            );
-          })}
-        </ScrollView>
-      )}
-
-      {viewMode === 'tickets' && (
-        <View style={{
-          paddingHorizontal: 16,
-          paddingVertical: isCompact ? 10 : 12,
-          backgroundColor: colors.surface,
-          borderTopWidth: 1,
-          borderColor: colors.line,
-          flexDirection: 'row',
-          alignItems: 'center',
-          paddingBottom: Platform.OS === 'ios' ? BOTTOM_INSET : 12
-        }}>
-          <Info size={16} color={colors.brand} style={{ marginRight: 10 }} />
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <Text style={{ fontSize: 12, fontWeight: '700', color: colors.ink }}>
-              <Text style={{ color: colors.success }}>Verde:</Text> 0-10m   •
-              <Text style={{ color: colors.warning }}> Amarillo:</Text> 10-15m   •
-              <Text style={{ color: colors.danger }}> Rojo:</Text> 15-20m   •
-              <Text style={{ color: colors.danger, fontWeight: '900' }}> Parpadeo:</Text> +20m
-            </Text>
-          </ScrollView>
-        </View>
-      )}
-    </SafeAreaView>
-  );
+export default function KitchenApp() {
+  return <WaiterAppearance>
+    <ComandaToastProvider placement="top" topOffset={72 + TOP_INSET}>
+      <Kitchen />
+    </ComandaToastProvider>
+  </WaiterAppearance>;
 }

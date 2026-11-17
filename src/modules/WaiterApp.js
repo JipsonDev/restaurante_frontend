@@ -53,7 +53,8 @@ import {
   Users,
   X,
   CakeSlice,
-  ArrowRightLeft
+  ArrowRightLeft,
+  StickyNote
 } from 'lucide-react-native';
 import axios from 'axios';
 import { useFonts } from 'expo-font';
@@ -63,7 +64,7 @@ import { useTheme, operationalColors as UI_COLORS, tableStatusMeta, WaiterAppear
 import { ComandaToastProvider, FONT as COMANDA_FONT, useComandaFonts, useComandaToast, useToastLift } from '../components/waiter/comanda';
 import Logo from '../components/Logo';
 import WaiterFloor from '../components/WaiterFloor';
-import { TableActionsSheet, TransferSheet, readyRounds, salonHaptic, useTodayReservations } from '../components/waiter/salon'; // Salón:
+import { TableActionsSheet, TransferSheet, readyItems, readyRounds, salonHaptic, useTodayReservations } from '../components/waiter/salon'; // Salón:
 import { addDraftProduct, changeDraftQuantity, addCustomizedProduct, addLines } from '../utils/waiterCart.mjs';
 import { topProducts, lastRoundItems, extrasForProduct } from '../utils/waiterFavorites.mjs'; // Menú:
 import CustomizeSheet from '../components/waiter/CustomizeSheet'; // Menú:
@@ -268,9 +269,11 @@ function App() {
     action: palette.primary, onAccent: palette.onPrimary, promotion: palette.purple, promotionSoft: palette.purpleSoft,
     danger: palette.red, success: palette.green, successSoft: palette.greenSoft, warning: palette.amber, warningSoft: palette.amberSoft,
     info: palette.sky, infoSoft: palette.skySoft, isDark: palette.isDark,
+    surfaceAlt: palette.surfaceAlt, primary: palette.primary, onPrimary: palette.onPrimary, primarySoft: palette.primarySoft, text: palette.text,
   }), [palette]);
 
   const [step, setStep] = useState('mesas');
+  const [noteOpen, setNoteOpen] = useState(false); // nota general plegada hasta que se necesite
   const serviceNow = useServiceClock(['mesas', 'express', 'pedido'].includes(step));
   const [mesas, setMesas] = useState([]);
   const [productos, setProductos] = useState([]);
@@ -455,6 +458,7 @@ function App() {
   const cartKey = isExpressOrder
     ? (selectedExpressPedidoId ? `express-${selectedExpressPedidoId}` : currentExpressDraft ? selectedExpressDraftKey : null)
     : mesaSel;
+  useEffect(() => { setNoteOpen(false); }, [cartKey]); // la nota plegada se reinicia al cambiar de mesa/pedido
   const pendingSend = drafts.pending[cartKey];
   const cart = carritos[cartKey] || [];
   const orderNote = orderNotes[cartKey] || '';
@@ -762,6 +766,19 @@ function App() {
     client.on('connect_error', onConnectError);
 
     const applyOrderPayload = (payload = {}) => {
+      // Cocina marcó platos sueltos como listos: avisar al mesero de esa cuenta qué puede llevar ya.
+      if (payload.action === 'platos_listos' && !payload.ronda_lista && payload.pedido && Array.isArray(payload.nombres) && payload.nombres.length) {
+        const pd = payload.pedido;
+        const mine = !pd.mesero_id || Number(pd.mesero_id) === Number(user?.id);
+        if (mine) {
+          const mesaId = pd.mesa_id || pd.mesa?.id || null;
+          const target = mesaId ? `Mesa ${pd.mesa_numero || pd.mesa?.numero || mesaId}` : `${pickupTypeLabel(pd.tipo)} #${pd.id}`;
+          const title = `${target}: ${payload.nombres.length === 1 ? 'plato listo' : 'platos listos'}`;
+          const body = `${payload.nombres.join(', ')} para llevar ya.`;
+          addNotification({ key: `items-${pd.id}-${payload.ronda_id}-${(payload.platos || []).join('.')}`, title, body, pedido_id: pd.id, pedido: pd, mesa_id: mesaId, mesa_numero: pd.mesa_numero || null, is_pickup: !mesaId, action: 'items_ready' });
+          notifyWaiterInApp({ title, body, data: { type: 'ITEMS_READY', pedido_id: pd.id, mesa_id: mesaId, action: 'items_ready' } }).catch(() => null);
+        }
+      }
       if (payload.action === 'delete' && payload.pedido_id) {
         setPedidos((prev) => prev.filter((pedido) => Number(pedido.id) !== Number(payload.pedido_id)));
         scheduleLiveSync();
@@ -847,6 +864,13 @@ function App() {
       subscribeRealtime(REALTIME_EVENTS.TABLE_OCCUPIED, applyTablePayload('Ocupada')),
       subscribeRealtime(REALTIME_EVENTS.TABLE_FREED, applyTablePayload('Libre')),
       subscribeRealtime(REALTIME_EVENTS.TABLE_UPDATED, applyTablePayload(null)),
+      // Cocina marcó un producto como agotado (o disponible otra vez): el menú se actualiza al instante.
+      subscribeRealtime(REALTIME_EVENTS.CATALOG_UPDATED, (payload = {}) => {
+        if (!payload.producto_id) return;
+        setProductos((prev) => prev.map((p) => Number(p.id) === Number(payload.producto_id) ? { ...p, agotado: payload.agotado ? 1 : 0 } : p));
+        toast.show(payload.agotado ? `${payload.nombre || 'Un producto'} se agotó` : `${payload.nombre || 'Un producto'} está disponible otra vez`,
+          { tone: payload.agotado ? 'warning' : 'success', detail: payload.agotado ? 'Avisó cocina. Ya aparece como «Agotado» en el menú.' : null });
+      }),
     ];
 
     return () => {
@@ -1383,8 +1407,8 @@ function App() {
                   return <TouchableOpacity key={item.splitKey} accessibilityRole="button" accessibilityState={{ selected: mine }} accessibilityLabel={`${item.nombre}, comensal ${assignedTo}`}
                     onPress={() => setItemAssignments(prev => ({ ...prev, [item.splitKey]: activeGuest }))}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52, borderBottomWidth: 1, borderColor: colors.line }}>
-                    <View style={{ minWidth: 34, height: 26, paddingHorizontal: 4, borderRadius: 4, borderWidth: 1.5, borderColor: colors.ink, backgroundColor: mine ? colors.ink : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
-                      <CNum size={13} weight="700" color={mine ? colors.surface : colors.ink}>C{assignedTo}</CNum>
+                    <View style={{ minWidth: 38, height: 30, paddingHorizontal: 6, borderRadius: 15, backgroundColor: mine ? colors.primary : colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+                      <CNum size={13} weight="800" color={mine ? colors.onPrimary : colors.text}>C{assignedTo}</CNum>
                     </View>
                     <View style={{ flex: 1 }}><CLeaderLine left={<CT size={16} weight={mine ? '600' : '400'} numberOfLines={1}>{item.nombre}</CT>} right={<CNum size={15}>{cMoney(item.unitPrice)}</CNum>} /></View>
                   </TouchableOpacity>;
@@ -1435,10 +1459,10 @@ function App() {
     <View style={{ gap: 8, marginBottom: 12 }}>
       {loadError ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Reintentar carga del catálogo" onPress={loadData} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: colors.danger, fontSize: 14, fontWeight: '600' }}>No se pudo cargar el catálogo. Toca para reintentar.</Text></TouchableOpacity> : null}
       <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Destino: ${catalog.label}. ${catalog.editable ? 'Cambiar' : 'Elegir destino'}`} onPress={() => setTargetOpen(true)}
-        style={{ minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, borderRadius: 6, borderWidth: 1.5, borderStyle: catalog.editable ? 'solid' : 'dashed', borderColor: catalog.editable ? colors.ink : colors.line, backgroundColor: colors.surface }}>
+        style={{ minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, borderRadius: 24, backgroundColor: catalog.editable ? colors.primarySoft : colors.surfaceAlt }}>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' }}>{catalog.editable ? 'Pidiendo para' : 'Sin destino'}</Text>
-          <Text numberOfLines={1} style={{ color: colors.ink, fontSize: 16, fontWeight: '700' }}>{isExpressOrder && !selectedExpressPedidoId ? `${pickupTypeLabel(pickupType)} · borrador` : catalog.label}</Text>
+          <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '600' }}>{catalog.editable ? 'Pidiendo para' : 'Sin destino'}</Text>
+          <Text numberOfLines={1} style={{ color: colors.ink, fontSize: 18, fontWeight: '800' }}>{isExpressOrder && !selectedExpressPedidoId ? `${pickupTypeLabel(pickupType)} · borrador` : catalog.label}</Text>
           {!catalog.editable ? <Text style={{ color: colors.muted, fontSize: 13, marginTop: 2 }}>{ catalog.reason === 'closed-express' ? 'Puedes consultar el menú. Selecciona otro destino para un nuevo pedido.' : catalog.reason === 'advance' ? 'Esta cuenta tiene abonos. Gestiona el saldo en caja antes de modificarla.' : 'Consulta el menú y elige un destino cuando quieras pedir.'}</Text> : null}
         </View>
         <Text style={{ color: colors.brand, fontWeight: '700', fontSize: 15 }}>{catalog.editable ? 'Cambiar' : 'Elegir'}</Text>
@@ -1544,6 +1568,7 @@ function App() {
   const [salonActionsMesa, setSalonActionsMesa] = useState(null);
   const [trayDelivering, setTrayDelivering] = useState(null);
   const salonReady = useMemo(() => readyRounds(pedidos, serviceNow), [pedidos, serviceNow]);
+  const salonPartial = useMemo(() => readyItems(pedidos), [pedidos]); // platos listos sueltos («Listo» parcial)
   const salonFocusMesa = (mesa) => { setOrderMode('mesa'); setSelectedExpressPedidoId(null); setMesaSel(mesa.id); setEditItemId(null); };
   const salonPedirCuenta = async (mesa) => {
     const order = activeOrderForMesa(mesa.id);
@@ -1596,7 +1621,7 @@ function App() {
       compact={compactTables} setCompact={setCompactTables} selected={mesaSel} selectTable={selectMesa}
       stateFor={mesaEstadoVisual} orderFor={activeOrderForMesa} zones={mesaZones} zone={mesaZone} setZone={setMesaZone}
       refresh={loadData} refreshing={loading} loadError={loadError}
-      reservations={salonReservations} onLongPressTable={setSalonActionsMesa} openTray={() => setNotiOpen(true)} readyCount={salonReady.length}
+      reservations={salonReservations} onLongPressTable={setSalonActionsMesa} openTray={() => setNotiOpen(true)} readyCount={salonReady.length + salonPartial.length}
     />)}
     <TableActionsSheet mesa={salonActionsMesa} state={salonActionsMesa ? mesaEstadoVisual(salonActionsMesa) : 'Libre'} order={salonActionsOrder} onClose={() => setSalonActionsMesa(null)}
       actions={{
@@ -1652,7 +1677,7 @@ function App() {
         <MenuSearch value={promoBusqueda} onChangeText={setPromoBusqueda} placeholder="Buscar promociones" />
         {promoCategorias.length > 2 ? renderCategoryTabs(promoCategorias, promoCategoria, setPromoCategoria) : null}
         <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
-          <Text style={{ color: colors.ink, fontSize: 13, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' }}>Promociones</Text>
+          <Text style={{ color: colors.ink, fontSize: 20, fontWeight: '800' }}>Promociones</Text>
           <Text style={{ color: colors.muted, fontSize: 13 }}>{promocionesFiltradas.length} {promocionesFiltradas.length === 1 ? 'promo' : 'promos'}</Text>
         </View>
       </View>
@@ -1744,11 +1769,13 @@ function App() {
           </PastRound>;
         })}
         {paid ? <CT size={15} weight="600" color={colors.success} style={{ marginTop: 12 }}>{pedidoActual.pendiente_entrega ? 'Pago completo · falta la entrega' : 'Pedido completado · guardado en el historial'}</CT> : null}
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 16 }}>
-          {catalog.editable && !showingCart ? <CButton variant="primary" icon={Plus} onPress={() => setStep('productos')} style={{ flexGrow: 1 }}>Nueva ronda</CButton> : null}
-          <CButton icon={PieChart} disabled={paid} onPress={() => setSplitOpen(true)} style={{ flexGrow: 1 }}>Dividir</CButton>
-          {!isExpressOrder ? <CButton icon={ArrowRightLeft} onPress={() => setTransferOpen(true)} style={{ flexGrow: 1 }}>Mover</CButton> : null}
-          <CButton variant="ink" icon={Printer} disabled={paid} onPress={solicitarCobroCaja} style={{ flexGrow: 1 }} accessibilityLabel="Solicitar cobro en caja">{paid ? 'Pago completado' : 'Pedir cobro en caja'}</CButton>
+        <View style={{ gap: 8, marginTop: 16 }}>
+          {catalog.editable && !showingCart ? <CButton variant="primary" size="lg" icon={Plus} full onPress={() => setStep('productos')}>Nueva ronda</CButton> : null}
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <CButton icon={PieChart} disabled={paid} onPress={() => setSplitOpen(true)} style={{ flex: 1, paddingHorizontal: 8 }}>Dividir</CButton>
+            {!isExpressOrder ? <CButton icon={ArrowRightLeft} onPress={() => setTransferOpen(true)} style={{ flex: 1, paddingHorizontal: 8 }}>Mover</CButton> : null}
+            <CButton icon={Printer} disabled={paid} onPress={solicitarCobroCaja} style={{ flex: 1, paddingHorizontal: 8 }} accessibilityLabel="Solicitar cobro en caja">{paid ? 'Pagado' : 'Cobrar'}</CButton>
+          </View>
         </View>
       </View>
     );
@@ -1808,16 +1835,17 @@ function App() {
 
         {cartItems.length || !pedidoActual ? <SectionLabel right={cartCount ? <CNum size={14} color={colors.muted}>{cartCount} art.</CNum> : null}>{pendingSend ? 'Ronda en cola · sin confirmar' : 'Ronda nueva'}</SectionLabel> : null}
         {cartItems.length ? cartItems.map(item => renderOrderItem(item, true)) : pedidoActual ? null : (
-          <View style={{ paddingVertical: 20, borderWidth: 1.5, borderStyle: 'dashed', borderColor: colors.line, borderRadius: 6, alignItems: 'center', gap: 10 }}>
+          <View style={{ paddingVertical: 28, borderRadius: 24, backgroundColor: colors.surfaceAlt, alignItems: 'center', gap: 12 }}>
             <CT size={15} color={colors.muted}>{catalog.editable ? 'Sin productos en esta ronda.' : 'Esta cuenta ya no admite rondas nuevas.'}</CT>
             {catalog.editable && !split ? <CButton variant="primary" icon={Plus} onPress={() => setStep('productos')} style={{ alignSelf: 'center' }}>Elegir productos</CButton> : null}
           </View>
         )}
-        {cartItems.length && catalog.editable && !split ? <CButton variant="ghost" icon={Plus} onPress={() => setStep('productos')} style={{ marginTop: 8 }}>Añadir más</CButton> : null}
-
-        {showingCart || editingCustomer ? (
-          <CField label="Nota general" value={orderNote} onChangeText={updateOrderNote} editable={!pendingSend} placeholder="Ej. entregar todo junto, silla para bebé" multiline maxLength={120} style={{ marginTop: 16 }} accessibilityLabel="Notas generales de la cuenta" />
-        ) : pedidoActual?.notas ? <CT size={15} color={colors.muted} style={{ marginTop: 12 }}>Nota: {pedidoActual.notas}</CT> : null}
+        {(cartItems.length && catalog.editable && !split) || ((showingCart || editingCustomer) && !orderNote && !noteOpen) ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+          {cartItems.length && catalog.editable && !split ? <CButton variant="ghost" icon={Plus} onPress={() => setStep('productos')}>Añadir más</CButton> : null}
+          {(showingCart || editingCustomer) && !orderNote && !noteOpen ? <CButton variant="ghost" icon={StickyNote} onPress={() => setNoteOpen(true)} accessibilityLabel="Añadir nota general">Nota general</CButton> : null}
+        </View> : null}
+        {(showingCart || editingCustomer) && (orderNote || noteOpen) ? <CField label="Nota general" value={orderNote} onChangeText={updateOrderNote} editable={!pendingSend} placeholder="Ej. entregar todo junto, silla para bebé" multiline autoFocus={noteOpen && !orderNote} maxLength={120} style={{ marginTop: 12 }} accessibilityLabel="Notas generales de la cuenta" />
+          : !(showingCart || editingCustomer) && pedidoActual?.notas ? <CT size={15} color={colors.muted} style={{ marginTop: 12 }}>Nota: {pedidoActual.notas}</CT> : null}
 
         <TotalsBlock
           rows={[
@@ -1846,7 +1874,7 @@ function App() {
 
   // Salón: bandeja «Listo» (rondas listas con «Entregado», demoras y actividad).
   const renderNotifications = () => <WaiterNotifications colors={colors} alerts={serviceAlerts} activity={notificaciones} close={()=>setNotiOpen(false)} openOrder={openPedidoFromNotification} clearActivity={()=>setNotificaciones([])}
-    ready={salonReady} onDeliver={salonEntregar} deliveringId={trayDelivering} now={serviceNow}/>;
+    ready={salonReady} partial={salonPartial} onDeliver={salonEntregar} deliveringId={trayDelivering} now={serviceNow}/>;
 
   if ((loading && !dataLoaded.current) || !drafts.ready) {
     return (

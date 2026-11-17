@@ -1,5 +1,5 @@
-// Express (para llevar y delivery) en dirección «Comanda»: cada pedido es una ficha de libreta con
-// su número en mono, el cliente, sellos de cocina y cobro, y el total. Misma lógica que antes.
+// Express (para llevar y delivery) en dirección «Suave»: cada pedido es una tarjeta redondeada con
+// el cliente, píldoras de cocina y cobro, y el total. Misma lógica que antes.
 import React, { useMemo } from 'react';
 import { ScrollView, View } from 'react-native';
 import { ChefHat, CreditCard, RefreshCw, ShoppingBag, Truck } from 'lucide-react-native';
@@ -9,7 +9,7 @@ import { expressStage, filterExpressOrders } from '../utils/expressWorkspace.mjs
 import { ServiceWait } from './ServiceTiming';
 import { serviceSummaryLabel } from '../utils/serviceTiming.mjs';
 import { useTheme } from '../theme';
-import { Appear, Button, Chip, EmptyState, Field, IconButton, Label, Num, Perforation, Press, Stamp, T, money, space } from './waiter/comanda';
+import { Appear, Button, Chip, EmptyState, Field, IconButton, Label, Num, Perforation, Press, Stamp, T, elevate, money, radius, space } from './waiter/comanda';
 
 function ExpressRow({ order, wide, onOpen, now, alerts, colors, index }) {
   const { c } = useTheme();
@@ -23,24 +23,23 @@ function ExpressRow({ order, wide, onOpen, now, alerts, colors, index }) {
   return <Appear delay={Math.min(index, 8) * 30}>
     <Press accessibilityRole="button" accessibilityLabel={`Abrir Express ${order.id}, ${order.cliente_nombre || 'Cliente'}, ${state.kitchenLabel}, ${state.paid ? 'pagado' : `saldo ${state.balance.toFixed(2)}`}, ${serviceSummaryLabel(order, now)}`}
       onPress={() => onOpen(order)} hapticKind="tap"
-      style={{ padding: space.lg, gap: space.sm, backgroundColor: c.surface, borderWidth: 1.5, borderColor: state.canDeliver ? c.green : c.ink, borderRadius: 4 }} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
+      style={[{ padding: space.lg, gap: space.sm, backgroundColor: c.surface, borderWidth: 2, borderColor: state.canDeliver ? c.greenDot : (c.isDark ? c.line : 'rgba(16,24,40,0.04)'), borderRadius: radius.xl }, elevate(c, 1)]} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.md }}>
-        <Num size={22} weight="700">#{order.id}</Num>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <T size={17} weight="700" numberOfLines={1}>{order.cliente_nombre || 'Cliente sin nombre'}</T>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            {delivery ? <Truck size={14} color={c.muted} /> : <ShoppingBag size={14} color={c.muted} />}
-            <T size={14} color={c.muted}>{delivery ? 'Delivery' : 'Para llevar'} · {items} {items === 1 ? 'artículo' : 'artículos'}</T>
-          </View>
+        <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: delivery ? c.skySoft : c.primarySoft, alignItems: 'center', justifyContent: 'center' }}>
+          {delivery ? <Truck size={20} color={c.sky} /> : <ShoppingBag size={20} color={c.primaryText} />}
         </View>
-        <Num size={18} weight="700">{money(order.total)}</Num>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <T size={17} weight="800" numberOfLines={1}>{order.cliente_nombre || 'Cliente sin nombre'}</T>
+          <T size={14} color={c.muted}>#{order.id} · {delivery ? 'Delivery' : 'Para llevar'} · {items} {items === 1 ? 'artículo' : 'artículos'}</T>
+        </View>
+        <Num size={18} weight="800">{money(order.total)}</Num>
       </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, alignItems: 'center' }}>
-        <Stamp color={state.ready ? c.green : c.muted} rotate={0} size={12}>{state.kitchenLabel}</Stamp>
-        <Stamp color={state.paid ? c.green : state.issue ? c.red : c.amber} rotate={0} size={12}>{state.paid ? 'Pagado' : Number(order.abonado || 0) > 0 ? `Saldo ${money(state.balance)}` : 'Por cobrar'}</Stamp>
+        <Stamp color={state.ready ? c.green : c.muted} size={12}>{state.kitchenLabel}</Stamp>
+        <Stamp color={state.paid ? c.green : state.issue ? c.red : c.amber} size={12}>{state.paid ? 'Pagado' : Number(order.abonado || 0) > 0 ? `Saldo ${money(state.balance)}` : 'Por cobrar'}</Stamp>
       </View>
       <ServiceWait order={order} now={now} colors={colors} compact alerts={alerts} />
-      {note ? <T size={14} weight="600" color={note[1]}>{note[0]}</T> : null}
+      {note ? <View style={{ borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: note[1] === c.red ? c.redSoft : note[1] === c.amber ? c.amberSoft : c.greenSoft }}><T size={14} weight="700" color={note[1]}>{note[0]}</T></View> : null}
       {detail ? <T size={14} color={c.muted} numberOfLines={1}>{detail}</T> : null}
     </Press>
   </Appear>;
@@ -56,7 +55,7 @@ export default function WaiterExpress({ colors, width, orders, view, setView, dr
   const clear = () => { setQuery(''); setChannel('Todos'); setStage('all'); };
   return <View style={{ padding, paddingTop: space.lg, gap: space.lg, maxWidth: 960, width: '100%', alignSelf: 'center' }}>
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-      <View style={{ flex: 1 }}><Label>Express</Label><T size={15} color={c.muted}>Para llevar y delivery</T></View>
+      <View style={{ flex: 1 }}><T size={28} weight="800" accessibilityRole="header">Express</T><T size={15} color={c.muted}>Para llevar y delivery</T></View>
       <IconButton icon={RefreshCw} label="Actualizar Express" onPress={refresh} disabled={loading} />
     </View>
     <View style={{ flexDirection: 'row', gap: space.sm }}>
@@ -67,7 +66,6 @@ export default function WaiterExpress({ colors, width, orders, view, setView, dr
       {[['active', 'Activos', orders.length], ['drafts', 'Borradores', draftCount], ['history', 'Historial', null]].map(([key, label, count]) =>
         <Chip key={key} selected={view === key} onPress={() => setView(key)} count={count} accessibilityLabel={key === 'active' ? 'Express activos' : key === 'drafts' ? 'Borradores Express' : 'Historial Express por día'}>{label}</Chip>)}
     </ScrollView>
-    <Perforation />
     {view === 'history' ? <ExpressHistory colors={colors} /> : view === 'drafts' ? <ExpressDraftList drafts={drafts} colors={colors} onOpen={openDraft} onDiscard={discardDraft} /> : <>
       {loadError ? <T accessibilityRole="alert" size={15} weight="600" color={c.red}>No se pudieron actualizar los pedidos. Toca actualizar para reintentar.</T> : null}
       <Field value={query} onChangeText={setQuery} placeholder="Buscar cliente, pedido, teléfono o dirección" accessibilityLabel="Buscar pedidos Express" />

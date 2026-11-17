@@ -12,13 +12,13 @@ export default function WaiterTabs({tabs,value,onChange,colors:c,label,padding=1
     onChange(tabs[next].key);buttons.current[tabs[next].key]?.focus();
   };
   return <>
-    <View accessibilityRole="tablist" accessibilityLabel={label} style={{flexDirection:'row',paddingHorizontal:padding,borderBottomWidth:1,borderColor:c.line}}>
+    <View accessibilityRole="tablist" accessibilityLabel={label} style={{flexDirection:'row',marginHorizontal:padding-6,padding:4,gap:4,borderRadius:999,backgroundColor:c.isDark?'rgba(255,255,255,0.06)':'rgba(16,24,40,0.05)'}}>
       {tabs.map(({key,label:caption,Icon},index)=>{
         const selected=value===key;
         return <Pressable key={key} ref={node=>{buttons.current[key]=node;}} nativeID={`${id}-tab-${key}`} accessibilityRole="tab" accessibilityState={{selected}}
           {...(Platform.OS==='web'?{'aria-selected':selected,'aria-controls':`${id}-panel`,tabIndex:selected?0:-1,onKeyDown:event=>move(event,index)}:{})}
-          onPress={()=>onChange(key)} style={{minHeight:48,flex:1,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:8,borderBottomWidth:2,borderColor:selected?c.brand:'transparent'}}>
-          {Icon?<Icon size={16} color={selected?c.brand:c.muted}/>:null}<WText style={{color:selected?c.ink:c.muted,fontSize:13}}>{caption}</WText>
+          onPress={()=>onChange(key)} style={{minHeight:40,flex:1,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:8,borderRadius:999,backgroundColor:selected?c.surface:'transparent'}}>
+          {Icon?<Icon size={16} color={selected?c.brand:c.muted}/>:null}<WText style={{color:selected?c.ink:c.muted,fontSize:14,fontWeight:selected?'800':'600'}}>{caption}</WText>
         </Pressable>;
       })}
     </View>

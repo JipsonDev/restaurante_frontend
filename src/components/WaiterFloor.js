@@ -1,11 +1,15 @@
-// Salón del mesero (dirección «Comanda»): cuadrícula densa, estado por forma, «Atender ahora» primero.
-import React, { useCallback, useMemo, useState } from 'react';
+// Salón del mesero (dirección «Suave»): «Atender ahora» primero, una sola fila de filtros de estado
+// (las zonas son títulos de sección, no pestañas) y tarjetas de mesa.
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { BellRing, Grid2X2, Grid3X3, RefreshCw, Search } from 'lucide-react-native';
 import { useTheme } from '../theme';
 import { serviceRounds } from '../utils/serviceTiming.mjs';
-import { Appear, Button, Chip, EmptyState, IconButton, Label, Num, T, space } from './waiter/comanda';
-import { AttentionStrip, SearchToggle, TableTile, ZoneTabs, minutesSince } from './waiter/salon';
+import { Appear, Button, Chip, EmptyState, IconButton, Label, Num, T, WEB, haptic, radius, space, useComandaToast } from './waiter/comanda';
+import { minutesUntil, timeOf } from '../utils/reservationLogic.mjs';
+import { CalendarClock } from 'lucide-react-native';
+import { AttentionStrip, SearchToggle, TableTile, minutesSince } from './waiter/salon';
+import { InstallBanner } from './waiter/install';
 
 const FILTERS = [['Todas', 'Todas'], ['Disponibles', 'Libres'], ['Ocupadas', 'Ocupadas'], ['Cuenta', 'Por cobrar'], ['Reservadas', 'Reservadas']];
 
@@ -17,8 +21,9 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
     if (next > 0) setMeasuredWidth(previous => previous === next ? previous : next);
   }, []);
   const layoutWidth = Math.min(width, measuredWidth ?? width);
-  const padding = layoutWidth < 600 ? 12 : layoutWidth >= 1024 ? 28 : 20;
-  const gap = layoutWidth < 600 ? 8 : 10;
+  const phone = layoutWidth < 600;
+  const padding = phone ? 12 : layoutWidth >= 1024 ? 28 : 20;
+  const gap = layoutWidth < 600 ? 10 : 12;
   const available = Math.max(0, layoutWidth - padding * 2);
   // Celular: 3 columnas (2 si la pantalla es muy estrecha). Tableta y escritorio: tantas como quepan.
   const minTile = layoutWidth < 600 ? (compact ? 84 : 100) : compact ? 108 : 128;
@@ -41,51 +46,75 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
       const order = orderFor(mesa.id);
       const ready = readyFor(order);
       const state = stateFor(mesa);
+      const res = reservations[mesa.id];
+      const resIn = res ? minutesUntil(res) : null;
+      // Reserva en menos de 15 min y la mesa sigue ocupada: hay que liberarla o reubicar.
+      if (res && resIn != null && resIn <= 15 && resIn >= -15 && (state === 'Ocupada' || state === 'Cuenta')) {
+        items.push({ key: `v${mesa.id}`, mesa, tone: 'reserve', rank: -1, title: `Mesa ${mesa.numero}`, detail: `Reserva ${timeOf(res.fecha_hora)}${res.cliente_nombre ? ` · ${res.cliente_nombre}` : ''} · ocupada`, order: -resIn });
+      }
       if (ready) {
         const oldest = serviceRounds(order).filter(r => r.estado === 'LISTO').map(r => minutesSince(r.listo_at || r.created_at, now)).filter(m => m != null).sort((a, b) => b - a)[0];
-        items.push({ key: `r${mesa.id}`, mesa, tone: 'ready', rank: 0, title: `Mesa ${mesa.numero}`, detail: `${ready > 1 ? `${ready} rondas listas` : 'Ronda lista'}${oldest ? ` · ${oldest}'` : ''}`, order: oldest ?? 0 });
+        items.push({ key: `r${mesa.id}`, mesa, tone: 'ready', rank: 0, title: `Mesa ${mesa.numero}`, detail: `${ready > 1 ? `${ready} rondas listas` : 'Ronda lista'}${oldest ? ` · ${oldest} min` : ''}`, order: oldest ?? 0 });
       } else if (lateByTable[mesa.id]) {
-        items.push({ key: `d${mesa.id}`, mesa, tone: 'late', rank: 1, title: `Mesa ${mesa.numero}`, detail: `Cocina · ${lateByTable[mesa.id].minutos}' esperando`, order: lateByTable[mesa.id].minutos });
+        items.push({ key: `d${mesa.id}`, mesa, tone: 'late', rank: 1, title: `Mesa ${mesa.numero}`, detail: `Cocina · ${lateByTable[mesa.id].minutos} min esperando`, order: lateByTable[mesa.id].minutos });
       } else if (state === 'Cuenta') {
         items.push({ key: `c${mesa.id}`, mesa, tone: 'bill', rank: 2, title: `Mesa ${mesa.numero}`, detail: 'Pidió la cuenta', order: minutesSince(order?.cuenta_solicitada_at, now) ?? 0 });
       }
     }
     return items.sort((a, b) => a.rank - b.rank || b.order - a.order);
-  }, [allMesas, orderFor, stateFor, lateByTable, now, readyFor]);
+  }, [allMesas, orderFor, stateFor, lateByTable, now, readyFor, reservations]);
+
+  // Aviso único (con vibración) cuando aparece un choque de reserva nuevo.
+  const toast = useComandaToast();
+  const warned = useRef(new Set());
+  useEffect(() => {
+    for (const it of attention) {
+      if (it.tone !== 'reserve' || warned.current.has(it.key)) continue;
+      warned.current.add(it.key);
+      haptic('warning');
+      toast.show(`${it.title}: reserva pronto y sigue ocupada`, { tone: 'warning', icon: CalendarClock, detail: it.detail.replace(/ · ocupada$/, ''), action: { label: 'Ver', onPress: () => selectTable(it.mesa) } });
+    }
+  }, [attention]);
 
   const summary = `${counts.Disponibles} ${counts.Disponibles === 1 ? 'libre' : 'libres'} de ${counts.Todas} mesas`;
   return <View onLayout={measure} style={{ minWidth: 0, paddingHorizontal: padding, paddingTop: space.md, paddingBottom: space.x3 }}>
     {/* Cabecera compacta: resumen + bandeja + búsqueda + densidad + actualizar */}
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, minHeight: 48, marginBottom: space.sm }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, minHeight: 48, marginBottom: phone ? space.sm : space.lg }}>
       {!search ? <View style={{ flex: 1, minWidth: 0 }}>
-        <Label color={c.muted}>Salón</Label>
-        <T size={15} weight="600" numberOfLines={1}>{summary}</T>
+        <T size={phone ? 22 : 28} weight="800" accessibilityRole="header">Mesas</T>
+        <T size={13} weight="600" color={c.muted} numberOfLines={1}>{summary}</T>
       </View> : null}
       <SearchToggle value={search} onChange={setSearch} />
       <IconButton icon={compact ? Grid2X2 : Grid3X3} label={compact ? 'Casillas normales' : 'Casillas compactas'} onPress={() => setCompact(!compact)} />
       <IconButton icon={RefreshCw} label="Actualizar mesas" disabled={refreshing} color={refreshing ? c.faint : c.text} onPress={refresh} />
     </View>
 
-    {loadError ? <Appear><View style={{ borderWidth: 1.5, borderColor: c.red, borderRadius: 4, padding: space.md, marginBottom: space.md, flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+    {loadError ? <Appear><View style={{ borderRadius: radius.lg, backgroundColor: c.redSoft, padding: space.md, paddingLeft: space.lg, marginBottom: space.md, flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
       <T size={14} weight="600" color={c.red} style={{ flex: 1 }}>No se pudieron actualizar las mesas. Lo que ves puede estar desactualizado.</T>
-      <Button size="sm" variant="danger" onPress={refresh}>Reintentar</Button>
+      <Button size="sm" variant="primary" onPress={refresh}>Reintentar</Button>
     </View></Appear> : null}
+
+    <InstallBanner />
 
     <AttentionStrip items={attention} onOpen={it => selectTable(it.mesa)} />
 
-    <ScrollView horizontal style={{ flexGrow: 0 }} showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.sm, paddingBottom: space.sm }}>
-      {FILTERS.map(([key, label]) => <Chip key={key} selected={filter === key} onPress={() => setFilter(key)} count={counts[key]} accessibilityLabel={`${label}: ${counts[key]}`}>{label}</Chip>)}
-    </ScrollView>
-
-    {zones.length > 1 ? <View style={{ marginBottom: space.xs }}><ZoneTabs zones={['Todas', ...zones]} value={zone} onChange={setZone} /></View> : null}
+    {/* Una sola fila de estado. Llega al borde de la pantalla y se desvanece a la derecha: así se nota que se puede deslizar.
+        Los filtros sin mesas se ocultan (salvo el activo). */}
+    <View style={{ marginHorizontal: -padding, marginBottom: space.sm }}>
+      <ScrollView horizontal style={{ flexGrow: 0 }} showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.sm, paddingHorizontal: padding, paddingBottom: space.sm }}>
+        {FILTERS.filter(([key]) => key === 'Todas' || key === filter || counts[key] > 0).map(([key, label]) =>
+          <Chip key={key} selected={filter === key} onPress={() => setFilter(key)} count={counts[key]} accessibilityLabel={`${label}: ${counts[key]}`}>{label}</Chip>)}
+      </ScrollView>
+      {WEB ? <View pointerEvents="none" style={{ position: 'absolute', top: 0, bottom: space.sm, right: 0, width: 36, backgroundImage: `linear-gradient(to right, ${c.bg}00, ${c.bg})` }} /> : null}
+    </View>
 
     {!groups.length ? <EmptyState icon={Search} title={counts.Todas ? 'Ninguna mesa con estos filtros' : 'Todavía no hay mesas'}
       description={counts.Todas ? undefined : 'Configura las mesas desde administración.'}
       action={counts.Todas ? <Button onPress={clear}>Limpiar filtros</Button> : null} /> : null}
 
-    {groups.map(group => <View key={group.name} style={{ marginTop: space.md }}>
-      {groups.length > 1 || zone === 'Todas' ? <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: space.sm, marginBottom: space.sm }}>
-        <Label color={c.text}>{group.name}</Label><Num size={13} color={c.muted}>{group.mesas.length}</Num>
+    {groups.map(group => <View key={group.name} style={{ marginTop: phone ? space.md : space.lg }}>
+      {groups.length ? <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: space.sm, marginBottom: space.sm }}>
+        <T size={17} weight="800">{group.name}</T><Num size={14} weight="600" color={c.faint}>{group.mesas.length}</Num>
       </View> : null}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap }}>
         {group.mesas.map(mesa => {

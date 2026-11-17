@@ -10,6 +10,7 @@ import { MenuButton, MenuField, MenuNotice } from '../components/MenuUI';
 import { Button, Card, PageHeader, Status, Switch as Toggle, Tabs, space, type, useToast } from '../components/admin/ui';
 import { Animated } from 'react-native';
 import { settingsPayload, ticketPreview } from '../utils/settingsLogic.mjs';
+import Maintenance from '../components/admin/Maintenance';
 
 const row = { flexDirection: 'row', alignItems: 'center' };
 const DEFAULTS = {
@@ -25,6 +26,7 @@ const SECTIONS = [
   { key: 'impresoras', label: 'Impresoras', hint: 'Caja y cocina', icon: Printer },
   { key: 'sistema', label: 'Sistema', hint: 'Conexión y estado', icon: Server },
   { key: 'atencion', label: 'Atención', hint: 'Demoras y avisos', icon: ChefHat },
+  { key: 'mantenimiento', label: 'Mantenimiento', hint: 'Base y limpieza', icon: Database },
 ];
 const normalizedConfig = config => Object.fromEntries(Object.entries({ ...DEFAULTS, ...(config || {}) }).map(([key, value]) => [key, value == null ? '' : String(value)]));
 const errorText = error => error.response?.data?.message || error.response?.data?.error || error.message || 'No se pudo completar la operación.';
@@ -183,6 +185,7 @@ export default function SettingsScreen() {
           <Text style={{color:c.muted,fontSize:13,lineHeight:20}}>La lista de alertas permanece disponible hasta entregar o cancelar la ronda, o hasta que deje de superar el límite. Desactivar las alertas no reinicia los avisos ya registrados.</Text>
         </View>
       </SettingsSection>}
+      {section === 'mantenimiento' && <Maintenance />}
       {section === 'sistema' && <SettingsSection compact={compact} title="Estado del sistema" description="Se comprueba solo cada 30 segundos: conexión y cola automática de comandas.">
         <View><StatusRow icon={Database} title="Base de datos y API" detail={BASE_URL} ok /><StatusRow icon={Wifi} title="Conexión del panel" detail="La aplicación está comunicándose con el backend del restaurante." ok /><StatusRow icon={Printer} title="Cola de comandas" detail={systemStatus?.ok ? `${Number(systemStatus.counts?.PENDIENTE || 0)} pendientes · ${Number(systemStatus.counts?.ERROR || 0)} con error · ${Number(systemStatus.counts?.REVISAR || 0)} por revisar` : systemStatus?.error || 'Consultando estado…'} ok={systemStatus?.ok && !Number(systemStatus.counts?.ERROR || 0) && !Number(systemStatus.counts?.REVISAR || 0)} warning={systemStatus?.ok && (!!Number(systemStatus.counts?.ERROR || 0) || !!Number(systemStatus.counts?.REVISAR || 0))} /><StatusRow icon={FileText} title="Configuración persistente" detail="Los valores se guardan en MySQL y se comparten con caja, cocina y meseros." ok /></View>
         <View style={{ padding: 14, borderRadius: 8, backgroundColor: c.surfaceAlt }}><View style={[row, { gap: 8 }]}><CheckCircle2 size={16} color={c.green} /><Text style={{ color: c.text, fontSize: 12, fontWeight: '700' }}>Protecciones activas</Text></View><Text style={{ color: c.muted, fontSize: 12, lineHeight: 17, marginTop: 8 }}>El servidor valida porcentajes, moneda, correo, identificación fiscal, tamaños de texto y URLs antes de guardar. Cada cambio queda registrado en Auditoría.</Text></View>

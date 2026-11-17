@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Platform, Text, TouchableOpacity, View } from 'react-native';
 import { Download, Smartphone, X } from 'lucide-react-native';
-import { isWebPwaStandalone } from '../services/pwa';
+import { getInstallState, onInstallChange, promptInstall } from '../services/pwa';
 
 export default function PwaInstallPrompt({
   role = 'equipo',
@@ -9,34 +9,16 @@ export default function PwaInstallPrompt({
   dark = false,
   style,
 }) {
-  const [installEvent, setInstallEvent] = useState(null);
+  // Estado global de instalación (el evento se captura al arrancar en services/pwa.js).
+  const [install, setInstall] = useState(() => getInstallState());
   const [dismissed, setDismissed] = useState(false);
-  const [standalone, setStandalone] = useState(false);
-
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
-
-    setStandalone(isWebPwaStandalone());
-
-    const handleBeforeInstall = (event) => {
-      event.preventDefault();
-      setInstallEvent(event);
-      setDismissed(false);
-    };
-
-    const handleInstalled = () => {
-      setStandalone(true);
-      setInstallEvent(null);
-    };
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
-    window.addEventListener('appinstalled', handleInstalled);
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
-      window.removeEventListener('appinstalled', handleInstalled);
-    };
+    setInstall(getInstallState());
+    return onInstallChange(setInstall);
   }, []);
+  const installEvent = install.canPrompt;
+  const standalone = install.standalone;
 
   const copy = useMemo(() => {
     if (role === 'cocina') {
@@ -57,12 +39,7 @@ export default function PwaInstallPrompt({
     };
   }, [role]);
 
-  const handleInstall = async () => {
-    if (!installEvent) return;
-    installEvent.prompt();
-    await installEvent.userChoice.catch(() => null);
-    setInstallEvent(null);
-  };
+  const handleInstall = async () => { await promptInstall(); };
 
   if (Platform.OS !== 'web' || standalone || dismissed) return null;
 
