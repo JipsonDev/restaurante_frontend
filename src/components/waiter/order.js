@@ -2,12 +2,13 @@
 // Todo se apoya en el kit «Suave» (comanda.js); aquí no se definen colores propios.
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Image, TextInput, View, useWindowDimensions } from 'react-native';
-import { CloudOff, RefreshCw, Send, PencilLine, Trash2 } from 'lucide-react-native';
+import { Check, CloudOff, RefreshCw, Send, PencilLine, Trash2 } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import {
   BottomSheet, Button, Chip, EASE, Label, LeaderLine, Num, Perforation, Press, RollingNumber, Stamp, SwipeRow, Tally, T,
   TOUCH, TOUCH_MAIN, elevate, haptic, money, radius, space,
 } from './comanda';
+import { ProductArt } from './ProductArt';
 
 const ND = false; // height/opacidad no se pueden animar en el hilo nativo
 
@@ -40,7 +41,7 @@ export function SectionLabel({ children, right }) {
 }
 
 // Línea de la ronda nueva. Al quitarla se encoge (alto + opacidad, 200 ms) y luego avisa a onRemove.
-export function OrderLine({ item, total, detail, image, expanded, onToggle, onQty, onRemove, locked, children }) {
+export function OrderLine({ item, total, detail, image, product, expanded, onToggle, onQty, onRemove, locked, children }) {
   const { c } = useTheme();
   const v = useRef(new Animated.Value(1)).current;
   const [h, setH] = useState(null);
@@ -56,7 +57,7 @@ export function OrderLine({ item, total, detail, image, expanded, onToggle, onQt
     <SwipeRow direction="left" onSwipe={remove} label="Quitar" icon={Trash2} disabled={locked || leaving}>
     <View style={[{ padding: space.lg, borderRadius: radius.lg, backgroundColor: c.surface, borderWidth: 1, borderColor: c.isDark ? c.line : 'rgba(16,24,40,0.04)', opacity: locked ? 0.6 : 1 }, elevate(c, 1)]} pointerEvents={locked ? 'none' : 'auto'}>
       <View style={{ flexDirection: 'row', gap: space.md, alignItems: 'flex-start' }}>
-        {image ? <Image source={{ uri: image }} style={{ width: 48, height: 48, borderRadius: radius.md, backgroundColor: c.soft }} /> : null}
+        <View style={{ width: 56 }}><ProductArt product={product || item} radius={14} iconScale={0.42} /></View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <LeaderLine left={<T size={16} weight="700" numberOfLines={2}>{item.nombre}</T>}
             right={<RollingNumber value={total} format={money} size={16} weight="800" />} />
@@ -108,7 +109,7 @@ const ROUND_STAMP = {
 // Ronda anterior plegada: «Ronda 2 · 3 art. · $8,40» con sello de cocina; se despliega al tocar.
 export function PastRound({ round, index, children, action }) {
   const { c } = useTheme();
-  const [open, setOpen] = useState(round.estado === 'LISTO');
+  const [open, setOpen] = useState(true); // los platos se ven sin tocar nada
   const [txt, tone] = ROUND_STAMP[round.estado] || [String(round.estado || '—'), 'muted'];
   const items = round.items || [];
   const count = items.reduce((n, it) => n + (Number(it.cantidad) || 0), 0);
@@ -116,13 +117,17 @@ export function PastRound({ round, index, children, action }) {
   return <View style={{ borderRadius: radius.lg, backgroundColor: c.surfaceAlt, paddingHorizontal: space.md, marginBottom: space.sm }}>
     <Press accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={`Ronda ${index}, ${txt.toLowerCase()}`} onPress={() => setOpen(!open)}
       style={{ minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: space.sm }}>
-      <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' }}><Num size={13} weight="800">R{index}</Num></View>
-      <T size={15} style={{ flex: 1 }} numberOfLines={1}>{count} art.{round.estado_cobro === 'PAGADO' ? ' · pagada' : ''}</T>
+      <T size={16} weight="800" style={{ flex: 1 }} numberOfLines={1}>Ronda {index}{round.estado_cobro === 'PAGADO' ? ' · pagada' : ''}</T>
       {sum ? <Num size={15} color={c.muted}>{money(sum)}</Num> : null}
       <Stamp color={tone === 'muted' ? c.muted : c[tone]} size={12}>{txt}</Stamp>
     </Press>
     {open ? <View style={{ paddingBottom: space.md, gap: 4 }}>
-      {items.map((it, i) => <LeaderLine key={`${it.id || i}`} dim left={<T size={15} color={c.muted}><Num size={15} color={c.muted}>{it.cantidad}× </Num>{it.nombre}{it.listo_at && round.estado !== 'LISTO' && round.estado !== 'ENTREGADO' ? <T size={13} weight="800" color={c.green}>  ✓ listo</T> : null}</T>} right={<Num size={15} color={c.muted}>{money((Number(it.precio) || 0) * (Number(it.cantidad) || 0))}</Num>} />)}
+      {items.map((it, i) => <View key={`${it.id || i}`} style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: 4 }}>
+        <View style={{ width: 40 }}><ProductArt product={it} radius={10} iconScale={0.46} /></View>
+        <T size={15} style={{ flex: 1 }} numberOfLines={2}><Num size={15} weight="800">{it.cantidad}× </Num>{it.nombre}</T>
+        {it.listo_at && round.estado !== 'LISTO' && round.estado !== 'ENTREGADO' ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}><Check size={14} color={c.green} strokeWidth={3} /><T size={13} weight="800" color={c.green}>listo</T></View> : null}
+        <Num size={15} color={c.muted}>{money((Number(it.precio) || 0) * (Number(it.cantidad) || 0))}</Num>
+      </View>)}
       {children}
       {action}
     </View> : null}

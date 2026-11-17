@@ -4,7 +4,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, ScrollView, TextInput, View } from 'react-native';
 import axios from 'axios';
-import { ArrowRightLeft, BellRing, CheckCheck, Clock3, Receipt, Search, Utensils, X } from 'lucide-react-native';
+import { ArrowRightLeft, BellRing, CalendarClock, ChefHat, CheckCheck, Clock3, Receipt, Search, Users, Utensils, X } from 'lucide-react-native';
 import { comandaTableMeta, useTheme } from '../../theme';
 import { BASE_URL } from '../../context/AuthContext';
 import { serviceDate, serviceDuration, serviceRounds } from '../../utils/serviceTiming.mjs';
@@ -64,37 +64,36 @@ export function TableTile({ mesa, state, order, width, now, selected, ready, ale
   const { c } = useTheme();
   const meta = comandaTableMeta(state, c);
   const filled = meta.shape === 'filled';
-  const balance = order ? Number(order.saldo_pendiente ?? Math.max(0, Number(order.total || 0) - Number(order.abonado || 0))) : 0;
-  const opened = order ? minutesSince(order.created_at, now) : null;
-  const late = !!alert;
-  const resMinutes = reservation ? minutesUntil(reservation) : null;
-  const muted = filled ? c.onPrimary : c.muted;
-  const label = `Mesa ${mesa.numero}, ${meta.label}${order ? `, saldo ${money(balance)}, abierta hace ${opened ?? 0} minutos` : ''}${ready ? `, ${ready} ${ready === 1 ? 'ronda lista' : 'rondas listas'}` : ''}${reservation ? `, reserva ${timeOf(reservation.fecha_hora)}` : ''}`;
   const free = state === 'Libre';
-  return <Press accessibilityRole="button" accessibilityLabel={label} accessibilityHint="Toca para abrir la mesa; mantén presionado para acciones rápidas" accessibilityState={{ selected }}
+  const balance = order ? Number(order.saldo_pendiente ?? Math.max(0, Number(order.total || 0) - Number(order.abonado || 0))) : 0;
+  const resMinutes = reservation ? minutesUntil(reservation) : null;
+  const rounds = order ? serviceRounds(order) : [];
+  const cooking = rounds.some(r => ['PENDIENTE', 'PREPARANDO'].includes(r.estado));
+  // Un solo estado por mesa, del más urgente al más tranquilo.
+  const status = ready ? { icon: CheckCheck, text: ready > 1 ? `${ready} listas` : 'Lista', color: filled ? c.onPrimary : c.green, soft: filled ? 'rgba(255,255,255,0.18)' : c.greenSoft }
+    : state === 'Cuenta' ? { icon: Receipt, text: 'Cobrar', color: c.onPrimary, soft: 'rgba(255,255,255,0.18)' }
+    : alert ? { icon: Clock3, text: `${alert.minutos} min`, color: c.red, soft: c.redSoft }
+    : cooking ? { icon: ChefHat, text: 'En cocina', color: c.sky, soft: c.skySoft }
+    : order ? { icon: Utensils, text: 'Comiendo', color: c.muted, soft: c.surfaceAlt }
+    : state === 'Reservada' || (reservation && resMinutes != null && resMinutes <= 90) ? { icon: CalendarClock, text: timeOf(reservation?.fecha_hora) || 'Reserva', color: c.purple, soft: c.purpleSoft }
+    : { icon: Users, text: 'Libre', color: c.green, soft: c.isDark ? 'rgba(255,255,255,0.06)' : '#FFFFFF' };
+  const Icon = status.icon;
+  const label = `Mesa ${mesa.numero}, ${status.text}${order ? `, ${money(balance)}` : ''}`;
+  return <Press accessibilityRole="button" accessibilityLabel={label} accessibilityHint="Toca para pedir; mantén presionado para más acciones" accessibilityState={{ selected }}
     onPress={() => onPress(mesa)} onLongPress={onLongPress ? () => onLongPress(mesa) : undefined} hapticKind="tap" scaleTo={0.95}
-    style={[{ width, minHeight: width < 110 ? 96 : 108, padding: width < 110 ? 10 : 12, borderRadius: radius.lg, backgroundColor: filled ? meta.bg : free ? c.surfaceAlt : c.surface,
-      borderWidth: 2, borderColor: selected ? c.primary : filled ? meta.bg : free ? c.surfaceAlt : (c.isDark ? c.line : 'rgba(16,24,40,0.04)'), justifyContent: 'space-between', gap: 6 },
-      free ? null : elevate(c, filled ? 2 : 1), filled && typeof document !== 'undefined' && !c.isDark ? { boxShadow: `0 8px 20px ${c.primary}38` } : null]}>
-    <Ping trigger={state} color={filled ? c.primary : meta.dot} radius={radius.lg} />
-    <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 4 }}>
-      <Num size={26} weight="800" color={meta.number} style={{ lineHeight: 30 }}>{mesa.numero}</Num>
-      {order && opened != null && opened < 1440 ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 7, paddingVertical: 2, borderRadius: radius.pill, backgroundColor: filled ? 'rgba(255,255,255,0.2)' : late ? c.redSoft : c.surfaceAlt }}>
-        <Clock3 size={11} color={filled ? c.onPrimary : late ? c.red : c.muted} />
-        <Num size={11} weight="700" color={filled ? c.onPrimary : late ? c.red : c.muted} numberOfLines={1}>{shortMinutes(opened)}</Num>
-      </View> : mesa.capacidad ? <Num size={12} weight="600" color={muted}>{mesa.capacidad} p.</Num> : null}
+    style={[{ width, minHeight: 112, padding: 12, borderRadius: radius.lg, justifyContent: 'space-between', gap: 8, borderWidth: 2,
+      backgroundColor: filled ? c.primary : free ? c.surfaceAlt : c.surface, borderColor: selected ? c.ink : filled ? c.primary : free ? c.surfaceAlt : (c.isDark ? c.line : 'rgba(16,24,40,0.05)') },
+      free ? null : elevate(c, filled ? 2 : 1)]}>
+    <Ping trigger={`${state}-${ready}`} color={filled ? c.primary : status.color} radius={radius.lg} />
+    <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+      <Num size={32} weight="800" color={filled ? c.onPrimary : c.text} style={{ lineHeight: 36 }}>{mesa.numero}</Num>
+      <View style={{ width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: status.soft }}>
+        <Icon size={16} color={status.color} strokeWidth={2.4} />
+      </View>
     </View>
-    {ready ? <Stamp color={filled ? c.onPrimary : c.green} size={12} animate={false}>{ready > 1 ? `${ready} listas` : 'Lista'}</Stamp> : null}
-    {state === 'Reservada' || (free && reservation && resMinutes != null && resMinutes <= 90) ? <Stamp color={c.purple} size={12}>{`Reserva ${timeOf(reservation?.fecha_hora) || ''}`.trim()}</Stamp>
-      : !free && reservation && resMinutes != null && resMinutes <= 15 && resMinutes >= -15 ? <Stamp color={filled ? c.onPrimary : c.purple} size={12} animate>{`Res. ${timeOf(reservation.fecha_hora)}`}</Stamp> : null}
-    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
-      {order ? <>
-        <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: meta.dot }} />
-        <Num size={16} weight="800" color={filled ? c.onPrimary : c.text}>{money(balance)}</Num>
-      </> : <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-        <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: meta.dot }} />
-        <T size={14} weight="700" color={meta.text}>{meta.label}</T>
-      </View>}
+    <View style={{ gap: 1 }}>
+      <T size={13} weight="800" color={status.color} numberOfLines={1}>{status.text}</T>
+      {order ? <Num size={16} weight="800" color={filled ? c.onPrimary : c.text}>{money(balance)}</Num> : null}
     </View>
   </Press>;
 }

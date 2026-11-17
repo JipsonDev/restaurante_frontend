@@ -26,7 +26,7 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
   const gap = layoutWidth < 600 ? 10 : 12;
   const available = Math.max(0, layoutWidth - padding * 2);
   // Celular: 3 columnas (2 si la pantalla es muy estrecha). Tableta y escritorio: tantas como quepan.
-  const minTile = layoutWidth < 600 ? (compact ? 84 : 100) : compact ? 108 : 128;
+  const minTile = layoutWidth < 600 ? 100 : 140;
   const columns = Math.max(2, Math.min(10, Math.floor((available + gap) / (minTile + gap))));
   const tileWidth = Math.max(0, Math.floor((available - gap * (columns - 1) - 1) / columns));
   const clear = () => { setSearch(''); setFilter('Todas'); setZone('Todas'); };
@@ -85,8 +85,6 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
         <T size={13} weight="600" color={c.muted} numberOfLines={1}>{summary}</T>
       </View> : null}
       <SearchToggle value={search} onChange={setSearch} />
-      <IconButton icon={compact ? Grid2X2 : Grid3X3} label={compact ? 'Casillas normales' : 'Casillas compactas'} onPress={() => setCompact(!compact)} />
-      <IconButton icon={RefreshCw} label="Actualizar mesas" disabled={refreshing} color={refreshing ? c.faint : c.text} onPress={refresh} />
     </View>
 
     {loadError ? <Appear><View style={{ borderRadius: radius.lg, backgroundColor: c.redSoft, padding: space.md, paddingLeft: space.lg, marginBottom: space.md, flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
@@ -125,6 +123,6 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
         })}
       </View>
     </View>)}
-    {groups.length ? <T size={13} color={c.faint} style={{ textAlign: 'center', marginTop: space.xl }}>Mantén presionada una mesa para acciones rápidas</T> : null}
+
   </View>;
 }
