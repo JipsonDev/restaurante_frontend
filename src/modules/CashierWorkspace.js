@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { SafeAreaView, ScrollView, TextInput, View, useWindowDimensions } from 'react-native';
 import {
-  ArrowDownLeft, ArrowLeft, ArrowUpRight, BadgePercent, Banknote, Ban, Clock, Gift, PackageOpen, Split, CreditCard, FileText, Gift, Hash, Layers, LogOut, Minus, Moon, Plus,
+  ArrowDownLeft, ArrowLeft, ArrowUpRight, BadgePercent, Banknote, Ban, Clock, Gift, PackageOpen, Split, CreditCard, FileText, Hash, Layers, LogOut, Minus, Moon, Plus,
   Printer, Receipt, RefreshCw, Search, ShoppingBag, Store, Sun, Table2, Trash2, WalletCards, Wifi, WifiOff, X,
 } from 'lucide-react-native';
 import Logo from '../components/Logo';
