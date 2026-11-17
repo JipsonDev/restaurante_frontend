@@ -9,7 +9,7 @@ import { comandaTableMeta, useTheme } from '../../theme';
 import { BASE_URL } from '../../context/AuthContext';
 import { serviceDate, serviceDuration, serviceRounds } from '../../utils/serviceTiming.mjs';
 import { addDays, dayOf, localStamp, minutesUntil, nextByTable, timeOf } from '../../utils/reservationLogic.mjs';
-import { Appear, BottomSheet, Button, Chip, EASE, EmptyState, IconButton, Label, Num, Perforation, Ping, Press, Stamp, T, TOUCH, elevate, haptic, money, radius, space } from './comanda';
+import { Appear, BottomSheet, Button, Chip, EASE, EmptyState, IconButton, Label, Num, Perforation, Ping, Press, Stamp, SwipeRow, T, TOUCH, elevate, haptic, money, radius, space } from './comanda';
 
 // Minutos desde una fecha (o null).
 export function minutesSince(value, now = Date.now()) {
@@ -201,8 +201,10 @@ export function ReadyTray({ open, onClose, ready, alerts, activity, onDeliver, d
       <Chip selected={tab === 'actividad'} onPress={() => setTab('actividad')} count={unread}>Actividad</Chip>
     </View>
     {tab === 'listo' ? (ready.length ? <View style={{ gap: space.sm }}>
+      <T size={13} color={c.muted}>Desliza una ronda hacia la derecha para marcarla como entregada.</T>
       {ready.map(({ round, pedido, minutes }, i) => <Appear key={round.id} delay={i * 40}>
-        <View style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.greenSoft, gap: 6 }}>
+        <SwipeRow direction="right" label="Entregado" icon={CheckCheck} disabled={deliveringId === round.id} onSwipe={() => onDeliver(round, pedido)}>
+        <View style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.isDark ? c.surfaceAlt : '#F2FAF5', borderWidth: 1, borderColor: c.isDark ? c.line : '#D7EFDF', gap: 6 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
             <T size={18} weight="700" style={{ flex: 1 }}>{placeOf(pedido)}</T>
             <Num size={14} weight="700" color={minutes != null && minutes >= (alerts.limits?.lista || 5) ? c.red : c.green}>{minutes ? `lista hace ${shortMinutes(minutes)}` : 'recién lista'}</Num>
@@ -213,6 +215,7 @@ export function ReadyTray({ open, onClose, ready, alerts, activity, onDeliver, d
             <Button variant="ghost" onPress={() => onOpen({ mesa_id: pedido.mesa_id, pedido_id: pedido.id, pedido })}>Ver</Button>
           </View>
         </View>
+        </SwipeRow>
       </Appear>)}
     </View> : <EmptyState icon={CheckCheck} title="Pase vacío" description="Cuando cocina marque una ronda como lista aparecerá aquí, con vibración." />) : null}
     {tab === 'demoras' ? <View style={{ gap: space.sm }}>

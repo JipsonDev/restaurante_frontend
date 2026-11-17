@@ -70,10 +70,30 @@ export function Label({ style, color, size = 14, ...props }) {
 export const money = n => `$${Number(n || 0).toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 // ── Vibración ──────────────────────────────────────────────────────────────
-const PATTERNS = { tap: 8, select: 6, light: 12, medium: 20, success: [0, 18, 60, 24], warning: [0, 30, 80, 30] };
+// iPhone/Android: expo-haptics (impactos y notificaciones nativas; en Android, el motor del sistema
+// sin permiso de vibración). Web: Vibration API. Una vibración por evento y siempre junto a un cambio visual.
+let Haptics = null;
+if (!WEB) { try { Haptics = require('expo-haptics'); } catch { Haptics = null; } }
+const PATTERNS = { tap: 8, select: 6, light: 12, medium: 20, success: [0, 18, 60, 24], warning: [0, 30, 80, 30], error: [0, 40, 60, 40] };
+const ANDROID = { tap: 'Keyboard_Tap', select: 'Segment_Tick', light: 'Clock_Tick', medium: 'Long_Press', success: 'Confirm', warning: 'Reject', error: 'Reject' };
+function nativeHaptic(kind) {
+  const H = Haptics;
+  if (!H) return false;
+  if (Platform.OS === 'android' && H.performAndroidHapticsAsync && H.AndroidHaptics?.[ANDROID[kind]] != null) { H.performAndroidHapticsAsync(H.AndroidHaptics[ANDROID[kind]]).catch(() => {}); return true; }
+  const I = H.ImpactFeedbackStyle || {}; const N = H.NotificationFeedbackType || {};
+  const run = {
+    tap: () => H.selectionAsync?.(), select: () => H.selectionAsync?.(),
+    light: () => H.impactAsync?.(I.Light), medium: () => H.impactAsync?.(I.Medium),
+    success: () => H.notificationAsync?.(N.Success), warning: () => H.notificationAsync?.(N.Warning), error: () => H.notificationAsync?.(N.Error),
+  }[kind];
+  if (!run) return false;
+  Promise.resolve(run()).catch(() => {});
+  return true;
+}
 export function haptic(kind = 'tap') {
-  const p = PATTERNS[kind] ?? 10;
   try {
+    if (!WEB && nativeHaptic(kind)) return;
+    const p = PATTERNS[kind] ?? 10;
     if (WEB) { if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(p); return; }
     if (Platform.OS === 'android') Vibration.vibrate(p);
   } catch {}
@@ -345,7 +365,7 @@ export function ComandaToastProvider({ children, bottomOffset = 84 }) {
   const [items, setItems] = useState([]);
   const [extra, setExtra] = useState(0);
   const show = useCallback((message, opts = {}) => {
-    if (opts.haptic !== false) haptic(opts.tone === 'error' ? 'warning' : 'light');
+    if (opts.haptic !== false) haptic(opts.tone === 'error' ? 'error' : opts.tone === 'warning' ? 'warning' : 'light');
     setItems(list => [...list.slice(-1), { id: Date.now() + Math.random(), message, ...opts }]);
   }, []);
   const lift = useCallback(n => setExtra(Number(n) || 0), []);
@@ -397,6 +417,54 @@ export function TabBar({ items, value, onChange, bottomInset = 0 }) {
       {w ? <Animated.View pointerEvents="none" style={{ position: 'absolute', top: 6, bottom: 6, left: 6, width: seg, borderRadius: radius.pill, backgroundColor: c.primarySoft, transform: [{ translateX: x }] }} /> : null}
       {items.map(item => <TabItem key={item.key} item={item} active={item.key === value} onPress={() => onChange(item.key)} />)}
     </View>
+  </View>;
+}
+
+// ── Deslizar para actuar ───────────────────────────────────────────────────
+// Fila que se arrastra en horizontal para confirmar una acción (borrar, entregar).
+// Seguimiento 1:1 con el dedo (sin resorte mientras se arrastra); resistencia elástica en la
+// dirección contraria; al soltar, confirma si pasó el 40 % del ancho o hubo un tirón rápido
+// (> 0,5 px/ms), y sale con un resorte que conserva la velocidad del dedo. Si no, vuelve rápido.
+// Vibra una vez al cruzar el umbral. Siempre debe existir un botón visible con la misma acción.
+export function SwipeRow({ children, direction = 'left', onSwipe, label, icon: Icon, color, disabled, radius: r = radius.lg }) {
+  const { c } = useTheme();
+  const x = useRef(new Animated.Value(0)).current;
+  const width = useRef(320);
+  const armed = useRef(false);
+  const busy = useRef(false);
+  const sign = direction === 'left' ? -1 : 1;
+  const tone = color || (direction === 'left' ? c.red : c.green);
+  const pan = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_, g) => !disabled && !busy.current && Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy) * 1.6,
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderGrant: () => { x.stopAnimation(); armed.current = false; },
+    onPanResponderMove: (_, g) => {
+      const along = g.dx * sign;                     // positivo = hacia la acción
+      const v = along >= 0 ? along : along * 0.2;    // elástico en la dirección contraria
+      x.setValue(v * sign);
+      const past = along > width.current * 0.4;
+      if (past !== armed.current) { armed.current = past; haptic(past ? 'medium' : 'select'); }
+    },
+    onPanResponderRelease: (_, g) => {
+      const along = g.dx * sign; const vel = g.vx * sign;
+      if (along > width.current * 0.4 || (vel > 0.5 && along > 24)) {
+        busy.current = true; haptic('success');
+        Animated.spring(x, { toValue: sign * (width.current + 40), velocity: g.vx, speed: 20, bounciness: 0, useNativeDriver: ND, restDisplacementThreshold: 2, restSpeedThreshold: 2 })
+          .start(() => { onSwipe?.(); setTimeout(() => { x.setValue(0); busy.current = false; }, 260); });
+      } else {
+        Animated.spring(x, { toValue: 0, velocity: g.vx, speed: 26, bounciness: 4, useNativeDriver: ND }).start();
+      }
+    },
+    onPanResponderTerminate: () => Animated.spring(x, { toValue: 0, speed: 26, bounciness: 4, useNativeDriver: ND }).start(),
+  }), [disabled, sign, onSwipe]);
+  const progress = x.interpolate({ inputRange: sign < 0 ? [-200, -40, 0] : [0, 40, 200], outputRange: sign < 0 ? [1, 0.35, 0] : [0, 0.35, 1], extrapolate: 'clamp' });
+  return <View onLayout={e => { width.current = e.nativeEvent.layout.width; }} style={{ borderRadius: r, overflow: 'hidden' }}>
+    <Animated.View pointerEvents="none" style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, borderRadius: r, backgroundColor: tone, opacity: progress,
+      flexDirection: 'row', alignItems: 'center', justifyContent: sign < 0 ? 'flex-end' : 'flex-start', paddingHorizontal: 24, gap: 8 }}>
+      {Icon ? <Animated.View style={{ transform: [{ scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.1] }) }] }}><Icon size={22} color="#FFFFFF" strokeWidth={2.4} /></Animated.View> : null}
+      {label ? <T size={15} weight="800" color="#FFFFFF">{label}</T> : null}
+    </Animated.View>
+    <Animated.View {...pan.panHandlers} style={[{ transform: [{ translateX: x }] }, WEB ? { touchAction: 'pan-y' } : null]}>{children}</Animated.View>
   </View>;
 }
 

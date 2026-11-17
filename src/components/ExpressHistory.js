@@ -1,23 +1,90 @@
-import React, { useEffect, useState } from 'react';
-import OrderTracking from './OrderTracking';
-import { ActivityIndicator, Pressable, TextInput, View } from 'react-native';
-import { ChevronLeft, ChevronRight, CalendarDays, CheckCircle2, ArrowUpRight } from 'lucide-react-native';
+// Historial Express (dirección «Suave»): selector de fecha tipo píldora («Lun 16 nov», con «Hoy»),
+// flechas para el día anterior/siguiente y consulta automática al cambiar. Tarjetas como en Activos.
+import React, { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, View } from 'react-native';
+import { CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ShoppingBag, Truck } from 'lucide-react-native';
 import axios from 'axios';
+import OrderTracking from './OrderTracking';
 import { BASE_URL } from '../context/AuthContext';
 import { historyDay, validHistoryDay } from '../utils/expressWorkspace.mjs';
-import { WText, WButton, waiterFont } from './WaiterUI';
-const money = value => `$${Number(value || 0).toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+import { useTheme } from '../theme';
+import { Appear, BottomSheet, Button, Chip, EmptyState, Field, IconButton, Num, Press, Stamp, T, elevate, money, radius, space } from './waiter/comanda';
 
-export default function ExpressHistory({ colors: c }) {
-  const [date, setDate] = useState(() => historyDay(new Date()));
-  const [input, setInput] = useState(date);
-  const [dateError, setDateError] = useState('');
+const parseDay = day => new Date(`${day}T12:00:00`);
+const shiftDay = (day, delta) => { const d = parseDay(day); d.setDate(d.getDate() + delta); return historyDay(d); };
+// «Lun 16 nov» (o «Hoy · Lun 16 nov» / «Ayer · …»).
+export function readableDay(day, today = historyDay(new Date())) {
+  const d = parseDay(day);
+  if (Number.isNaN(d.getTime())) return day;
+  const wd = d.toLocaleDateString('es-EC', { weekday: 'short' }).replace('.', '');
+  const mo = d.toLocaleDateString('es-EC', { month: 'short' }).replace('.', '');
+  const text = `${wd.charAt(0).toUpperCase()}${wd.slice(1)} ${d.getDate()} ${mo}`;
+  if (day === today) return `Hoy · ${text}`;
+  if (day === shiftDay(today, -1)) return `Ayer · ${text}`;
+  return text;
+}
+
+function DayPicker({ open, onClose, value, onPick }) {
+  const today = historyDay(new Date());
+  const [typed, setTyped] = useState(value);
+  const [error, setError] = useState('');
+  useEffect(() => { if (open) { setTyped(value); setError(''); } }, [open, value]);
+  const recent = useMemo(() => Array.from({ length: 14 }, (_, i) => shiftDay(today, -i)), [today]);
+  const apply = () => { if (!validHistoryDay(typed) || typed > today) { setError('Escribe una fecha válida (AAAA-MM-DD) que no sea futura.'); return; } onPick(typed); };
+  return <BottomSheet visible={open} onClose={onClose} title="Elegir día" subtitle="Pedidos Express pagados y entregados ese día.">
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
+      {recent.map(day => <Chip key={day} selected={day === value} onPress={() => onPick(day)}>{day === today ? 'Hoy' : day === shiftDay(today, -1) ? 'Ayer' : readableDay(day, today)}</Chip>)}
+    </View>
+    <Field label="Otra fecha" value={typed} onChangeText={v => { setTyped(v); setError(''); }} placeholder="AAAA-MM-DD" maxLength={10} error={error} onSubmitEditing={apply} accessibilityLabel="Fecha del historial" />
+    <Button variant="ink" full onPress={apply}>Ver ese día</Button>
+  </BottomSheet>;
+}
+
+function HistoryCard({ order, open, onToggle, colors, index }) {
+  const { c } = useTheme();
+  const delivery = order.tipo === 'Delivery';
+  const items = (order.items || []).reduce((n, it) => n + Number(it.cantidad || 0), 0);
+  const closed = order.cerrado_at && !Number.isNaN(new Date(order.cerrado_at).getTime()) ? new Date(order.cerrado_at) : null;
+  return <Appear delay={Math.min(index, 8) * 30}>
+    <View style={[{ borderRadius: radius.xl, backgroundColor: c.surface, borderWidth: 1, borderColor: c.isDark ? c.line : 'rgba(16,24,40,0.04)', overflow: 'hidden' }, elevate(c, 1)]}>
+      <Press accessibilityRole="button" accessibilityLabel={`Ver historial Express ${order.id}`} accessibilityState={{ expanded: open }} onPress={onToggle} hapticKind="tap"
+        style={{ padding: space.lg, flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+        <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: delivery ? c.skySoft : c.primarySoft, alignItems: 'center', justifyContent: 'center' }}>
+          {delivery ? <Truck size={19} color={c.sky} /> : <ShoppingBag size={19} color={c.primaryText} />}
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <T size={16} weight="800" numberOfLines={1}>{order.cliente_nombre || 'Cliente'}</T>
+          <T size={13} color={c.muted} numberOfLines={1}>#{order.id} · {delivery ? 'Delivery' : 'Para llevar'}{items ? ` · ${items} art.` : ''}{closed ? ` · ${closed.toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}` : ''}</T>
+        </View>
+        <View style={{ alignItems: 'flex-end', gap: 4 }}>
+          <Num size={16} weight="800">{money(order.total)}</Num>
+          <Stamp color={c.green} size={11}>Cerrado</Stamp>
+        </View>
+      </Press>
+      {open ? <View style={{ paddingHorizontal: space.lg, paddingBottom: space.lg, gap: 6 }}>
+        <View style={{ height: 1, backgroundColor: c.line, marginBottom: 6 }} />
+        {(order.items || []).map(item => <View key={item.id} style={{ flexDirection: 'row', gap: 8 }}>
+          <Num size={14} weight="700" color={c.muted}>{item.cantidad}×</Num>
+          <View style={{ flex: 1 }}><T size={14}>{item.nombre}</T>{item.notas ? <T size={13} color={c.muted}>{item.notas}</T> : null}</View>
+        </View>)}
+        <View style={{ marginTop: 6 }}><OrderTracking order={order} colors={colors} /></View>
+      </View> : null}
+    </View>
+  </Appear>;
+}
+
+export default function ExpressHistory({ colors }) {
+  const { c } = useTheme();
+  const today = historyDay(new Date());
+  const [date, setDate] = useState(today);
+  const [picker, setPicker] = useState(false);
   const [page, setPage] = useState(0);
   const [data, setData] = useState({ items: [], hasMore: false });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
   const [selected, setSelected] = useState(null);
+  // Consulta automática al cambiar de día o de página.
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
@@ -28,26 +95,38 @@ export default function ExpressHistory({ colors: c }) {
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; controller.abort(); };
   }, [date, page, attempt]);
-  const changeDate = next => { setDateError(''); setInput(next); setDate(next); setPage(0); };
-  const apply = () => { if (!validHistoryDay(input)) { setDateError('Escribe una fecha válida en formato AAAA-MM-DD.'); return; } changeDate(input); setAttempt(n => n + 1); };
-  const changeDay = delta => { const parsed = new Date(`${date}T12:00:00`); parsed.setDate(parsed.getDate() + delta); changeDate(historyDay(parsed)); };
-  return <View style={{ gap: 14 }}>
-    <WText style={{ color: c.muted, fontSize: 12, lineHeight: 18 }}>Pagados y entregados, por fecha de cierre. Los pedidos con saldo siguen en Activos.</WText>
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-      <WButton colors={c} label="Día anterior" Icon={ChevronLeft} onPress={() => changeDay(-1)} />
-      <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 2, borderColor: dateError ? c.danger : 'transparent', backgroundColor: c.surfaceAlt || c.elevated, borderRadius: 999, paddingHorizontal: 14 }}><CalendarDays size={16} color={c.muted} /><TextInput accessibilityLabel="Fecha del historial" value={input} maxLength={10} placeholder="AAAA-MM-DD" placeholderTextColor={c.muted} onChangeText={value => { setInput(value); setDateError(''); }} onSubmitEditing={apply} style={{ ...waiterFont, flex: 1, minWidth: 0, minHeight: 44, color: c.ink, fontSize: 12 }} /></View>
-      <WButton colors={c} label="Día siguiente" Icon={ChevronRight} onPress={() => changeDay(1)} />
+  const go = next => { if (next > today) return; setDate(next); setPage(0); setPicker(false); };
+  const total = data.items.reduce((s, o) => s + Number(o.total || 0), 0);
+  return <View style={{ gap: space.md }}>
+    {/* Selector de día: ‹ [Hoy · Lun 16 nov ▾] › */}
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, padding: 4, borderRadius: radius.pill, backgroundColor: c.surfaceAlt }}>
+      <IconButton icon={ChevronLeft} label="Día anterior" onPress={() => go(shiftDay(date, -1))} size={44} />
+      <Press accessibilityRole="button" accessibilityLabel={`Día: ${readableDay(date, today)}. Elegir otro día`} onPress={() => setPicker(true)} hapticKind="tap"
+        style={[{ flex: 1, minHeight: 44, borderRadius: radius.pill, backgroundColor: c.surface, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12 }, elevate(c, 1)]}>
+        <CalendarDays size={17} color={c.primaryText} />
+        <T size={15} weight="800" numberOfLines={1}>{readableDay(date, today)}</T>
+        <ChevronDown size={16} color={c.muted} />
+      </Press>
+      <IconButton icon={ChevronRight} label="Día siguiente" onPress={() => go(shiftDay(date, 1))} size={44} disabled={date >= today} />
     </View>
-    <View style={{ flexDirection: 'row', gap: 8 }}><WButton colors={c} primary label="Consultar fecha del historial" onPress={apply}>Consultar</WButton><WButton colors={c} onPress={() => { changeDate(historyDay(new Date())); setAttempt(n => n + 1); }}>Hoy</WButton><WText style={{ marginLeft: 'auto', color: c.muted, alignSelf: 'center', fontSize: 11 }}>{date}</WText></View>
-    {dateError ? <WText accessibilityRole="alert" style={{ color: c.danger, fontSize: 12 }}>{dateError}</WText> : null}
-    {loading ? <View style={{ padding: 24, alignItems: 'center', gap: 10 }}><ActivityIndicator color={c.brand} /><WText style={{ color: c.muted, fontSize: 12 }}>Consultando historial…</WText></View> : error ? <View style={{ padding: 16, gap: 10 }}><WText accessibilityRole="alert" style={{ color: c.danger }}>{error}</WText><WButton colors={c} onPress={() => setAttempt(n => n + 1)}>Reintentar historial</WButton></View> : <>
-      {!data.items.length ? <View style={{ padding: 24, gap: 8, borderRadius: 20, backgroundColor: c.surfaceAlt || c.elevated }}><WText style={{ color: c.ink, fontSize: 14 }}>Sin pedidos cerrados este día</WText><WText style={{ color: c.muted, fontSize: 12 }}>Al completar el pago y la entrega aparecerán aquí.</WText></View> : null}
-      {data.items.map(order => <View key={order.id} style={{ borderRadius: 20, backgroundColor: c.surfaceAlt || c.elevated, overflow: 'hidden' }}>
-        <Pressable accessibilityRole="button" accessibilityLabel={`Ver historial Express ${order.id}`} accessibilityState={{ expanded: selected === order.id }} onPress={() => setSelected(selected === order.id ? null : order.id)} style={{ padding: 14, gap: 6, flexDirection: 'row', alignItems: 'center' }}><CheckCircle2 size={18} color={c.success} /><View style={{ flex: 1, minWidth: 0, gap: 5 }}><WText style={{ color: c.ink, fontSize: 14 }}>{order.cliente_nombre || 'Cliente'} · #{order.id}</WText><WText style={{ color: c.muted, fontSize: 12 }}>{order.tipo} · {money(order.total)} · pagado y entregado</WText></View><ArrowUpRight size={16} color={c.muted} /></Pressable>
-        {selected === order.id ? <View style={{ padding: 14, paddingTop: 0, gap: 10 }}><WText style={{ color: c.muted, fontSize: 12 }}>Cierre: {order.cerrado_at && !Number.isNaN(new Date(order.cerrado_at).getTime()) ? new Date(order.cerrado_at).toLocaleString('es') : 'Sin fecha registrada'}</WText>{(order.items || []).map(item => <View key={item.id} style={{ gap: 3 }}><WText style={{ color: c.ink, fontSize: 12 }}>{item.cantidad} × {item.nombre}</WText>{item.notas ? <WText style={{ color: c.muted, fontSize: 11 }}>{item.notas}</WText> : null}</View>)}</View> : null}
-        {selected===order.id?<View style={{paddingHorizontal:14}}><OrderTracking order={order} colors={c}/></View>:null}
-      </View>)}
-      {data.items.length > 0 || page > 0 ? <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><WButton colors={c} disabled={page === 0} onPress={() => setPage(n => n - 1)}>Anterior</WButton><WText style={{ color: c.muted, fontSize: 12 }}>Página {page + 1}</WText><WButton colors={c} disabled={!data.hasMore} onPress={() => setPage(n => n + 1)}>Siguiente</WButton></View> : null}
-    </>}
+    {date !== today ? <Button variant="ghost" size="sm" onPress={() => go(today)} style={{ alignSelf: 'center' }}>Volver a hoy</Button> : null}
+    {loading ? <View style={{ padding: space.x3, alignItems: 'center', gap: 10 }}><ActivityIndicator color={c.primary} /><T size={14} color={c.muted}>Consultando historial…</T></View>
+      : error ? <View style={{ padding: space.lg, gap: space.sm, borderRadius: radius.lg, backgroundColor: c.redSoft }}>
+        <T accessibilityRole="alert" size={14} weight="700" color={c.red}>{error}</T>
+        <Button variant="ink" size="sm" onPress={() => setAttempt(n => n + 1)}>Reintentar</Button>
+      </View>
+      : <>
+        {data.items.length ? <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 4 }}>
+          <T size={14} weight="700" color={c.muted}>{data.items.length} {data.items.length === 1 ? 'pedido cerrado' : 'pedidos cerrados'}{data.hasMore || page ? ` · página ${page + 1}` : ''}</T>
+          <Num size={14} weight="800" color={c.muted}>{money(total)}</Num>
+        </View> : null}
+        {!data.items.length ? <EmptyState icon={CheckCircle2} title="Sin pedidos cerrados este día" description="Al completar el pago y la entrega aparecerán aquí." /> : null}
+        {data.items.map((order, i) => <HistoryCard key={order.id} order={order} index={i} colors={colors} open={selected === order.id} onToggle={() => setSelected(selected === order.id ? null : order.id)} />)}
+        {data.items.length > 0 && (data.hasMore || page > 0) ? <View style={{ flexDirection: 'row', justifyContent: 'center', gap: space.sm }}>
+          <Button size="sm" icon={ChevronLeft} disabled={page === 0} onPress={() => setPage(n => n - 1)}>Anterior</Button>
+          <Button size="sm" iconRight={ChevronRight} disabled={!data.hasMore} onPress={() => setPage(n => n + 1)}>Siguiente</Button>
+        </View> : null}
+      </>}
+    <DayPicker open={picker} onClose={() => setPicker(false)} value={date} onPick={go} />
   </View>;
 }

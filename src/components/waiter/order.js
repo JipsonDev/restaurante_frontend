@@ -5,7 +5,7 @@ import { Animated, Image, TextInput, View } from 'react-native';
 import { CloudOff, RefreshCw, Send, PencilLine, Trash2 } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import {
-  BottomSheet, Button, Chip, EASE, Label, LeaderLine, Num, Perforation, Press, RollingNumber, Stamp, Tally, T,
+  BottomSheet, Button, Chip, EASE, Label, LeaderLine, Num, Perforation, Press, RollingNumber, Stamp, SwipeRow, Tally, T,
   TOUCH, TOUCH_MAIN, elevate, haptic, money, radius, space,
 } from './comanda';
 
@@ -46,11 +46,13 @@ export function OrderLine({ item, total, detail, image, expanded, onToggle, onQt
   const remove = () => {
     if (leaving) return;
     haptic('warning'); setLeaving(true);
-    Animated.timing(v, { toValue: 0, duration: 200, easing: EASE, useNativeDriver: ND }).start(() => onRemove?.());
+    Animated.timing(v, { toValue: 0, duration: 220, easing: EASE, useNativeDriver: ND }).start(() => onRemove?.());
   };
   const style = leaving && h ? { height: v.interpolate({ inputRange: [0, 1], outputRange: [0, h] }), opacity: v, overflow: 'hidden' } : { opacity: v };
   return <Animated.View style={style}>
-    <View onLayout={e => !leaving && setH(e.nativeEvent.layout.height)} style={[{ padding: space.lg, marginBottom: space.sm, borderRadius: radius.lg, backgroundColor: c.surface, borderWidth: 1, borderColor: c.isDark ? c.line : 'rgba(16,24,40,0.04)', opacity: locked ? 0.6 : 1 }, elevate(c, 1)]} pointerEvents={locked ? 'none' : 'auto'}>
+    <View onLayout={e => !leaving && setH(e.nativeEvent.layout.height)} style={{ paddingBottom: space.sm }}>
+    <SwipeRow direction="left" onSwipe={remove} label="Quitar" icon={Trash2} disabled={locked || leaving}>
+    <View style={[{ padding: space.lg, borderRadius: radius.lg, backgroundColor: c.surface, borderWidth: 1, borderColor: c.isDark ? c.line : 'rgba(16,24,40,0.04)', opacity: locked ? 0.6 : 1 }, elevate(c, 1)]} pointerEvents={locked ? 'none' : 'auto'}>
       <View style={{ flexDirection: 'row', gap: space.md, alignItems: 'flex-start' }}>
         {image ? <Image source={{ uri: image }} style={{ width: 48, height: 48, borderRadius: radius.md, backgroundColor: c.soft }} /> : null}
         <View style={{ flex: 1, minWidth: 0 }}>
@@ -69,6 +71,8 @@ export function OrderLine({ item, total, detail, image, expanded, onToggle, onQt
         </Press>
       </View>
       {expanded ? <View style={{ marginTop: space.md }}>{children}</View> : null}
+    </View>
+    </SwipeRow>
     </View>
   </Animated.View>;
 }
