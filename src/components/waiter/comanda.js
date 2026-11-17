@@ -188,7 +188,7 @@ export function LeaderLine({ left, right }) {
 
 // ── Insignias ──────────────────────────────────────────────────────────────
 // Píldora de estado con tinte suave y punto. Con `animate`, aparece con un pequeño rebote.
-const SOFT = c => ({ [c.green]: c.greenSoft, [c.amber]: c.amberSoft, [c.red]: c.redSoft, [c.primary]: c.primarySoft, [c.purple]: c.purpleSoft, [c.sky]: c.skySoft, [c.muted]: c.surfaceAlt, [c.ink]: c.surfaceAlt, [c.text]: c.surfaceAlt });
+const SOFT = c => ({ [c.onPrimary]: 'rgba(255,255,255,0.22)', [c.green]: c.greenSoft, [c.amber]: c.amberSoft, [c.red]: c.redSoft, [c.primary]: c.primarySoft, [c.purple]: c.purpleSoft, [c.sky]: c.skySoft, [c.muted]: c.surfaceAlt, [c.ink]: c.surfaceAlt, [c.text]: c.surfaceAlt });
 export function Stamp({ children, color, animate, size = 13, style, dot = true }) {
   const { c } = useTheme();
   const tone = color || c.primary;

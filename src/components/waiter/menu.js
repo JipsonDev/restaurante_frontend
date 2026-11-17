@@ -1,12 +1,12 @@
 // Menú del mesero en lenguaje «Comanda»: cada producto es una línea de la libreta
 // «Batido de mora ····· 2,80». Tocar la línea suma uno; mantener (o el botón ⋯) abre la personalización.
-import React, { memo, useMemo, useState } from 'react';
-import { ScrollView, TextInput, View } from 'react-native';
-import { Search, SlidersHorizontal, X, RotateCcw, Flame, ShoppingBag, Bike, LockKeyhole, Plus, Minus, PencilLine } from 'lucide-react-native';
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, ScrollView, TextInput, View } from 'react-native';
+import { Search, SlidersHorizontal, X, RotateCcw, Flame, ShoppingBag, Bike, LockKeyhole, Plus, Minus, PencilLine, Mic, Hash, Type } from 'lucide-react-native';
 import { comandaTableMeta, useTheme } from '../../theme';
 import { menuStock } from '../../utils/waiterCatalog.mjs';
 import { normalize } from '../../utils/waiterFavorites.mjs';
-import { T, Num, Label, Press, Button, Chip, LeaderLine, RollingNumber, BottomSheet, EmptyState, TOUCH, FONT, WEB, elevate, radius, space } from './comanda';
+import { T, Num, Label, Press, Button, Chip, LeaderLine, RollingNumber, BottomSheet, EmptyState, TOUCH, FONT, WEB, elevate, haptic, radius, space } from './comanda';
 
 const amount = n => Number(n || 0).toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const price = n => `$${amount(n)}`; // mismo formato que la comanda: $1,80
@@ -27,7 +27,7 @@ export const MenuRow = memo(function MenuRow({ producto, qty = 0, isPromo, locke
       disabled={off} onPress={add} onLongPress={onCustomize && canAdd ? custom : undefined} hapticKind={off ? undefined : 'tap'} scaleTo={0.98}
       hoverStyle={{ backgroundColor: qty ? 'transparent' : c.surfaceAlt }} style={{ flex: 1, minHeight: 68, paddingVertical: 10, paddingHorizontal: space.md, borderRadius: radius.lg, flexDirection: 'row', alignItems: 'center', gap: space.md }}>
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-        <T size={16} weight={qty ? '800' : '700'} numberOfLines={2}>{producto.nombre}</T>
+        <T size={16} weight={qty ? '800' : '700'} numberOfLines={2}>{producto.nombre} <T size={12} weight="600" color={c.faint}>N.º {producto.id}</T></T>
         {(isPromo || note || producto.descripcion) ? <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
           {isPromo ? <View style={{ paddingHorizontal: 8, borderRadius: radius.pill, backgroundColor: c.primary }}><T size={11} weight="800" color={c.onPrimary}>Promo</T></View> : null}
           {note ? <T size={13} weight="700" color={!available || limit ? c.red : c.amber}>{note}</T> : null}
@@ -52,18 +52,67 @@ export const MenuRow = memo(function MenuRow({ producto, qty = 0, isPromo, locke
   </View>;
 });
 
-// ── Cabecera compacta: búsqueda + categorías + filtros ─────────────────────
-export function MenuSearch({ value, onChangeText, placeholder = 'Buscar en el menú', onFilters, filtersActive }) {
+// ── Dictado por voz (Web Speech API; en nativo no hay y el botón no aparece) ──
+const SpeechAPI = WEB && typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
+function useDictation(onText) {
+  const [listening, setListening] = useState(false);
+  const rec = useRef(null);
+  useEffect(() => () => { try { rec.current?.abort(); } catch {} }, []);
+  const toggle = () => {
+    if (!SpeechAPI) return;
+    if (listening) { try { rec.current?.stop(); } catch {} return; }
+    try {
+      const r = new SpeechAPI();
+      r.lang = 'es-EC'; r.interimResults = true; r.maxAlternatives = 1; r.continuous = false;
+      r.onresult = e => { const text = Array.from(e.results).map(x => x[0]?.transcript || '').join(' ').replace(/[.,¿?¡!]/g, '').trim(); onText(text); };
+      r.onend = () => { setListening(false); haptic('light'); };
+      r.onerror = () => setListening(false);
+      rec.current = r; r.start(); setListening(true); haptic('medium');
+    } catch { setListening(false); }
+  };
+  return { supported: !!SpeechAPI, listening, toggle };
+}
+
+// Anillo que late mientras se escucha.
+function ListeningRing({ active, color }) {
+  const v = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!active) { v.stopAnimation(); v.setValue(0); return undefined; }
+    const loop = Animated.loop(Animated.timing(v, { toValue: 1, duration: 1100, useNativeDriver: !WEB }));
+    loop.start(); return () => loop.stop();
+  }, [active]);
+  if (!active) return null;
+  return <Animated.View pointerEvents="none" style={{ position: 'absolute', width: 40, height: 40, borderRadius: 20, backgroundColor: color,
+    opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0] }), transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 1.9] }) }] }} />;
+}
+
+// ── Cabecera compacta: búsqueda (texto, número o voz) + filtros ────────────
+export function MenuSearch({ value, onChangeText, placeholder = 'Buscar en el menú', onFilters, filtersActive, numbers = true, voice = true }) {
   const { c } = useTheme();
   const [focus, setFocus] = useState(false);
+  const [numeric, setNumeric] = useState(false);
+  const input = useRef(null);
+  const dictation = useDictation(text => onChangeText(text));
+  const listening = dictation.listening;
+  const toggleNumeric = () => { haptic('select'); setNumeric(n => !n); setTimeout(() => input.current?.focus?.(), 30); };
   return <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'center' }}>
-    <View style={[{ flex: 1, minHeight: TOUCH, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 16, borderWidth: 2, borderColor: focus ? c.primary : 'transparent', borderRadius: radius.pill, backgroundColor: focus ? c.surface : c.surfaceAlt },
-      WEB ? { transitionProperty: 'border-color, background-color, box-shadow', transitionDuration: '160ms', boxShadow: focus ? `0 0 0 4px ${c.focus}` : 'none' } : null]}>
+    <View style={[{ flex: 1, minHeight: TOUCH, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 16, paddingRight: 4, borderWidth: 2, borderColor: listening ? c.primary : focus ? c.primary : 'transparent', borderRadius: radius.pill, backgroundColor: focus || listening ? c.surface : c.surfaceAlt },
+      WEB ? { transitionProperty: 'border-color, background-color, box-shadow', transitionDuration: '160ms', boxShadow: focus || listening ? `0 0 0 4px ${c.focus}` : 'none' } : null]}>
       <Search size={18} color={c.muted} />
-      <TextInput accessibilityLabel={placeholder} value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor={c.faint} returnKeyType="search"
+      <TextInput ref={input} accessibilityLabel={placeholder} value={value} onChangeText={onChangeText} placeholder={listening ? 'Escuchando… di el producto' : numeric ? 'Número del producto' : placeholder} placeholderTextColor={listening ? c.primaryText : c.faint} returnKeyType="search"
+        keyboardType={numeric ? 'number-pad' : 'default'} inputMode={numeric ? 'numeric' : 'search'}
         onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
-        style={{ flex: 1, minHeight: TOUCH - 4, fontFamily: FONT, fontSize: 16, color: c.text, ...(WEB ? { outlineStyle: 'none' } : {}) }} />
-      {value ? <Press accessibilityRole="button" accessibilityLabel="Borrar búsqueda" onPress={() => onChangeText('')} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}><X size={18} color={c.muted} /></Press> : null}
+        style={{ flex: 1, minWidth: 0, minHeight: TOUCH - 4, fontFamily: FONT, fontSize: 16, color: c.text, ...(WEB ? { outlineStyle: 'none' } : {}) }} />
+      {value ? <Press accessibilityRole="button" accessibilityLabel="Borrar búsqueda" onPress={() => onChangeText('')} scaleTo={0.85} style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' }}><X size={18} color={c.muted} /></Press> : null}
+      {numbers ? <Press accessibilityRole="button" accessibilityLabel={numeric ? 'Buscar con letras' : 'Buscar por número'} accessibilityState={{ selected: numeric }} onPress={toggleNumeric} scaleTo={0.85}
+        style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: numeric ? c.ink : 'transparent' }}>
+        {numeric ? <Type size={17} color={c.onInk} /> : <Hash size={17} color={c.muted} />}
+      </Press> : null}
+      {voice && dictation.supported ? <Press accessibilityRole="button" accessibilityLabel={listening ? 'Detener dictado' : 'Buscar por voz'} accessibilityState={{ selected: listening }} onPress={dictation.toggle} scaleTo={0.85}
+        style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: listening ? c.primary : 'transparent' }}>
+        <ListeningRing active={listening} color={c.primary} />
+        <Mic size={18} color={listening ? c.onPrimary : c.muted} />
+      </Press> : null}
     </View>
     {onFilters ? <Press accessibilityRole="button" accessibilityLabel={filtersActive ? 'Filtros, activos' : 'Filtros'} onPress={onFilters} hapticKind="tap" scaleTo={0.94}
       style={{ width: TOUCH, height: TOUCH, borderRadius: radius.pill, backgroundColor: filtersActive ? c.ink : c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
@@ -155,7 +204,7 @@ export function TargetPickerSheet({ visible, onClose, mesas = [], zoneOf, stateO
       <Button icon={ShoppingBag} variant="outline" style={{ flex: 1 }} onPress={() => onPickExpress('Para llevar')}>Para llevar</Button>
       <Button icon={Bike} variant="outline" style={{ flex: 1 }} onPress={() => onPickExpress('Delivery')}>Delivery</Button>
     </View>}>
-    {mesas.length > 8 ? <MenuSearch value={query} onChangeText={setQuery} placeholder="Buscar mesa o zona" /> : null}
+    {mesas.length > 8 ? <MenuSearch value={query} onChangeText={setQuery} placeholder="Buscar mesa o zona" voice={false} /> : null}
     {groups.length ? groups.map(([zone, list]) => <View key={zone} style={{ gap: space.sm }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><T size={15} weight="800">{zone}</T><Num size={13} color={c.muted}>{(n => `${n} ${n === 1 ? 'libre' : 'libres'}`)(list.filter(m => stateOf(m) === 'Libre').length)}</Num></View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>

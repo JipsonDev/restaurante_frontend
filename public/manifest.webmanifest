@@ -1,26 +1,23 @@
 {
-  "name": "Morena Mia POS",
-  "short_name": "Morena Mia",
-  "description": "Sistema POS para restaurante: mesero, cocina, caja y administracion.",
+  "id": "/",
+  "name": "Morena Mía POS",
+  "short_name": "Morena Mía",
+  "description": "Sistema POS para restaurante: mesero, cocina, caja y administración.",
+  "lang": "es-EC",
+  "dir": "ltr",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "any",
-  "background_color": "#F6F8FB",
-  "theme_color": "#0F172A",
+  "background_color": "#FFFFFF",
+  "theme_color": "#FFFFFF",
   "categories": ["business", "food", "productivity"],
+  "prefer_related_applications": false,
   "icons": [
-    {
-      "src": "/icons/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icons/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

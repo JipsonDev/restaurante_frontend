@@ -76,7 +76,8 @@ export function TableTile({ mesa, state, order, width, now, selected, ready, ale
       </View> : mesa.capacidad ? <Num size={12} weight="600" color={muted}>{mesa.capacidad} p.</Num> : null}
     </View>
     {ready ? <Stamp color={filled ? c.onPrimary : c.green} size={12} animate={false}>{ready > 1 ? `${ready} listas` : 'Lista'}</Stamp> : null}
-    {state === 'Reservada' || (free && reservation && resMinutes != null && resMinutes <= 90) ? <Stamp color={c.purple} size={12}>{`Reserva ${timeOf(reservation?.fecha_hora) || ''}`.trim()}</Stamp> : null}
+    {state === 'Reservada' || (free && reservation && resMinutes != null && resMinutes <= 90) ? <Stamp color={c.purple} size={12}>{`Reserva ${timeOf(reservation?.fecha_hora) || ''}`.trim()}</Stamp>
+      : !free && reservation && resMinutes != null && resMinutes <= 15 && resMinutes >= -15 ? <Stamp color={filled ? c.onPrimary : c.purple} size={12} animate>{`Res. ${timeOf(reservation.fecha_hora)}`}</Stamp> : null}
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
       {order ? <>
         <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: meta.dot }} />
@@ -103,8 +104,8 @@ export function AttentionStrip({ items, onOpen }) {
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.sm, paddingVertical: 4, paddingRight: 8 }}>
         {items.map(it => {
-          const tone = it.tone === 'ready' ? c.green : it.tone === 'late' ? c.red : c.primary;
-          const soft = it.tone === 'ready' ? c.greenSoft : it.tone === 'late' ? c.redSoft : c.primarySoft;
+          const tone = it.tone === 'ready' ? c.green : it.tone === 'late' ? c.red : it.tone === 'reserve' ? c.purple : c.primaryText;
+          const soft = it.tone === 'ready' ? c.greenSoft : it.tone === 'late' ? c.redSoft : it.tone === 'reserve' ? c.purpleSoft : c.primarySoft;
           return <Press key={it.key} accessibilityRole="button" accessibilityLabel={`${it.title}, ${it.detail}`} onPress={() => onOpen(it)} hapticKind="tap" scaleTo={0.95}
             style={{ minHeight: 56, paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.lg, backgroundColor: soft, justifyContent: 'center', minWidth: 120 }}>
             <T size={15} weight="800">{it.title}</T>

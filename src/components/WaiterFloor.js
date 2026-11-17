@@ -1,12 +1,15 @@
 // Salón del mesero (dirección «Suave»): «Atender ahora» primero, una sola fila de filtros de estado
 // (las zonas son títulos de sección, no pestañas) y tarjetas de mesa.
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { BellRing, Grid2X2, Grid3X3, RefreshCw, Search } from 'lucide-react-native';
 import { useTheme } from '../theme';
 import { serviceRounds } from '../utils/serviceTiming.mjs';
-import { Appear, Button, Chip, EmptyState, IconButton, Label, Num, T, WEB, radius, space } from './waiter/comanda';
+import { Appear, Button, Chip, EmptyState, IconButton, Label, Num, T, WEB, haptic, radius, space, useComandaToast } from './waiter/comanda';
+import { minutesUntil, timeOf } from '../utils/reservationLogic.mjs';
+import { CalendarClock } from 'lucide-react-native';
 import { AttentionStrip, SearchToggle, TableTile, minutesSince } from './waiter/salon';
+import { InstallBanner } from './waiter/install';
 
 const FILTERS = [['Todas', 'Todas'], ['Disponibles', 'Libres'], ['Ocupadas', 'Ocupadas'], ['Cuenta', 'Por cobrar'], ['Reservadas', 'Reservadas']];
 
@@ -42,6 +45,12 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
       const order = orderFor(mesa.id);
       const ready = readyFor(order);
       const state = stateFor(mesa);
+      const res = reservations[mesa.id];
+      const resIn = res ? minutesUntil(res) : null;
+      // Reserva en menos de 15 min y la mesa sigue ocupada: hay que liberarla o reubicar.
+      if (res && resIn != null && resIn <= 15 && resIn >= -15 && (state === 'Ocupada' || state === 'Cuenta')) {
+        items.push({ key: `v${mesa.id}`, mesa, tone: 'reserve', rank: -1, title: `Mesa ${mesa.numero}`, detail: `Reserva ${timeOf(res.fecha_hora)}${res.cliente_nombre ? ` · ${res.cliente_nombre}` : ''} · ocupada`, order: -resIn });
+      }
       if (ready) {
         const oldest = serviceRounds(order).filter(r => r.estado === 'LISTO').map(r => minutesSince(r.listo_at || r.created_at, now)).filter(m => m != null).sort((a, b) => b - a)[0];
         items.push({ key: `r${mesa.id}`, mesa, tone: 'ready', rank: 0, title: `Mesa ${mesa.numero}`, detail: `${ready > 1 ? `${ready} rondas listas` : 'Ronda lista'}${oldest ? ` · ${oldest} min` : ''}`, order: oldest ?? 0 });
@@ -52,7 +61,19 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
       }
     }
     return items.sort((a, b) => a.rank - b.rank || b.order - a.order);
-  }, [allMesas, orderFor, stateFor, lateByTable, now, readyFor]);
+  }, [allMesas, orderFor, stateFor, lateByTable, now, readyFor, reservations]);
+
+  // Aviso único (con vibración) cuando aparece un choque de reserva nuevo.
+  const toast = useComandaToast();
+  const warned = useRef(new Set());
+  useEffect(() => {
+    for (const it of attention) {
+      if (it.tone !== 'reserve' || warned.current.has(it.key)) continue;
+      warned.current.add(it.key);
+      haptic('warning');
+      toast.show(`${it.title}: reserva pronto y sigue ocupada`, { tone: 'warning', icon: CalendarClock, detail: it.detail.replace(/ · ocupada$/, ''), action: { label: 'Ver', onPress: () => selectTable(it.mesa) } });
+    }
+  }, [attention]);
 
   const summary = `${counts.Disponibles} ${counts.Disponibles === 1 ? 'libre' : 'libres'} de ${counts.Todas} mesas`;
   return <View onLayout={measure} style={{ minWidth: 0, paddingHorizontal: padding, paddingTop: space.md, paddingBottom: space.x3 }}>
@@ -71,6 +92,8 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
       <T size={14} weight="600" color={c.red} style={{ flex: 1 }}>No se pudieron actualizar las mesas. Lo que ves puede estar desactualizado.</T>
       <Button size="sm" variant="primary" onPress={refresh}>Reintentar</Button>
     </View></Appear> : null}
+
+    <InstallBanner />
 
     <AttentionStrip items={attention} onOpen={it => selectTable(it.mesa)} />
 

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover" />
+    <title>%WEB_TITLE%</title>
+    <!-- App instalable (PWA): manifiesto, íconos y modo pantalla completa en iPhone y Android -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0E0F12" media="(prefers-color-scheme: dark)" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Morena Mía" />
+    <meta name="application-name" content="Morena Mía" />
+    <meta name="format-detection" content="telephone=no" />
+    <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
+    <style id="expo-reset">
+      /* These styles make the body full-height */
+      html,
+      body {
+        height: 100%;
+      }
+      /* These styles disable body scrolling if you are using <ScrollView> */
+      body {
+        overflow: hidden;
+      }
+      /* These styles make the root element full-height */
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+    </style>
+    <!-- Pantalla de carga: se muestra mientras arranca la app y se desvanece al aparecer la interfaz -->
+    <style id="boot-splash-style">
+      #boot-splash {
+        position: fixed; inset: 0; z-index: 2147483647;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
+        background: #FFFFFF; transition: opacity 280ms cubic-bezier(0.22, 1, 0.36, 1), visibility 280ms;
+      }
+      #boot-splash.boot-hide { opacity: 0; visibility: hidden; }
+      #boot-splash img {
+        width: 132px; height: 132px; border-radius: 34px;
+        box-shadow: 0 10px 30px rgba(16, 24, 40, 0.12);
+        animation: boot-pop 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+      }
+      #boot-splash .boot-bar { width: 120px; height: 4px; border-radius: 999px; background: #EEF0F3; overflow: hidden; }
+      #boot-splash .boot-bar::after {
+        content: ''; display: block; width: 40%; height: 100%; border-radius: 999px; background: #D63B20;
+        animation: boot-slide 1100ms cubic-bezier(0.65, 0, 0.35, 1) infinite;
+      }
+      @keyframes boot-pop { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
+      @keyframes boot-slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+      @media (prefers-color-scheme: dark) {
+        #boot-splash { background: #0E0F12; }
+        #boot-splash .boot-bar { background: #22242A; }
+        #boot-splash img { box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- Use static rendering with Expo Router to support running without JavaScript. -->
+    <noscript> You need to enable JavaScript to run this app. </noscript>
+    <div id="boot-splash" role="progressbar" aria-label="Cargando Morena Mía">
+      <img src="/icons/icon-192.png" alt="" width="132" height="132" />
+      <div class="boot-bar"></div>
+    </div>
+    <!-- The root element for your Expo app. -->
+    <div id="root"></div>
+  </body>
+</html>
