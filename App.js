@@ -32,7 +32,6 @@ if (Platform.OS === 'web' && typeof document !== 'undefined') {
     [role="button"] { transition: background-color .16s ease, border-color .16s ease, box-shadow .16s ease; }
     [role="button"]:focus, [role="tab"]:focus, input:focus, textarea:focus { outline: none; }
     [role="button"]:focus-visible, [role="tab"]:focus-visible { box-shadow: inset 0 0 0 1px #a8b3c780; }
-    @media (prefers-reduced-motion: reduce) { [role="button"] { transition: none; } }
     ::-webkit-scrollbar { width: 7px; height: 7px; }
     ::-webkit-scrollbar-thumb { background: #94a3b866; border-radius: 8px; }
   `;

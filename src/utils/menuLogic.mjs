@@ -2,7 +2,7 @@ import { adminNumber } from './adminNumbers.mjs';
 
 export const normalizeCatalogText = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
 export const productStock = product => Math.max(0, Math.floor(Number(product.stock_disponible ?? (product.inventario_item_id ? product.inventario_stock : Number(product.stock || 0) - Number(product.stock_reservado || 0))) || 0));
-export const productStatus = product => Number(product.disponible) !== 1 || product.categoria_activa != null && Number(product.categoria_activa) === 0 ? 'hidden' : productStock(product) <= 0 ? 'empty' : 'available';
+export const productStatus = product => Number(product.disponible) !== 1 || product.categoria_activa != null && Number(product.categoria_activa) === 0 ? 'hidden' : productStock(product) <= 0 || Number(product.agotado) === 1 ? 'empty' : 'available';
 export const stockMode = product => Number(product.receta_count) > 0 ? 'recipe' : product.inventario_item_id ? 'linked' : 'own';
 
 export function productPayload(form, categories, inventory) {
@@ -36,7 +36,7 @@ export function productPayload(form, categories, inventory) {
     });
   } else throw new Error('Selecciona cómo se controlan las existencias.');
   return {
-    nombre, descripcion: form.descripcion.trim() || null, precio,
+    nombre, descripcion: form.descripcion.trim() || null, estacion: String(form.estacion || '').trim() || null, precio,
     categoria_id: Number(category.id), disponible: form.disponible ? 1 : 0,
     inventario_item_id: linked, receta,
     ...(!form.id ? { stock: stock ?? 0 } : stock !== undefined && (stock !== form.originalStock || form.mode !== form.originalMode) ? { stock } : {}),

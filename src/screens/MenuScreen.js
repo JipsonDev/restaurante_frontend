@@ -12,7 +12,7 @@ import { MenuButton, MenuChip, MenuField, MenuModal, MenuNotice, MenuSection } f
 import { normalizeCatalogText as normalize, productPayload, productStatus, productStock, recipeEstimate, stockMode } from '../utils/menuLogic.mjs';
 
 const money = value => `$${Number(value || 0).toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const EMPTY = { id: null, nombre: '', descripcion: '', precio: '', stock: '0', categoria_id: null, disponible: true, imagen_url: null, imageAsset: null, inventario_item_id: null, receta: [], mode: 'own' };
+const EMPTY = { id: null, nombre: '', descripcion: '', estacion: '', precio: '', stock: '0', categoria_id: null, disponible: true, imagen_url: null, imageAsset: null, inventario_item_id: null, receta: [], mode: 'own' };
 const EMPTY_CATEGORY = { id: null, nombre: '', icono: '', activo: true };
 const STATUS = { available: 'Activo', empty: 'Agotado', hidden: 'Oculto' };
 const MODES = { own: 'Stock propio', linked: 'Insumo vinculado', recipe: 'Por receta' };
@@ -84,7 +84,7 @@ export default function MenuScreen() {
       if (!Array.isArray(data)) throw new Error('No se pudo leer la receta.');
       if (version.current !== token) return;
       const mode = data.some(line => Number(line.activo) !== 0) ? 'recipe' : product.inventario_item_id ? 'linked' : 'own';
-      beginForm({ ...EMPTY, ...product, precio: String(product.precio ?? ''), stock: String(product.stock ?? 0), descripcion: product.descripcion || '', disponible: Number(product.disponible) === 1, imageAsset: null, originalStock: Number(product.stock || 0), originalMode: mode, originalCategory: product.categoria_id, reserved: Number(product.stock_reservado || 0), mode,
+      beginForm({ ...EMPTY, ...product, precio: String(product.precio ?? ''), stock: String(product.stock ?? 0), descripcion: product.descripcion || '', estacion: product.estacion || '', disponible: Number(product.disponible) === 1, imageAsset: null, originalStock: Number(product.stock || 0), originalMode: mode, originalCategory: product.categoria_id, reserved: Number(product.stock_reservado || 0), mode,
         receta: data.filter(line => Number(line.activo) !== 0).map(line => ({ inventario_item_id: line.inventario_item_id, cantidad: String(line.cantidad), unidad: line.inventario_unidad || line.unidad || '' })) });
     } catch (error) { if (version.current === token) Alert.alert('No se pudo abrir el producto', errorText(error)); }
     finally { if (version.current === token) setLoadingEdit(null); }
@@ -228,6 +228,15 @@ export default function MenuScreen() {
         <MenuField label="Precio de venta" value={form.precio} onChangeText={value => setField('precio', value)} keyboardType="decimal-pad" placeholder="0,00" hint="Admite hasta dos decimales. Se conservan los precios de pedidos ya confirmados." editable={!saving} />
         {form.precio.trim() && Number(form.precio.replace(',', '.')) === 0 ? <MenuNotice>Precio cero: este producto se registrará sin importe. Verifica que sea intencional.</MenuNotice> : null}
         <View style={{ gap: 8 }}><Text style={{ color: c.text, fontSize: 12, fontWeight: '600' }}>Categoría</Text>{!categorias.length && <MenuNotice>No hay categorías registradas. Crea una desde Categorías antes de guardar el producto.</MenuNotice>}<View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>{categorias.filter(item => Number(item.activo) !== 0 || Number(item.id) === Number(form.categoria_id)).map(item => <MenuChip key={item.id} selected={Number(form.categoria_id) === Number(item.id)} onPress={() => !saving && Number(item.activo) !== 0 && setField('categoria_id', item.id)}>{`${item.nombre}${Number(item.activo) === 0 ? ' · Inactiva' : ''}`}</MenuChip>)}</View></View>
+        {/* Estación: cada tablet de cocina muestra solo los platos de su estación (bar, plancha, fríos…). */}
+        <View style={{ gap: 8 }}><Text style={{ color: c.text, fontSize: 12, fontWeight: '600' }}>Estación de cocina</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>{['', ...new Set(['Bar', 'Plancha', 'Fríos', 'Postres', ...productos.map(p => p.estacion).filter(Boolean)])].map(st => <MenuChip key={st || 'general'} selected={(form.estacion || '') === st} onPress={() => setField('estacion', st)}>{st || 'Cocina (general)'}</MenuChip>)}</View>
+          <MenuField label="Otra estación" maxLength={40} value={form.estacion} onChangeText={value => setField('estacion', value)} placeholder="Ej. Parrilla" hint="Déjalo vacío para la cocina general. En cocina, cada tablet elige qué estación muestra." editable={!saving} />
+        </View>
+        {form.id && Number(form.agotado) === 1 ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 8, backgroundColor: c.surfaceAlt, borderWidth: 1, borderColor: c.line }}>
+          <Text style={{ flex: 1, color: c.text, fontSize: 13 }}>Cocina lo marcó como agotado: los meseros lo ven así y no pueden pedirlo.</Text>
+          <MenuButton disabled={saving} onPress={async () => { try { await axios.put(`${BASE_URL}/productos/${form.id}/agotado`, { agotado: false }); setField('agotado', 0); toast.show(`${form.nombre} disponible otra vez`, 'green'); } catch (e) { toast.show(errorText(e), 'red'); } }}>Volver a habilitar</MenuButton>
+        </View> : null}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, padding: 14, borderWidth: 1, borderColor: c.line, backgroundColor: c.surfaceAlt, borderRadius: 8 }}><View style={{ flex: 1 }}><Text style={{ color: c.text, fontSize: 13, fontWeight: '600' }}>Publicado en el menú</Text><Text style={{ color: c.muted, fontSize: 12, lineHeight: 17, marginTop: 5 }}>Ocultarlo impide nuevas ventas y conserva su historial. Agotado significa que está publicado, pero sin existencias.</Text></View><Toggle showLabel={false} label="Publicado en el menú" disabled={saving} value={form.disponible} onValueChange={value => value && Number(formCategory?.activo) === 0 ? setFormError('Activa la categoría o selecciona otra antes de publicar.') : setField('disponible', value)} /></View>
         {form.id && <View style={{ alignItems: 'flex-start', paddingTop: 6 }}><MenuButton danger icon={Trash2} disabled={saving} onPress={deleteCurrent}>Eliminar producto sin historial</MenuButton></View>}
       </MenuSection>}
