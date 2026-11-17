@@ -355,14 +355,14 @@ function ToastItem({ t, onDone }) {
       <T size={14} weight="700" color="#FFFFFF" numberOfLines={2}>{t.message}</T>
       {t.detail ? <T size={12} color="#FFFFFF" style={{ opacity: 0.7 }} numberOfLines={1}>{t.detail}</T> : null}
     </View>
-    {t.action ? <Press accessibilityRole="button" onPress={() => { t.action.onPress(); close(); }} hapticKind="tap" style={{ minHeight: 36, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.12)', justifyContent: 'center' }}>
-      <T size={14} weight="800" color="#FFFFFF">{t.action.label}</T>
+    {t.action ? <Press accessibilityRole="button" onPress={() => { t.action.onPress(); close(); }} hapticKind="tap" style={{ minHeight: 44, paddingHorizontal: 16, borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.16)', justifyContent: 'center' }}>
+      <T size={15} weight="800" color="#FFFFFF">{t.action.label}</T>
     </Press> : null}
     <Press accessibilityRole="button" accessibilityLabel="Cerrar aviso" onPress={close} style={{ width: 40, height: TOUCH, alignItems: 'center', justifyContent: 'center' }}><X size={18} color="rgba(255,255,255,0.7)" /></Press>
   </Animated.View>;
 }
 
-export function ComandaToastProvider({ children, bottomOffset = 84 }) {
+export function ComandaToastProvider({ children, bottomOffset = 84, placement = 'bottom', topOffset = 72 }) {
   const [items, setItems] = useState([]);
   const [extra, setExtra] = useState(0);
   const show = useCallback((message, opts = {}) => {
@@ -371,7 +371,7 @@ export function ComandaToastProvider({ children, bottomOffset = 84 }) {
   }, []);
   const lift = useCallback(n => setExtra(Number(n) || 0), []);
   const value = useMemo(() => ({ show, lift }), [show, lift]);
-  const host = <View pointerEvents="box-none" style={{ position: WEB ? 'fixed' : 'absolute', left: 12, right: 12, bottom: bottomOffset + extra, alignItems: 'center', gap: 8, zIndex: 2147483000 }}>
+  const host = <View pointerEvents="box-none" style={[{ position: WEB ? 'fixed' : 'absolute', left: 12, right: 12, alignItems: 'center', gap: 8, zIndex: 2147483000 }, placement === 'top' ? { top: topOffset } : { bottom: bottomOffset + extra }]}>
     <View pointerEvents="box-none" style={{ width: '100%', maxWidth: 520, gap: 8 }}>
       {items.map(t => <ToastItem key={t.id} t={t} onDone={id => setItems(list => list.filter(x => x.id !== id))} />)}
     </View>
@@ -465,7 +465,7 @@ export function SwipeRow({ children, direction = 'left', onSwipe, label, icon: I
       {Icon ? <Animated.View style={{ transform: [{ scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.1] }) }] }}><Icon size={22} color="#FFFFFF" strokeWidth={2.4} /></Animated.View> : null}
       {label ? <T size={15} weight="800" color="#FFFFFF">{label}</T> : null}
     </Animated.View>
-    <Animated.View {...pan.panHandlers} style={[{ transform: [{ translateX: x }] }, WEB ? { touchAction: 'pan-y' } : null]}>{children}</Animated.View>
+    <Animated.View {...pan.panHandlers} style={[{ transform: [{ translateX: x }] }, WEB ? { touchAction: 'pan-y', userSelect: 'none', WebkitUserSelect: 'none' } : null]}>{children}</Animated.View>
   </View>;
 }
 
