@@ -35,3 +35,39 @@ Las animaciones se muestran siempre, aunque el sistema tenga activado «reducir 
 `IconButton`, `ActionMenu`, `Badge`/`Status`, `Banner`, `Tabs`/`Segmented` (pastillas), `SearchField`, `Field`/`Input`, `Checkbox`, `Switch`,
 `DataTable` (orden por columna, `toolbar`, `selectable` + `bulkActions`, paginación), `Metric`, `Avatar`, `EmptyState`, `Skeleton`, `useToast`.
 Formularios y diálogos: `src/components/MenuUI.js`.
+
+---
+
+# Caja (punto de cobro) — dirección «Comprobante»
+
+La caja tiene identidad propia, distinta del admin y del mesero: **cada cuenta se lee como el comprobante que va a emitirse**.
+Kit: `src/components/cashier/kit.js` · diálogos: `src/components/cashier/dialogs.js` · pantallas: `src/modules/CashierWorkspace.js`, `CashierPayments.js`.
+
+## Mundo
+- **Papel blanco** `#FFFFFF` (paneles), fondo `#ECEDEF`, segundo neutro `#F6F7F8` (panel de cobro, cabeceras de tabla).
+- **Tinta** `#16171A`: barra superior, texto, botón principal y selección (fila elegida en tinta con texto blanco).
+- **Rojo de numeración** `#D63B20`: *solo* para números de comprobante. Nunca en botones ni decoración.
+- Reglas finas `#CDD0D5` (retículas) y `#E3E4E8` (separadores). Radios pequeños: 4 / 6 / 8.
+- Estados: verde `#15703F` = cobrado y cambio; ámbar `#8F5300` = cuenta pedida, faltante y avisos; rojo `#B3261E` = error, anulación y faltante en arqueo.
+- Oscuro: grafito `#0C0D0F` / `#16171A`, rojo de numeración `#FF7A5C`.
+- Letra **Archivo** (Google Fonts en web) con cifras tabulares en todo número.
+
+## Firma
+`Serial`: el número de comprobante con prefijo gris, **ceros a la izquierda tenues y dígitos significativos en rojo** (`TCK-000000012`).
+Aparece como «Próximo número» en la cuenta abierta, en los abonos y en el libro de comprobantes; anulado o devuelto va en gris.
+
+## Piezas
+- **Celdas rayadas** (`Cells`/`Cell`/`CellInput`): etiqueta pequeña sobre el dato, como el bloque de cliente de una factura.
+- **Caja de totales** (`TotalRow`) alineada a la derecha; la fila fuerte (Total, Saldo) con fondo gris y cifra grande.
+- **Tablas** con regla superior en tinta de 1 px, cabecera de etiquetas y filas separadas por línea fina.
+- **Teclado numérico** (`Keypad`) en retícula; los montos se muestran en «visores» que se tocan para elegir a dónde escribe el teclado.
+- `Seg` (segmentado, lo activo en tinta), `Btn` (ink · outline · ghost · danger · dangerSolid · paid), `Kbd` (atajo visible solo en web), `Badge`, `Dialog` (centrado en ancho, hoja inferior en celular), `Empty`, `Skel`.
+
+## Composición
+- ≥ 1024 px: tres columnas — cuentas (290–340) · comprobante en curso · panel de cobro (340–380) con pie fijo «Cobrar».
+- 760–1023 px: cuentas + columna con comprobante y cobro apilados, barra fija de cobro abajo.
+- < 760 px: lista → detalle con barra fija de cobro; barra inferior en tinta con 4 secciones.
+- Atajos: F2 buscar · F3 venta directa · F8 cobrar · F9 precuenta · Esc soltar la cuenta · números, coma y retroceso al teclado de cobro · Enter cobra.
+
+## Movimiento
+Presión 0,98 en 100 ms; diálogos entran en 200 ms (desplazamiento corto y opacidad). Nada decorativo.

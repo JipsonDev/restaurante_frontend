@@ -1,70 +1,160 @@
+// Libro de comprobantes: cada cobro con su número en rojo, filtros y acciones (ver, reimprimir, anular, devolver).
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Modal, ScrollView, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ScrollView, Text, TextInput, View } from 'react-native';
+import { ChevronLeft, ChevronRight, FileText, Printer, RefreshCw, RotateCcw, Search, Slash, X } from 'lucide-react-native';
 import axios from 'axios';
 import { BASE_URL } from '../context/AuthContext';
 import { savedPaymentText } from '../utils/paymentReceipt.mjs';
+import { Badge, Btn, Dialog, Empty, FONT, IconBtn, Lbl, Num, Press, Serial, Skel, T, WEB, money, r } from '../components/cashier/kit';
 
-const money = (n) => `$${Number(n || 0).toFixed(2)}`;
-const blankFilters = { q:'', desde:'', hasta:'', metodo:'', estado:'', cajero_id:'' };
-function Button({ p, label, onPress, disabled, selected }) {
-  return <TouchableOpacity accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress}
-    style={{paddingHorizontal:12,paddingVertical:10,borderWidth:1,borderColor:selected?p.primary:p.line,borderRadius:8,backgroundColor:selected?p.primarySoft:p.surface,opacity:disabled?0.4:1}}>
-    <Text style={{color:selected?p.primaryText:p.text,fontSize:12,fontWeight:'600'}}>{label}</Text>
-  </TouchableOpacity>;
+const blank = { q: '', desde: '', hasta: '', metodo: '', estado: '', cajero_id: '' };
+const METHODS = ['Efectivo', 'Tarjeta', 'Transferencia', 'QR', 'Vales', 'Otro', 'Mixto'];
+const STATE = { ACTIVO: ['Cobrado', 'green'], ANULADO: ['Anulado', 'red'], DEVUELTO: ['Devuelto', 'amber'] };
+const PRINT = { ENVIADO: 'Impreso', ERROR: 'Error al imprimir' };
+const when = v => { const d = new Date(String(v || '').replace(' ', 'T')); return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('es-EC', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }); };
+// Fechas del día del local (no UTC): a las 21:00 en Ecuador sigue siendo «hoy».
+const localISO = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const today = () => localISO(new Date());
+const daysAgo = n => { const d = new Date(); d.setDate(d.getDate() - n); return localISO(d); };
+
+function Chip({ c, label, on, onPress }) {
+  return <Press accessibilityRole="button" accessibilityState={{ selected: on }} onPress={onPress} scaleTo={0.97} hoverStyle={on ? null : { backgroundColor: c.hover }}
+    style={{ height: 32, paddingHorizontal: 10, borderRadius: r.md, justifyContent: 'center', borderWidth: 1, borderColor: on ? 'transparent' : c.rule, backgroundColor: on ? (c.isDark ? c.onInk : c.ink) : c.paper }}>
+    <T c={c} size={13} weight={on ? '700' : '600'} color={on ? (c.isDark ? c.ink : c.onInk) : c.muted}>{label}</T>
+  </Press>;
 }
-function Field({ p, label, value, change, placeholder }) {
-  return <View style={{flexGrow:1,minWidth:150,gap:6}}><Text style={{color:p.muted,fontSize:12}}>{label}</Text><TextInput accessibilityLabel={label} value={value} onChangeText={change} placeholder={placeholder} placeholderTextColor={p.faint}
-    style={{height:42,borderWidth:1,borderColor:p.line,borderRadius:8,paddingHorizontal:12,color:p.text,backgroundColor:p.surface}}/></View>;
-}
-export default function CashierPayments({ p, onReprint, onAuthorize, canAuthorize, busy, version }) {
-  const { width } = useWindowDimensions();
-  const [filters,setFilters] = useState(blankFilters), [applied,setApplied] = useState(blankFilters), [page,setPage] = useState(1);
-  const [result,setResult] = useState({rows:[],total:0,pages:1,cajeros:[]}), [loading,setLoading] = useState(true), [error,setError] = useState('');
-  const [detail,setDetail] = useState(null), [detailError,setDetailError] = useState(''), [detailLoading,setDetailLoading] = useState(false), [detailOpen,setDetailOpen] = useState(false);
-  const requestRef=useRef(0),detailRef=useRef(0);
-  const load=useCallback(async()=>{
-    const seq=++requestRef.current;setLoading(true);setError('');
-    try { const {data}=await axios.get(`${BASE_URL}/caja/pagos`,{params:{...applied,page}}); if(seq===requestRef.current)setResult(data); }
-    catch(err){if(seq===requestRef.current)setError(err.response?.data?.message||'No se pudo cargar el historial.');}
-    finally{if(seq===requestRef.current)setLoading(false);}
-  },[applied,page,version]);
-  useEffect(()=>{load();return()=>{requestRef.current++;};},[load]);
-  useEffect(()=>()=>{detailRef.current++;},[]);
-  const openDetail=async(id)=>{const seq=++detailRef.current;setDetail(null);setDetailError('');setDetailOpen(true);setDetailLoading(true);
-    try{const {data}=await axios.get(`${BASE_URL}/caja/pagos/${id}`);if(seq===detailRef.current)setDetail(data);}
-    catch(err){if(seq===detailRef.current)setDetailError(err.response?.data?.message||'No se pudo cargar el comprobante.');}
-    finally{if(seq===detailRef.current)setDetailLoading(false);}};
-  const field=(key,value)=>setFilters((old)=>({...old,[key]:value}));
-  const options=(key,items)=><ScrollView horizontal style={{flexGrow:0}} showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:7}}>{items.map(([value,label])=><Button key={value} p={p} label={label} selected={filters[key]===value} onPress={()=>field(key,value)}/>)}</ScrollView>;
-  const print=async(id)=>{await onReprint(id);load();};
-  return <View style={{gap:16}}>
-    <View style={{backgroundColor:p.surface,borderRadius:12,borderWidth:1,borderColor:p.line,padding:20,gap:14}}>
-      <View style={{flexDirection:'row',flexWrap:'wrap',gap:12}}>
-        <Field p={p} label="Cliente o comprobante" value={filters.q} change={(v)=>field('q',v)} placeholder="Nombre, documento o número"/>
-        <Field p={p} label="Desde" value={filters.desde} change={(v)=>field('desde',v)} placeholder="AAAA-MM-DD"/>
-        <Field p={p} label="Hasta" value={filters.hasta} change={(v)=>field('hasta',v)} placeholder="AAAA-MM-DD"/>
+
+export default function CashierPayments({ c, phone, onReprint, onAuthorize, canAuthorize, busy, version }) {
+  const [filters, setFilters] = useState(blank);
+  const [applied, setApplied] = useState(blank);
+  const [page, setPage] = useState(1);
+  const [result, setResult] = useState({ rows: [], total: 0, pages: 1, cajeros: [] });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [detail, setDetail] = useState(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailError, setDetailError] = useState('');
+  const req = useRef(0), dreq = useRef(0);
+
+  const load = useCallback(async () => {
+    const seq = ++req.current; setLoading(true); setError('');
+    try { const { data } = await axios.get(`${BASE_URL}/caja/pagos`, { params: { ...applied, page } }); if (seq === req.current) setResult(data); }
+    catch (e) { if (seq === req.current) setError(e.response?.data?.message || 'No se pudo cargar el libro de comprobantes.'); }
+    finally { if (seq === req.current) setLoading(false); }
+  }, [applied, page, version]);
+  useEffect(() => { load(); return () => { req.current++; }; }, [load]);
+  useEffect(() => () => { dreq.current++; }, []);
+
+  // Los filtros de lista se aplican al tocarlos; el texto se aplica al pulsar Enter o «Buscar».
+  const apply = next => { setFilters(next); setApplied(next); setPage(1); };
+  const set = (k, v) => apply({ ...filters, [k]: v });
+  const openDetail = async id => {
+    const seq = ++dreq.current; setDetail(null); setDetailError(''); setDetailOpen(true);
+    try { const { data } = await axios.get(`${BASE_URL}/caja/pagos/${id}`); if (seq === dreq.current) setDetail(data); }
+    catch (e) { if (seq === dreq.current) setDetailError(e.response?.data?.message || 'No se pudo cargar el comprobante.'); }
+  };
+  const reprint = async id => { await onReprint(id); load(); };
+  const range = filters.desde === today() && filters.hasta === today() ? 'hoy' : filters.desde === daysAgo(6) && filters.hasta === today() ? '7' : !filters.desde && !filters.hasta ? 'todo' : 'otro';
+  const dirty = JSON.stringify(applied) !== JSON.stringify(blank);
+
+  const row = p => {
+    const [stLabel, stTone] = STATE[p.estado] || [p.estado, 'neutral'];
+    const voided = p.estado !== 'ACTIVO';
+    return <View key={p.id} style={{ flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderColor: c.line, paddingRight: phone ? 0 : 16 }}><Press accessibilityRole="button" accessibilityLabel={`Comprobante ${p.comprobante_numero || p.id}, ${money(p.monto)}, ${stLabel}. Ver detalle`}
+      onPress={() => openDetail(p.id)} scaleTo={0.995} hoverStyle={{ backgroundColor: c.hover }}
+      style={{ flex: 1, flexDirection: phone ? 'column' : 'row', alignItems: phone ? 'stretch' : 'center', gap: phone ? 4 : 12, paddingLeft: 16, paddingRight: phone ? 16 : 0, paddingVertical: phone ? 12 : 10 }}>
+      {phone ? <>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <Serial c={c} value={p.comprobante_numero} size={15} muted={voided} />
+          <Num c={c} size={16} weight="800" style={voided ? { textDecorationLine: 'line-through', color: c.faint } : null}>{money(p.monto)}</Num>
+        </View>
+        <T c={c} size={13} color={c.muted} numberOfLines={1}>{[p.factura_cliente || p.cliente_nombre || 'Consumidor final', p.metodo, when(p.created_at)].join(' · ')}</T>
+        <View style={{ flexDirection: 'row', gap: 6 }}><Badge c={c} tone={stTone}>{stLabel}</Badge>{p.impresion_estado === 'ERROR' ? <Badge c={c} tone="red">Error al imprimir</Badge> : null}</View>
+      </> : <>
+        <View style={{ width: 150 }}><Serial c={c} value={p.comprobante_numero} size={14} muted={voided} /></View>
+        <Num c={c} size={13} weight="500" color={c.muted} style={{ width: 110 }}>{when(p.created_at)}</Num>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <T c={c} size={14} weight="600" numberOfLines={1}>{p.factura_cliente || p.cliente_nombre || 'Consumidor final'}</T>
+          <T c={c} size={12} color={c.faint} numberOfLines={1}>{[p.factura_documento, p.mesa_numero ? `Mesa ${p.mesa_numero}` : p.tipo, `Pedido #${p.pedido_id}`].filter(Boolean).join(' · ')}</T>
+        </View>
+        <T c={c} size={13} color={c.muted} style={{ width: 100 }} numberOfLines={1}>{p.metodo}</T>
+        <T c={c} size={13} color={c.muted} style={{ width: 110 }} numberOfLines={1}>{p.cajero_nombre || '—'}</T>
+        <View style={{ width: 96, gap: 3 }}><Badge c={c} tone={stTone}>{stLabel}</Badge>{p.impresion_estado === 'ERROR' ? <T c={c} size={12} color={c.red}>Error al imprimir</T> : null}</View>
+        <Num c={c} size={15} weight="800" style={[{ width: 96, textAlign: 'right' }, voided ? { textDecorationLine: 'line-through', color: c.faint } : null]}>{money(p.monto)}</Num>
+      </>}
+    </Press>{!phone ? <View style={{ marginLeft: 12 }}><IconBtn c={c} icon={Printer} label={`Reimprimir ${p.comprobante_numero || p.id}`} onPress={() => reprint(p.id)} disabled={busy} size={36} /></View> : null}</View>;
+  };
+
+  return <View style={{ flex: 1, backgroundColor: c.paper }}>
+    <View style={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 12, gap: 10, borderBottomWidth: 1, borderColor: c.line }}>
+      <View style={{ flexDirection: phone ? 'column' : 'row', alignItems: phone ? 'stretch' : 'center', gap: 10 }}>
+        <View style={{ flex: 1, gap: 2 }}>
+          <T c={c} size={20} weight="800" accessibilityRole="header">Comprobantes</T>
+          <T c={c} size={13} color={c.muted}>{loading ? 'Cargando…' : `${result.total} comprobantes · cobrado neto ${money(result.total_activo)}`}</T>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, height: 44, paddingHorizontal: 12, borderRadius: r.md, borderWidth: 1, borderColor: c.rule, minWidth: phone ? undefined : 320 }}>
+          <View style={{ flexShrink: 0 }}><Search size={17} color={c.faint} /></View>
+          <TextInput value={filters.q} onChangeText={v => setFilters(f => ({ ...f, q: v }))} onSubmitEditing={() => apply(filters)} returnKeyType="search"
+            placeholder="Número, cliente o cédula" placeholderTextColor={c.faint} accessibilityLabel="Buscar comprobante"
+            style={[{ flex: 1, fontFamily: FONT, fontSize: 15, color: c.text, height: 42 }, WEB ? { outlineStyle: 'none' } : null]} />
+          {filters.q ? <IconBtn c={c} icon={X} label="Borrar búsqueda" onPress={() => apply({ ...filters, q: '' })} size={30} /> : null}
+        </View>
+        <IconBtn c={c} icon={RefreshCw} label="Actualizar" onPress={load} disabled={loading} />
       </View>
-      {options('metodo',[['','Todos los métodos'],...['Efectivo','Tarjeta','Transferencia','QR','Vales','Otro','Mixto'].map(v=>[v,v])])}
-      {options('estado',[['','Todos los estados'],['ACTIVO','Cobrados'],['ANULADO','Anulados'],['DEVUELTO','Devueltos']])}
-      {options('cajero_id',[['','Todos los cajeros'],...result.cajeros.map(c=>[String(c.id),c.nombre])])}
-      <View style={{flexDirection:'row',gap:8,flexWrap:'wrap'}}><Button p={p} label="Buscar ventas" disabled={loading} onPress={()=>{setPage(1);setApplied({...filters});}}/><Button p={p} label="Limpiar filtros" disabled={loading} onPress={()=>{setFilters(blankFilters);setApplied(blankFilters);setPage(1);}}/><Button p={p} label="Actualizar historial" disabled={loading} onPress={load}/></View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, alignItems: 'center' }}>
+        <Chip c={c} label="Hoy" on={range === 'hoy'} onPress={() => apply({ ...filters, desde: today(), hasta: today() })} />
+        <Chip c={c} label="7 días" on={range === '7'} onPress={() => apply({ ...filters, desde: daysAgo(6), hasta: today() })} />
+        <Chip c={c} label="Todo" on={range === 'todo'} onPress={() => apply({ ...filters, desde: '', hasta: '' })} />
+        <View style={{ width: 1, height: 20, backgroundColor: c.rule, marginHorizontal: 4 }} />
+        {[['', 'Todos'], ['ACTIVO', 'Cobrados'], ['ANULADO', 'Anulados'], ['DEVUELTO', 'Devueltos']].map(([v, l]) => <Chip key={v || 'all'} c={c} label={l} on={filters.estado === v} onPress={() => set('estado', v)} />)}
+        <View style={{ width: 1, height: 20, backgroundColor: c.rule, marginHorizontal: 4 }} />
+        <Chip c={c} label="Cualquier pago" on={!filters.metodo} onPress={() => set('metodo', '')} />
+        {METHODS.map(v => <Chip key={v} c={c} label={v} on={filters.metodo === v} onPress={() => set('metodo', filters.metodo === v ? '' : v)} />)}
+        {result.cajeros?.length > 1 ? <>
+          <View style={{ width: 1, height: 20, backgroundColor: c.rule, marginHorizontal: 4 }} />
+          {result.cajeros.map(cj => <Chip key={cj.id} c={c} label={cj.nombre} on={filters.cajero_id === String(cj.id)} onPress={() => set('cajero_id', filters.cajero_id === String(cj.id) ? '' : String(cj.id))} />)}
+        </> : null}
+        {dirty ? <Btn c={c} size="sm" variant="ghost" icon={X} onPress={() => apply(blank)}>Quitar filtros</Btn> : null}
+      </ScrollView>
     </View>
-    {error?<Text accessibilityRole="alert" style={{color:p.red}}>{error}</Text>:null}
-    {loading?<ActivityIndicator color={p.primary}/>:null}
-    {!error?<View style={{gap:12}}>
-      <Text style={{color:p.muted,fontSize:13}}>{result.total} comprobantes · Cobros activos: {money(result.total_activo)}</Text>
-      {result.rows.map(pay=><View key={pay.id} style={{padding:18,borderWidth:1,borderColor:p.line,borderRadius:10,backgroundColor:p.surface,gap:12}}>
-        <View style={{flexDirection:'row',justifyContent:'space-between',gap:12}}><View style={{flex:1,gap:5}}><Text style={{color:p.text,fontWeight:'600'}}>{pay.comprobante_numero||`Pago #${pay.id}`}</Text><Text style={{color:p.muted,fontSize:12}}>{pay.factura_cliente||pay.cliente_nombre||'Consumidor Final'} · {pay.metodo}</Text><Text style={{color:p.faint,fontSize:11}}>{new Date(pay.created_at).toLocaleString('es-EC')} · {pay.cajero_nombre||'Cajero no registrado'} · Caja #{pay.caja_id}</Text></View><View style={{alignItems:'flex-end',gap:6}}><Text style={{color:p.text,fontSize:19,fontWeight:'600'}}>{money(pay.monto)}</Text><Text style={{color:pay.estado==='ACTIVO'?p.green:p.red,fontSize:11}}>{pay.estado}</Text></View></View>
-        <Text style={{color:pay.impresion_estado==='ERROR'?p.red:p.muted,fontSize:11}}>{pay.impresion_estado==='ERROR'?'Error de impresión: puedes reintentar':pay.impresion_estado==='ENVIADO'?'Enviado a impresión (salida física sin confirmar)':'Impresión pendiente o sin registro'}</Text>
-        <View style={{flexDirection:'row',gap:8,flexWrap:'wrap'}}><Button p={p} label={`Ver ${pay.comprobante_numero||pay.id}`} onPress={()=>openDetail(pay.id)}/><Button p={p} label={`Reimprimir ${pay.comprobante_numero||pay.id}`} disabled={busy} onPress={()=>print(pay.id)}/>{canAuthorize&&pay.estado==='ACTIVO'?<><Button p={p} label={`Anular ${pay.comprobante_numero||pay.id}`} disabled={busy} onPress={()=>onAuthorize(pay,'anular')}/><Button p={p} label={`Devolver ${pay.comprobante_numero||pay.id}`} disabled={busy} onPress={()=>onAuthorize(pay,'devolver')}/></>:null}</View>
-      </View>)}
-      {!loading&&!result.rows.length?<Text style={{color:p.muted,padding:20}}>No hay ventas con estos filtros.</Text>:null}
-      <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:8}}><Button p={p} label="Página anterior" disabled={loading||page<=1} onPress={()=>setPage(page-1)}/><Text style={{color:p.muted,fontSize:12}}>{page} / {result.pages}</Text><Button p={p} label="Página siguiente" disabled={loading||page>=result.pages} onPress={()=>setPage(page+1)}/></View>
-    </View>:null}
-    <Modal visible={detailOpen} transparent animationType="fade" onRequestClose={()=>{detailRef.current++;setDetailOpen(false);}}><View style={{flex:1,backgroundColor:'rgba(15,23,42,0.55)',padding:width<600?12:28,alignItems:'center',justifyContent:'center'}}><View style={{backgroundColor:p.surface,borderRadius:12,width:'100%',maxWidth:640,maxHeight:'94%',padding:20,gap:16}}>
-      <View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}><Text style={{color:p.text,fontWeight:'600',fontSize:18}}>Detalle del comprobante</Text><Button p={p} label="Cerrar detalle" onPress={()=>{detailRef.current++;setDetailOpen(false);}}/></View>
-      {detailLoading?<ActivityIndicator color={p.primary}/>:null}{detailError?<Text style={{color:p.red}}>{detailError}</Text>:null}
-      {detail?<><ScrollView><Text selectable style={{color:p.text,fontSize:13,lineHeight:22}}>{savedPaymentText(detail.snapshot,detail.pago)}</Text></ScrollView><Button p={p} label="Reimprimir comprobante" disabled={busy} onPress={()=>print(detail.pago.id)}/></>:null}
-    </View></View></Modal>
+    {!phone ? <View style={{ flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderColor: c.rule, backgroundColor: c.paperAlt }}>
+      <Lbl c={c} style={{ width: 150 }}>N.º</Lbl><Lbl c={c} style={{ width: 110 }}>Fecha</Lbl><Lbl c={c} style={{ flex: 1 }}>Cliente</Lbl>
+      <Lbl c={c} style={{ width: 100 }}>Pago</Lbl><Lbl c={c} style={{ width: 110 }}>Cajero</Lbl><Lbl c={c} style={{ width: 96 }}>Estado</Lbl>
+      <Lbl c={c} style={{ width: 96, textAlign: 'right' }}>Monto</Lbl><View style={{ width: 36 }} />
+    </View> : null}
+    <ScrollView style={{ flex: 1 }}>
+      {error ? <View style={{ padding: 16, gap: 8 }} accessibilityRole="alert"><T c={c} size={14} color={c.red}>{error}</T><Btn c={c} size="sm" icon={RefreshCw} onPress={load}>Reintentar</Btn></View> : null}
+      {loading && !result.rows.length ? [0, 1, 2, 3, 4, 5].map(i => <View key={i} style={{ flexDirection: 'row', gap: 16, padding: 16, borderBottomWidth: 1, borderColor: c.line }}><Skel c={c} w={130} /><Skel c={c} w={90} /><Skel c={c} w="30%" /><View style={{ flex: 1 }} /><Skel c={c} w={70} /></View>) : null}
+      {!error ? result.rows.map(row) : null}
+      {!loading && !error && !result.rows.length ? <Empty c={c} icon={FileText} title="No hay comprobantes con estos filtros" description="Cambia el rango de fechas o quita los filtros." action={dirty ? <Btn c={c} size="sm" onPress={() => apply(blank)}>Quitar filtros</Btn> : null} /> : null}
+    </ScrollView>
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8, borderTopWidth: 1, borderColor: c.line, backgroundColor: c.paperAlt }}>
+      <Num c={c} size={13} weight="500" color={c.muted}>Página {page} de {result.pages || 1}</Num>
+      <View style={{ flexDirection: 'row', gap: 6 }}>
+        <Btn c={c} size="sm" icon={ChevronLeft} disabled={loading || page <= 1} onPress={() => setPage(page - 1)} accessibilityLabel="Página anterior">{phone ? null : 'Anterior'}</Btn>
+        <Btn c={c} size="sm" disabled={loading || page >= (result.pages || 1)} onPress={() => setPage(page + 1)} accessibilityLabel="Página siguiente" icon={phone ? ChevronRight : undefined}>{phone ? null : 'Siguiente'}</Btn>
+      </View>
+    </View>
+
+    <Dialog c={c} visible={detailOpen} onClose={() => { dreq.current++; setDetailOpen(false); }} width={560} icon={FileText}
+      title={detail ? `Comprobante ${detail.pago?.comprobante_numero || detail.pago?.id}` : 'Comprobante'}
+      subtitle={detail ? `${STATE[detail.pago?.estado]?.[0] || detail.pago?.estado} · ${money(detail.pago?.monto)} · ${detail.pago?.metodo}` : null}
+      footer={detail ? <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        {canAuthorize && detail.pago?.estado === 'ACTIVO' ? <>
+          <Btn c={c} variant="danger" icon={Slash} disabled={busy} onPress={() => { setDetailOpen(false); onAuthorize(detail.pago, 'anular'); }}>Anular</Btn>
+          <Btn c={c} icon={RotateCcw} disabled={busy} onPress={() => { setDetailOpen(false); onAuthorize(detail.pago, 'devolver'); }}>Devolver</Btn>
+        </> : null}
+        <Btn c={c} variant="ink" icon={Printer} disabled={busy} onPress={() => reprint(detail.pago.id)}>Reimprimir</Btn>
+      </View> : null}>
+      {!detail && !detailError ? <View style={{ gap: 8 }}>{[0, 1, 2, 3, 4, 5, 6].map(i => <Skel key={i} c={c} w={i % 2 ? '70%' : '90%'} />)}</View> : null}
+      {detailError ? <T c={c} size={14} color={c.red}>{detailError}</T> : null}
+      {detail ? <>
+        {detail.pago?.impresion_estado ? <T c={c} size={13} color={detail.pago.impresion_estado === 'ERROR' ? c.red : c.faint}>{PRINT[detail.pago.impresion_estado] || 'Impresión sin registrar'}{detail.pago.impresion_estado === 'ENVIADO' ? ' (se envió a la impresora; la salida física no se confirma)' : ''}</T> : null}
+        {/* El ticket guardado, tal cual se imprime: papel de 80 mm con letra de impresora. */}
+        <View style={{ alignSelf: 'center', width: '100%', maxWidth: 380, paddingVertical: 16, paddingHorizontal: 14, backgroundColor: c.isDark ? '#F4F4F2' : '#FFFFFF', borderWidth: 1, borderColor: c.rule }}>
+          <Text selectable style={{ fontFamily: WEB ? 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' : undefined, fontSize: 12, lineHeight: 18, color: '#16171A' }}>{savedPaymentText(detail.snapshot, detail.pago)}</Text>
+        </View>
+      </> : null}
+    </Dialog>
   </View>;
 }
