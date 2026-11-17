@@ -64,7 +64,7 @@ export function TableTile({ mesa, state, order, width, now, selected, ready, ale
   const free = state === 'Libre';
   return <Press accessibilityRole="button" accessibilityLabel={label} accessibilityHint="Toca para abrir la mesa; mantén presionado para acciones rápidas" accessibilityState={{ selected }}
     onPress={() => onPress(mesa)} onLongPress={onLongPress ? () => onLongPress(mesa) : undefined} hapticKind="tap" scaleTo={0.95}
-    style={[{ width, minHeight: 108, padding: 12, borderRadius: radius.lg, backgroundColor: filled ? meta.bg : free ? c.surfaceAlt : c.surface,
+    style={[{ width, minHeight: width < 110 ? 96 : 108, padding: width < 110 ? 10 : 12, borderRadius: radius.lg, backgroundColor: filled ? meta.bg : free ? c.surfaceAlt : c.surface,
       borderWidth: 2, borderColor: selected ? c.primary : filled ? meta.bg : free ? c.surfaceAlt : (c.isDark ? c.line : 'rgba(16,24,40,0.04)'), justifyContent: 'space-between', gap: 6 },
       free ? null : elevate(c, filled ? 2 : 1), filled && typeof document !== 'undefined' && !c.isDark ? { boxShadow: `0 8px 20px ${c.primary}38` } : null]}>
     <Ping trigger={state} color={filled ? c.primary : meta.dot} radius={radius.lg} />
@@ -95,25 +95,23 @@ export function TableTile({ mesa, state, order, width, now, selected, ready, ale
 export function AttentionStrip({ items, onOpen }) {
   const { c } = useTheme();
   if (!items.length) return null;
+  // Una sola línea por ficha: «● Mesa 1 · Pidió la cuenta». Ocupa poco alto en pantallas chicas.
   return <Appear>
-    <View style={{ marginBottom: space.lg }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: space.sm, marginHorizontal: -12 }} contentContainerStyle={{ gap: space.sm, paddingHorizontal: 12, paddingVertical: 2, alignItems: 'center' }}>
+      <View accessibilityRole="header" accessibilityLabel={`Atender ahora: ${items.length}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingRight: 2 }}>
         <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: c.primary }} />
-        <T size={15} weight="800">Atender ahora</T>
-        <View style={{ paddingHorizontal: 8, borderRadius: radius.pill, backgroundColor: c.primarySoft }}><Num size={13} weight="800" color={c.primaryText}>{items.length}</Num></View>
+        <T size={13} weight="800" color={c.primaryText}>Ahora</T>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.sm, paddingVertical: 4, paddingRight: 8 }}>
-        {items.map(it => {
-          const tone = it.tone === 'ready' ? c.green : it.tone === 'late' ? c.red : it.tone === 'reserve' ? c.purple : c.primaryText;
-          const soft = it.tone === 'ready' ? c.greenSoft : it.tone === 'late' ? c.redSoft : it.tone === 'reserve' ? c.purpleSoft : c.primarySoft;
-          return <Press key={it.key} accessibilityRole="button" accessibilityLabel={`${it.title}, ${it.detail}`} onPress={() => onOpen(it)} hapticKind="tap" scaleTo={0.95}
-            style={{ minHeight: 56, paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.lg, backgroundColor: soft, justifyContent: 'center', minWidth: 120 }}>
-            <T size={15} weight="800">{it.title}</T>
-            <T size={13} weight="700" color={tone}>{it.detail}</T>
-          </Press>;
-        })}
-      </ScrollView>
-    </View>
+      {items.map(it => {
+        const tone = it.tone === 'ready' ? c.green : it.tone === 'late' ? c.red : it.tone === 'reserve' ? c.purple : c.primaryText;
+        const soft = it.tone === 'ready' ? c.greenSoft : it.tone === 'late' ? c.redSoft : it.tone === 'reserve' ? c.purpleSoft : c.primarySoft;
+        return <Press key={it.key} accessibilityRole="button" accessibilityLabel={`${it.title}, ${it.detail}`} onPress={() => onOpen(it)} hapticKind="tap" scaleTo={0.95}
+          style={{ minHeight: 40, maxWidth: 280, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: soft, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <T size={14} weight="800" numberOfLines={1} style={{ flexShrink: 0 }}>{it.title}</T>
+          <T size={13} weight="700" color={tone} numberOfLines={1} style={{ flexShrink: 1 }}>{it.detail}</T>
+        </Press>;
+      })}
+    </ScrollView>
   </Appear>;
 }
 

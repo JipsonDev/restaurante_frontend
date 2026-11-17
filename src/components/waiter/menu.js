@@ -12,7 +12,7 @@ const amount = n => Number(n || 0).toLocaleString('es-EC', { minimumFractionDigi
 const price = n => `$${amount(n)}`; // mismo formato que la comanda: $1,80
 
 // ── Línea de producto ──────────────────────────────────────────────────────
-export const MenuRow = memo(function MenuRow({ producto, qty = 0, isPromo, locked, canAdd, onAdd, onCustomize, onDecrement, chooseTarget }) {
+export const MenuRow = memo(function MenuRow({ producto, qty = 0, showCode = false, isPromo, locked, canAdd, onAdd, onCustomize, onDecrement, chooseTarget }) {
   const { c } = useTheme();
   const stock = menuStock(producto);
   const available = Number(producto.disponible ?? 1) === 1 && stock > 0;
@@ -25,15 +25,15 @@ export const MenuRow = memo(function MenuRow({ producto, qty = 0, isPromo, locke
   return <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingRight: 6, marginVertical: 3, borderRadius: radius.lg, backgroundColor: qty ? c.primarySoft : 'transparent', opacity: off ? 0.5 : 1 }}>
     <Press accessibilityRole="button" accessibilityLabel={label} accessibilityHint={canAdd ? 'Toca para añadir uno; mantén para personalizar' : 'Elige primero mesa o pedido'}
       disabled={off} onPress={add} onLongPress={onCustomize && canAdd ? custom : undefined} hapticKind={off ? undefined : 'tap'} scaleTo={0.98}
-      hoverStyle={{ backgroundColor: qty ? 'transparent' : c.surfaceAlt }} style={{ flex: 1, minHeight: 68, paddingVertical: 10, paddingHorizontal: space.md, borderRadius: radius.lg, flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+      hoverStyle={{ backgroundColor: qty ? 'transparent' : c.surfaceAlt }} style={{ flex: 1, minHeight: 60, paddingVertical: 8, paddingHorizontal: space.md, borderRadius: radius.lg, flexDirection: 'row', alignItems: 'center', gap: space.md }}>
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-        <T size={16} weight={qty ? '800' : '700'} numberOfLines={2}>{producto.nombre} <T size={12} weight="600" color={c.faint}>N.º {producto.id}</T></T>
+        <T size={16} weight={qty ? '800' : '700'} numberOfLines={2}>{showCode ? <T size={13} weight="800" color={c.primaryText}>N.º {producto.id}  </T> : null}{producto.nombre}</T>
         {(isPromo || note || producto.descripcion) ? <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
           {isPromo ? <View style={{ paddingHorizontal: 8, borderRadius: radius.pill, backgroundColor: c.primary }}><T size={11} weight="800" color={c.onPrimary}>Promo</T></View> : null}
           {note ? <T size={13} weight="700" color={!available || limit ? c.red : c.amber}>{note}</T> : null}
           {producto.descripcion && !note ? <T size={13} color={c.muted} numberOfLines={1} style={{ flex: 1 }}>{producto.descripcion}</T> : null}
         </View> : null}
-        <Num size={15} weight="800" color={qty ? c.primaryText : c.text} style={{ marginTop: 2 }}>{price(producto.precio)}</Num>
+        <Num size={15} weight="800" color={qty ? c.primaryText : c.text} style={{ marginTop: 1 }}>{price(producto.precio)}</Num>
       </View>
       {locked ? <LockKeyhole size={18} color={c.muted} /> : null}
     </Press>
@@ -87,7 +87,7 @@ function ListeningRing({ active, color }) {
 }
 
 // ── Cabecera compacta: búsqueda (texto, número o voz) + filtros ────────────
-export function MenuSearch({ value, onChangeText, placeholder = 'Buscar en el menú', onFilters, filtersActive, numbers = true, voice = true }) {
+export function MenuSearch({ value, onChangeText, placeholder = 'Buscar producto', onFilters, filtersActive, numbers = true, voice = true }) {
   const { c } = useTheme();
   const [focus, setFocus] = useState(false);
   const [numeric, setNumeric] = useState(false);
@@ -99,7 +99,7 @@ export function MenuSearch({ value, onChangeText, placeholder = 'Buscar en el me
     <View style={[{ flex: 1, minHeight: TOUCH, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 16, paddingRight: 4, borderWidth: 2, borderColor: listening ? c.primary : focus ? c.primary : 'transparent', borderRadius: radius.pill, backgroundColor: focus || listening ? c.surface : c.surfaceAlt },
       WEB ? { transitionProperty: 'border-color, background-color, box-shadow', transitionDuration: '160ms', boxShadow: focus || listening ? `0 0 0 4px ${c.focus}` : 'none' } : null]}>
       <Search size={18} color={c.muted} />
-      <TextInput ref={input} accessibilityLabel={placeholder} value={value} onChangeText={onChangeText} placeholder={listening ? 'Escuchando… di el producto' : numeric ? 'Número del producto' : placeholder} placeholderTextColor={listening ? c.primaryText : c.faint} returnKeyType="search"
+      <TextInput ref={input} accessibilityLabel={placeholder} value={value} onChangeText={onChangeText} placeholder={listening ? 'Escuchando…' : numeric ? 'N.º del producto' : placeholder} placeholderTextColor={listening ? c.primaryText : c.faint} returnKeyType="search"
         keyboardType={numeric ? 'number-pad' : 'default'} inputMode={numeric ? 'numeric' : 'search'}
         onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
         style={{ flex: 1, minWidth: 0, minHeight: TOUCH - 4, fontFamily: FONT, fontSize: 16, color: c.text, ...(WEB ? { outlineStyle: 'none' } : {}) }} />
@@ -149,31 +149,28 @@ export function MenuFiltersSheet({ visible, onClose, availableOnly, setAvailable
 export function QuickStrip({ favorites = [], counts = {}, canAdd, locked, onAdd, chooseTarget, repeat }) {
   const { c } = useTheme();
   if (!favorites.length && !repeat) return null;
-  return <View style={{ gap: space.sm }}>
-    {repeat ? <Press accessibilityRole="button" accessibilityLabel={`Repetir ronda anterior: ${repeat.summary}`} onPress={repeat.onPress} disabled={locked} hapticKind="medium"
-      hoverStyle={{ backgroundColor: c.soft }} style={{ minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.md, borderRadius: radius.lg, backgroundColor: c.surfaceAlt, opacity: locked ? 0.5 : 1 }}>
-      <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' }}><RotateCcw size={19} color={c.primary} /></View>
-      <View style={{ flex: 1, minWidth: 0 }}><T size={16} weight="700">Repetir ronda anterior</T><T size={13} color={c.muted} numberOfLines={1}>{repeat.summary}</T></View>
-      <Num size={15} weight="800">{price(repeat.total)}</Num>
+  // Una sola tira: «↻ Repetir ronda · $110» y después lo más pedido hoy (🔥).
+  return <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ marginHorizontal: -space.lg, flexGrow: 0 }} contentContainerStyle={{ gap: 8, paddingHorizontal: space.lg, paddingVertical: 2, alignItems: 'center' }}>
+    {repeat ? <Press accessibilityRole="button" accessibilityLabel={`Repetir ronda anterior: ${repeat.summary}, ${price(repeat.total)}`} onPress={repeat.onPress} disabled={locked} hapticKind="medium" scaleTo={0.95}
+      style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 6, paddingRight: 14, borderRadius: radius.pill, backgroundColor: c.ink, opacity: locked ? 0.5 : 1 }}>
+      <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.16)', alignItems: 'center', justifyContent: 'center' }}><RotateCcw size={16} color={c.onInk} /></View>
+      <T size={14} weight="800" color={c.onInk}>Repetir ronda</T>
+      <Num size={13} weight="700" color={c.onInk} style={{ opacity: 0.75 }}>{price(repeat.total)}</Num>
     </Press> : null}
-    {favorites.length ? <>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}><Flame size={16} color={c.primary} /><T size={15} weight="800">Lo más pedido hoy</T></View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ marginHorizontal: -space.lg }} contentContainerStyle={{ gap: 8, paddingHorizontal: space.lg, paddingVertical: 4 }}>
-        {favorites.map(f => {
-          const p = f.product; const qty = counts[p.id] || 0;
-          const out = menuStock(p) <= 0 || locked;
-          return <Press key={p.id} accessibilityRole="button" accessibilityLabel={`Añadir ${p.nombre}${qty ? `, ${qty} en la ronda` : ''}`} disabled={out}
-            onPress={() => canAdd ? onAdd(p, false) : chooseTarget()} hapticKind="tap" scaleTo={0.95}
-            style={[{ minHeight: TOUCH, maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, borderRadius: radius.pill,
-              backgroundColor: qty ? c.primarySoft : c.surface, opacity: out ? 0.45 : 1, borderWidth: 1, borderColor: qty ? c.primarySoft : c.line }, elevate(c, 1)]}>
-            <T size={15} weight="600" numberOfLines={1} style={{ flexShrink: 1 }}>{p.nombre}</T>
-            {qty ? <View style={{ minWidth: 22, height: 22, borderRadius: 11, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 }}><RollingNumber value={qty} size={12} color={c.onPrimary} /></View>
-              : <Num size={13} color={c.muted}>{price(p.precio)}</Num>}
-          </Press>;
-        })}
-      </ScrollView>
-    </> : null}
-  </View>;
+    {favorites.length ? <View accessibilityLabel="Lo más pedido hoy" style={{ flexDirection: 'row', alignItems: 'center', gap: 2, paddingLeft: repeat ? 4 : 0 }}><Flame size={16} color={c.primary} /></View> : null}
+    {favorites.map(f => {
+      const p = f.product; const qty = counts[p.id] || 0;
+      const out = menuStock(p) <= 0 || locked;
+      return <Press key={p.id} accessibilityRole="button" accessibilityLabel={`Lo más pedido: añadir ${p.nombre}${qty ? `, ${qty} en la ronda` : ''}`} disabled={out}
+        onPress={() => canAdd ? onAdd(p, false) : chooseTarget()} hapticKind="tap" scaleTo={0.95}
+        style={{ minHeight: 44, maxWidth: 220, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, borderRadius: radius.pill,
+          backgroundColor: qty ? c.primarySoft : c.surfaceAlt, opacity: out ? 0.45 : 1 }}>
+        <T size={14} weight="700" numberOfLines={1} style={{ flexShrink: 1 }}>{p.nombre}</T>
+        {qty ? <View style={{ minWidth: 22, height: 22, borderRadius: 11, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 }}><RollingNumber value={qty} size={12} color={c.onPrimary} /></View>
+          : <Num size={13} color={c.muted}>{price(p.precio)}</Num>}
+      </Press>;
+    })}
+  </ScrollView>;
 }
 
 // ── Destino del pedido ─────────────────────────────────────────────────────

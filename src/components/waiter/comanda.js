@@ -94,7 +94,8 @@ export function haptic(kind = 'tap') {
   try {
     if (!WEB && nativeHaptic(kind)) return;
     const p = PATTERNS[kind] ?? 10;
-    if (WEB) { if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(p); return; }
+    // En web solo después de que el usuario tocó la página (si no, el navegador lo bloquea y avisa en consola).
+    if (WEB) { if (typeof navigator !== 'undefined' && navigator.vibrate && navigator.userActivation?.hasBeenActive !== false) navigator.vibrate(p); return; }
     if (Platform.OS === 'android') Vibration.vibrate(p);
   } catch {}
 }
@@ -346,13 +347,13 @@ function ToastItem({ t, onDone }) {
   const tone = t.tone === 'error' ? '#FF8A70' : t.tone === 'warning' ? '#F5C451' : t.tone === 'success' ? '#5FD69A' : null;
   const bg = c.isDark ? '#2A2C32' : '#16181D';
   return <Animated.View accessibilityRole="alert" accessibilityLiveRegion="polite" style={[{ opacity: v, transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) }, { scale: v.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) }],
-    alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: 56, paddingLeft: space.lg, paddingRight: 6, borderRadius: radius.lg,
+    alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: space.sm + 2, minHeight: 48, paddingLeft: 14, paddingRight: 4, borderRadius: radius.lg,
     backgroundColor: bg }, WEB ? { boxShadow: '0 12px 32px rgba(0,0,0,0.28)' } : { elevation: 12 }]}>
-    {Icon ? <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}><Icon size={18} color={tone || '#FFFFFF'} /></View>
+    {Icon ? <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}><Icon size={18} color={tone || '#FFFFFF'} /></View>
       : tone ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: tone }} /> : null}
-    <View style={{ flex: 1, minWidth: 0, paddingVertical: 10 }}>
-      <T size={15} weight="700" color="#FFFFFF">{t.message}</T>
-      {t.detail ? <T size={13} color="#FFFFFF" style={{ opacity: 0.7 }}>{t.detail}</T> : null}
+    <View style={{ flex: 1, minWidth: 0, paddingVertical: 8 }}>
+      <T size={14} weight="700" color="#FFFFFF" numberOfLines={2}>{t.message}</T>
+      {t.detail ? <T size={12} color="#FFFFFF" style={{ opacity: 0.7 }} numberOfLines={1}>{t.detail}</T> : null}
     </View>
     {t.action ? <Press accessibilityRole="button" onPress={() => { t.action.onPress(); close(); }} hapticKind="tap" style={{ minHeight: 36, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.12)', justifyContent: 'center' }}>
       <T size={14} weight="800" color="#FFFFFF">{t.action.label}</T>
@@ -392,7 +393,7 @@ function TabItem({ item, active, onPress }) {
   useEffect(() => { Animated.spring(v, { toValue: active ? 1 : 0, speed: 18, bounciness: 12, useNativeDriver: ND }).start(); }, [active]);
   const Icon = item.icon;
   return <Press accessibilityRole="tab" accessibilityLabel={item.badge ? `${item.label}, ${item.badge}` : item.label} accessibilityState={{ selected: active }}
-    onPress={onPress} hapticKind="select" scaleTo={0.88} style={{ flex: 1, minHeight: 58, alignItems: 'center', justifyContent: 'center', gap: 2 }}>
+    onPress={onPress} hapticKind="select" scaleTo={0.88} style={{ flex: 1, minHeight: 54, alignItems: 'center', justifyContent: 'center', gap: 2 }}>
     <Animated.View style={{ transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [0, -1] }) }, { scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }) }] }}>
       <Icon size={22} color={active ? c.primary : c.muted} strokeWidth={active ? 2.4 : 1.9} />
       {item.badge ? <View style={{ position: 'absolute', top: -6, right: -13, minWidth: 19, height: 19, paddingHorizontal: 5, borderRadius: 10, backgroundColor: item.badgeTone === 'ink' ? c.ink : c.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: c.surface }}>
@@ -410,7 +411,7 @@ export function TabBar({ items, value, onChange, bottomInset = 0 }) {
   const index = Math.max(0, items.findIndex(i => i.key === value));
   const seg = w / items.length;
   useEffect(() => { if (w) Animated.spring(x, { toValue: index * seg, speed: 16, bounciness: 7, useNativeDriver: ND }).start(); }, [index, w, items.length]);
-  return <View style={{ paddingHorizontal: 12, paddingTop: 6, paddingBottom: Math.max(bottomInset, 10), backgroundColor: 'transparent' }}>
+  return <View style={{ paddingHorizontal: 12, paddingTop: 4, paddingBottom: Math.max(bottomInset, 8), backgroundColor: 'transparent' }}>
     <View onLayout={e => setW(e.nativeEvent.layout.width - 12)} accessibilityRole="tablist"
       style={[{ flexDirection: 'row', padding: 6, borderRadius: radius.pill, backgroundColor: c.glass, borderWidth: 1, borderColor: c.isDark ? c.line : 'rgba(16,24,40,0.06)', maxWidth: 560, width: '100%', alignSelf: 'center' },
         WEB ? { backdropFilter: 'saturate(180%) blur(18px)', WebkitBackdropFilter: 'saturate(180%) blur(18px)' } : null, elevate(c, 2)]}>

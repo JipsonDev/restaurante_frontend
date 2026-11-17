@@ -1,7 +1,7 @@
 // Comanda: piezas de la hoja de pedido del mesero (encabezado, líneas, rondas, barra de envío, cola).
 // Todo se apoya en el kit «Suave» (comanda.js); aquí no se definen colores propios.
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Image, TextInput, View } from 'react-native';
+import { Animated, Image, TextInput, View, useWindowDimensions } from 'react-native';
 import { CloudOff, RefreshCw, Send, PencilLine, Trash2 } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import {
@@ -14,14 +14,16 @@ const ND = false; // height/opacidad no se pueden animar en el hilo nativo
 // Encabezado: insignia redondeada con el número de mesa, título y estado.
 export function ComandaHeader({ number, title, subtitle, meta, stamp, stampColor, children }) {
   const { c } = useTheme();
-  return <View style={{ paddingBottom: space.md }}>
+  const small = useWindowDimensions().width < 400;
+  const box = small ? 56 : 68;
+  return <View style={{ paddingBottom: small ? space.sm : space.md }}>
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-      {number != null ? <View accessibilityLabel={`Mesa ${number}`} style={{ width: 68, height: 68, borderRadius: radius.xl, backgroundColor: c.primarySoft, alignItems: 'center', justifyContent: 'center' }}>
+      {number != null ? <View accessibilityLabel={`Mesa ${number}`} style={{ width: box, height: box, borderRadius: small ? radius.lg : radius.xl, backgroundColor: c.primarySoft, alignItems: 'center', justifyContent: 'center' }}>
         <T size={11} weight="700" color={c.primaryText} style={{ lineHeight: 13 }}>Mesa</T>
-        <Num size={28} weight="800" color={c.primaryText} style={{ lineHeight: 32 }}>{number}</Num>
+        <Num size={small ? 24 : 28} weight="800" color={c.primaryText} style={{ lineHeight: small ? 27 : 32 }}>{number}</Num>
       </View> : null}
       <View style={{ flex: 1, minWidth: 0 }}>
-        <T size={22} weight="800" numberOfLines={1}>{title}</T>
+        <T size={small ? 19 : 22} weight="800" numberOfLines={1}>{title}</T>
         <T size={14} color={c.muted} numberOfLines={2}>{[meta, subtitle].filter(Boolean).join(' · ')}</T>
         {stamp ? <Stamp color={stampColor} style={{ marginTop: 6 }}>{stamp}</Stamp> : null}
       </View>
@@ -147,9 +149,9 @@ export function SendBar({ count, amount, onPress, sending, pending, offline, dis
   return <View style={{ paddingHorizontal: space.lg, paddingTop: space.sm, paddingBottom: 2, backgroundColor: 'transparent' }}>
     <Press accessibilityRole="button" accessibilityLabel={`${text}, ${money(amount)}`} accessibilityState={{ disabled: !!(disabled || sending), busy: !!sending }}
       onPress={onPress} disabled={disabled || sending} hapticKind="medium"
-      style={[{ height: 60, borderRadius: radius.pill, backgroundColor: pending ? c.ink : c.primary, flexDirection: 'row', alignItems: 'center', paddingLeft: 8, paddingRight: space.xl, gap: space.md, opacity: disabled ? 0.45 : 1, maxWidth: 760, width: '100%', alignSelf: 'center' },
+      style={[{ height: 54, borderRadius: radius.pill, backgroundColor: pending ? c.ink : c.primary, flexDirection: 'row', alignItems: 'center', paddingLeft: 8, paddingRight: space.xl, gap: space.md, opacity: disabled ? 0.45 : 1, maxWidth: 760, width: '100%', alignSelf: 'center' },
         typeof document !== 'undefined' && !c.isDark && !pending ? { boxShadow: `0 10px 24px ${c.primary}55` } : elevate(c, 2)]}>
-      <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' }}>
         {pending ? <RefreshCw size={20} color={c.onInk} /> : <Send size={20} color={c.onPrimary} />}
       </View>
       <T size={17} weight="800" color={pending ? c.onInk : c.onPrimary} style={{ flex: 1 }} numberOfLines={1}>{text}</T>

@@ -53,7 +53,8 @@ import {
   Users,
   X,
   CakeSlice,
-  ArrowRightLeft
+  ArrowRightLeft,
+  StickyNote
 } from 'lucide-react-native';
 import axios from 'axios';
 import { useFonts } from 'expo-font';
@@ -272,6 +273,7 @@ function App() {
   }), [palette]);
 
   const [step, setStep] = useState('mesas');
+  const [noteOpen, setNoteOpen] = useState(false); // nota general plegada hasta que se necesite
   const serviceNow = useServiceClock(['mesas', 'express', 'pedido'].includes(step));
   const [mesas, setMesas] = useState([]);
   const [productos, setProductos] = useState([]);
@@ -456,6 +458,7 @@ function App() {
   const cartKey = isExpressOrder
     ? (selectedExpressPedidoId ? `express-${selectedExpressPedidoId}` : currentExpressDraft ? selectedExpressDraftKey : null)
     : mesaSel;
+  useEffect(() => { setNoteOpen(false); }, [cartKey]); // la nota plegada se reinicia al cambiar de mesa/pedido
   const pendingSend = drafts.pending[cartKey];
   const cart = carritos[cartKey] || [];
   const orderNote = orderNotes[cartKey] || '';
@@ -1816,11 +1819,12 @@ function App() {
             {catalog.editable && !split ? <CButton variant="primary" icon={Plus} onPress={() => setStep('productos')} style={{ alignSelf: 'center' }}>Elegir productos</CButton> : null}
           </View>
         )}
-        {cartItems.length && catalog.editable && !split ? <CButton variant="ghost" icon={Plus} onPress={() => setStep('productos')} style={{ marginTop: 8 }}>Añadir más</CButton> : null}
-
-        {showingCart || editingCustomer ? (
-          <CField label="Nota general" value={orderNote} onChangeText={updateOrderNote} editable={!pendingSend} placeholder="Ej. entregar todo junto, silla para bebé" multiline maxLength={120} style={{ marginTop: 16 }} accessibilityLabel="Notas generales de la cuenta" />
-        ) : pedidoActual?.notas ? <CT size={15} color={colors.muted} style={{ marginTop: 12 }}>Nota: {pedidoActual.notas}</CT> : null}
+        {(cartItems.length && catalog.editable && !split) || ((showingCart || editingCustomer) && !orderNote && !noteOpen) ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+          {cartItems.length && catalog.editable && !split ? <CButton variant="ghost" icon={Plus} onPress={() => setStep('productos')}>Añadir más</CButton> : null}
+          {(showingCart || editingCustomer) && !orderNote && !noteOpen ? <CButton variant="ghost" icon={StickyNote} onPress={() => setNoteOpen(true)} accessibilityLabel="Añadir nota general">Nota general</CButton> : null}
+        </View> : null}
+        {(showingCart || editingCustomer) && (orderNote || noteOpen) ? <CField label="Nota general" value={orderNote} onChangeText={updateOrderNote} editable={!pendingSend} placeholder="Ej. entregar todo junto, silla para bebé" multiline autoFocus={noteOpen && !orderNote} maxLength={120} style={{ marginTop: 12 }} accessibilityLabel="Notas generales de la cuenta" />
+          : !(showingCart || editingCustomer) && pedidoActual?.notas ? <CT size={15} color={colors.muted} style={{ marginTop: 12 }}>Nota: {pedidoActual.notas}</CT> : null}
 
         <TotalsBlock
           rows={[

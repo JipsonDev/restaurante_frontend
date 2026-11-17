@@ -21,7 +21,8 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
     if (next > 0) setMeasuredWidth(previous => previous === next ? previous : next);
   }, []);
   const layoutWidth = Math.min(width, measuredWidth ?? width);
-  const padding = layoutWidth < 600 ? 12 : layoutWidth >= 1024 ? 28 : 20;
+  const phone = layoutWidth < 600;
+  const padding = phone ? 12 : layoutWidth >= 1024 ? 28 : 20;
   const gap = layoutWidth < 600 ? 10 : 12;
   const available = Math.max(0, layoutWidth - padding * 2);
   // Celular: 3 columnas (2 si la pantalla es muy estrecha). Tableta y escritorio: tantas como quepan.
@@ -78,10 +79,10 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
   const summary = `${counts.Disponibles} ${counts.Disponibles === 1 ? 'libre' : 'libres'} de ${counts.Todas} mesas`;
   return <View onLayout={measure} style={{ minWidth: 0, paddingHorizontal: padding, paddingTop: space.md, paddingBottom: space.x3 }}>
     {/* Cabecera compacta: resumen + bandeja + búsqueda + densidad + actualizar */}
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, minHeight: 56, marginBottom: space.lg }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, minHeight: 48, marginBottom: phone ? space.sm : space.lg }}>
       {!search ? <View style={{ flex: 1, minWidth: 0 }}>
-        <T size={28} weight="800" accessibilityRole="header">Mesas</T>
-        <T size={15} weight="500" color={c.muted} numberOfLines={1}>{summary}</T>
+        <T size={phone ? 22 : 28} weight="800" accessibilityRole="header">Mesas</T>
+        <T size={13} weight="600" color={c.muted} numberOfLines={1}>{summary}</T>
       </View> : null}
       <SearchToggle value={search} onChange={setSearch} />
       <IconButton icon={compact ? Grid2X2 : Grid3X3} label={compact ? 'Casillas normales' : 'Casillas compactas'} onPress={() => setCompact(!compact)} />
@@ -111,7 +112,7 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
       description={counts.Todas ? undefined : 'Configura las mesas desde administración.'}
       action={counts.Todas ? <Button onPress={clear}>Limpiar filtros</Button> : null} /> : null}
 
-    {groups.map(group => <View key={group.name} style={{ marginTop: space.lg }}>
+    {groups.map(group => <View key={group.name} style={{ marginTop: phone ? space.md : space.lg }}>
       {groups.length ? <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: space.sm, marginBottom: space.sm }}>
         <T size={17} weight="800">{group.name}</T><Num size={14} weight="600" color={c.faint}>{group.mesas.length}</Num>
       </View> : null}
