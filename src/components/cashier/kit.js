@@ -15,13 +15,11 @@ export function useCajaFonts() {
   useEffect(() => {
     if (!WEB || fontsInjected || typeof document === 'undefined') return;
     fontsInjected = true;
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap';
-    document.head.appendChild(link);
+    // Archivo va dentro de la app (public/fonts, licencia OFL): sin internet la caja se ve igual.
     // Selección, cursor y barras de desplazamiento con la paleta de caja.
     const style = document.createElement('style');
-    style.textContent = `[data-caja] ::selection{background:#2457C533}[data-caja] input,[data-caja] textarea{caret-color:#2457C5}
+    style.textContent = `@font-face{font-family:"Archivo";src:url("/fonts/Archivo-latin.woff") format("woff");font-weight:100 900;font-stretch:62% 125%;font-style:normal;font-display:swap}
+[data-caja] ::selection{background:#2457C533}[data-caja] input,[data-caja] textarea{caret-color:#2457C5}
 [data-caja] input:focus-visible,[data-caja] textarea:focus-visible{outline:2px solid #2457C5 !important;outline-offset:2px}
 [data-caja] [tabindex]:focus-visible{outline:2px solid #2457C5 !important;outline-offset:2px}
 [data-caja] *{scrollbar-width:thin;scrollbar-color:#CDD0D5 transparent}[data-caja-dark] *{scrollbar-color:#3A3D43 transparent}`;

@@ -12,8 +12,10 @@ const METHODS = ['Efectivo', 'Tarjeta', 'Transferencia', 'QR', 'Vales', 'Otro', 
 const STATE = { ACTIVO: ['Cobrado', 'green'], ANULADO: ['Anulado', 'red'], DEVUELTO: ['Devuelto', 'amber'] };
 const PRINT = { ENVIADO: 'Impreso', ERROR: 'Error al imprimir' };
 const when = v => { const d = new Date(String(v || '').replace(' ', 'T')); return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('es-EC', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }); };
-const today = () => new Date().toISOString().slice(0, 10);
-const daysAgo = n => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
+// Fechas del día del local (no UTC): a las 21:00 en Ecuador sigue siendo «hoy».
+const localISO = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const today = () => localISO(new Date());
+const daysAgo = n => { const d = new Date(); d.setDate(d.getDate() - n); return localISO(d); };
 
 function Chip({ c, label, on, onPress }) {
   return <Press accessibilityRole="button" accessibilityState={{ selected: on }} onPress={onPress} scaleTo={0.97} hoverStyle={on ? null : { backgroundColor: c.hover }}

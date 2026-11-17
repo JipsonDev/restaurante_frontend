@@ -3,12 +3,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { SafeAreaView, ScrollView, TextInput, View, useWindowDimensions } from 'react-native';
 import {
-  ArrowDownLeft, ArrowLeft, ArrowUpRight, Banknote, Ban, Clock, CreditCard, FileText, Gift, Hash, Layers, LogOut, Minus, Moon, Plus,
+  ArrowDownLeft, ArrowLeft, ArrowUpRight, BadgePercent, Banknote, Ban, Clock, Gift, PackageOpen, Split, CreditCard, FileText, Gift, Hash, Layers, LogOut, Minus, Moon, Plus,
   Printer, Receipt, RefreshCw, Search, ShoppingBag, Store, Sun, Table2, Trash2, WalletCards, Wifi, WifiOff, X,
 } from 'lucide-react-native';
 import Logo from '../components/Logo';
 import { BOTTOM_INSET, TOP_INSET } from '../utils/safeArea';
 import CashierPayments from './CashierPayments';
+import { AdjustDialog, SplitDialog } from '../components/cashier/accountTools';
 import {
   Badge, Btn, Cell, CellInput, Cells, Empty, FONT, IconBtn, Kbd, Keypad, Lbl, Num, Press, Seg, Serial, T, TotalRow,
   WEB, applyKey, haptic, money, r, sp, tokens, toNum, useCajaFonts,
@@ -33,6 +34,9 @@ export default function CashierWorkspace({ model: m, actions: a, helpers: h }) {
   const roomy = width >= 1280;
   const [view, setView] = useState('cobrar');
   const [target, setTarget] = useState('recibido'); // a dónde escribe el teclado numérico
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [removing, setRemoving] = useState(null);
+  const [splitOpen, setSplitOpen] = useState(false);
   const fresh = useRef(true); // la primera tecla reemplaza el monto sugerido
   const searchRef = useRef(null);
   const sel = m.selectedOrder;
@@ -44,9 +48,10 @@ export default function CashierWorkspace({ model: m, actions: a, helpers: h }) {
   const prevSel = useRef(sel?.id);
   useEffect(() => { if (sel?.id && sel.id !== prevSel.current && view === 'venta' && !m.cart.length) setView('cobrar'); prevSel.current = sel?.id; }, [sel?.id]);
 
-  const padValue = t => t === 'recibido' ? m.cashReceived : t === 'abono' ? m.partialAmount : (m.mixedAmounts[t] || '');
+  const padValue = t => t === 'recibido' ? m.cashReceived : t === 'abono' ? m.partialAmount : t === 'propina' ? m.tipAmount : (m.mixedAmounts[t] || '');
   const padWrite = (t, next) => {
     if (t === 'recibido') a.setCashReceived(next);
+    else if (t === 'propina') a.setTipAmount(next);
     else if (t === 'abono') { a.setPartialAmount(next); a.setDivisionId(null); }
     else a.setMixedAmounts(old => ({ ...old, [t]: next }));
   };
@@ -109,9 +114,9 @@ export default function CashierWorkspace({ model: m, actions: a, helpers: h }) {
         <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: openCaja ? '#3FB873' : '#E8A93B' }} />
         <T c={c} size={13} weight="600" color={c.onInk} numberOfLines={1}>{openCaja ? (!three ? `Turno ${m.caja.caja.id}` : `Turno ${m.caja.caja.id} · desde ${hhmm(m.caja.caja.fecha_apertura)}`) : 'Caja cerrada'}</T>
       </Press>
-      {!phone ? <View accessibilityLabel={m.connected ? 'Conectado en tiempo real' : 'Sin conexión en tiempo real'} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-        {m.connected ? <Wifi size={16} color="#3FB873" /> : <WifiOff size={16} color="#E8A93B" />}
-        {width >= 1180 ? <T c={c} size={13} color={c.inkMuted}>{m.connected ? 'En vivo' : 'Reconectando'}</T> : null}
+      {!m.connected ? <View accessibilityRole="alert" accessibilityLabel="Sin conexión con el servidor, reconectando" style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <WifiOff size={16} color="#E8A93B" />
+        {!phone ? <T c={c} size={13} color="#E8A93B">Reconectando…</T> : null}
       </View> : null}
       <IconBtn c={c} onInk icon={m.isDark ? Sun : Moon} label={m.isDark ? 'Tema claro' : 'Tema oscuro'} onPress={a.toggleTheme} />
       {three ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -246,20 +251,34 @@ export default function CashierWorkspace({ model: m, actions: a, helpers: h }) {
       </View>
       {(sel.items || []).filter(i => Number(i.cantidad) > 0).map((item, idx) => {
         const extra = [item.notas, ...(item.modificadores || []).map(mod => `${mod.nombre}${Number(mod.precio_extra) ? ` +${money(mod.precio_extra)}` : ''}`)].filter(Boolean).join(' · ');
+        const comp = item.cortesia;
         return <View key={item.id || idx} style={{ flexDirection: 'row', paddingVertical: 10, borderBottomWidth: 1, borderColor: c.line, gap: 12 }}>
           <Num c={c} size={15} weight="700" style={{ width: 40, textAlign: 'right' }}>{item.cantidad}</Num>
           <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-            <T c={c} size={15} weight="600">{item.nombre}</T>
-            {extra ? <T c={c} size={13} color={c.faint}>{extra}</T> : null}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}><T c={c} size={15} weight="600">{item.nombre}</T>{comp ? <Badge c={c} tone="green">Cortesía</Badge> : null}</View>
+            {extra || comp ? <T c={c} size={13} color={c.faint}>{[extra, comp ? comp.motivo : null].filter(Boolean).join(' · ')}</T> : null}
           </View>
           {!phone ? <Num c={c} size={14} weight="500" color={c.muted} style={{ width: 96, textAlign: 'right' }}>{money(Number(item.precio) + h.itemExtras(item))}</Num> : null}
-          <Num c={c} size={15} weight="700" style={{ width: 92, textAlign: 'right' }}>{money(h.itemLineTotal(item))}</Num>
+          <Num c={c} size={15} weight="700" color={comp ? c.faint : c.text} style={[{ width: 92, textAlign: 'right' }, comp ? { textDecorationLine: 'line-through' } : null]}>{money(h.itemLineTotal(item))}</Num>
         </View>;
       })}
     </View>
 
     <View style={{ flexDirection: phone || !three ? 'column' : 'row', gap: 20, alignItems: 'flex-start' }}>
       <View style={{ flex: 1, minWidth: 0, gap: 12, width: phone || !three ? '100%' : undefined }}>
+        {m.canRequestPaymentActions ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          <Btn c={c} size="sm" icon={BadgePercent} onPress={() => setAdjustOpen(true)} disabled={m.busy || !openCaja}>Descuento o cortesía</Btn>
+          {!Number(sel.abonado) ? <Btn c={c} size="sm" icon={Split} onPress={() => setSplitOpen(true)} disabled={m.busy}>{m.selectedSplit ? 'Volver a dividir' : 'Dividir la cuenta'}</Btn> : null}
+        </View> : null}
+        {(sel.ajustes || []).length ? <View style={{ gap: 6 }}>
+          <Lbl c={c}>Descuentos y cortesías</Lbl>
+          {sel.ajustes.map(aj => <View key={aj.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            {aj.tipo === 'CORTESIA' ? <Gift size={15} color={c.green} /> : <BadgePercent size={15} color={c.green} />}
+            <T c={c} size={13} color={c.muted} style={{ flex: 1 }} numberOfLines={2}>{aj.tipo === 'CORTESIA' ? `Cortesía: ${(sel.items || []).find(i => Number(i.id) === Number(aj.detalle_pedido_id))?.nombre || 'plato'}` : `Descuento${aj.porcentaje ? ` ${String(aj.porcentaje).replace('.', ',')} %` : ''}`} · {aj.motivo}{aj.autorizado_nombre ? ` · autorizó ${aj.autorizado_nombre}` : ''}</T>
+            <Num c={c} size={14} weight="700" color={c.green}>{`−${money(aj.monto)}`}</Num>
+            {m.canRequestPaymentActions ? <IconBtn c={c} icon={X} label={`Quitar ${aj.tipo === 'CORTESIA' ? 'cortesía' : 'descuento'}`} onPress={() => setRemoving(aj)} size={32} disabled={m.busy} /> : null}
+          </View>)}
+        </View> : null}
         {sel.notas ? <View style={{ gap: 2 }}><Lbl c={c}>Observaciones</Lbl><T c={c} size={14} color={c.muted}>{sel.notas}</T></View> : null}
         {abonos.length ? <View style={{ gap: 6 }}>
           <Lbl c={c}>Abonos de este turno</Lbl>
@@ -270,7 +289,7 @@ export default function CashierWorkspace({ model: m, actions: a, helpers: h }) {
           </View>)}
         </View> : null}
         {m.selectedSplit ? <View style={{ gap: 8 }}>
-          <Lbl c={c}>Reparto pedido por el mesero</Lbl>
+          <Lbl c={c}>Cuenta dividida</Lbl>
           {m.selectedSplit.divisions.map(part => { const on = Number(m.divisionId) === Number(part.id); return <View key={part.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 }}>
             <T c={c} size={14} weight="600" style={{ flex: 1 }}>{part.nombre}</T>
             <Num c={c} size={14} weight="700">{money(part.monto)}</Num>
@@ -280,6 +299,10 @@ export default function CashierWorkspace({ model: m, actions: a, helpers: h }) {
         </View> : null}
       </View>
       <View style={{ width: phone || !three ? '100%' : 300, borderWidth: 1, borderColor: c.rule }}>
+        {Number(sel.ajustes_total) > 0 ? <>
+          <TotalRow c={c} label="Consumo" value={Number(m.total) + Number(sel.ajustes_total)} />
+          <TotalRow c={c} label="Descuentos y cortesías" value={`−${money(sel.ajustes_total)}`} tone="green" />
+        </> : null}
         <TotalRow c={c} label="Subtotal sin IVA" value={m.subtotal} />
         <TotalRow c={c} label={`IVA ${m.taxPercent != null ? `${String(m.taxPercent).replace('.', ',')} %` : ''}`.trim()} value={m.tax} />
         {Number(m.service) > 0 ? <TotalRow c={c} label="Servicio" value={m.service} /> : null}
@@ -296,7 +319,7 @@ export default function CashierWorkspace({ model: m, actions: a, helpers: h }) {
 
   // ── Panel de cobro ─────────────────────────────────────────────────────────
   const received = toNum(m.cashReceived || 0);
-  const missing = Math.max(0, Math.round(m.cashPortion * 100) - Math.round((received || 0) * 100)) / 100;
+  const missing = Math.max(0, Math.round(m.cashNeeded * 100) - Math.round((received || 0) * 100)) / 100;
   const chargeLabel = `Cobrar ${money(Number.isFinite(m.chargeAmount) ? m.chargeAmount : 0)}`;
   const blockers = [];
   if (sel) {
@@ -320,8 +343,11 @@ export default function CashierWorkspace({ model: m, actions: a, helpers: h }) {
       </View>
     </Press>;
   };
-  const quick = m.cashPortion > 0 ? [...new Set([m.cashPortion, Math.ceil(m.cashPortion / 5) * 5, Math.ceil(m.cashPortion / 10) * 10, Math.ceil(m.cashPortion / 20) * 20, 50, 100].filter(v => v >= m.cashPortion))].slice(0, 4) : [];
-  const usesPad = m.cashPortion > 0 || m.chargeMode === 'PARCIAL' || m.paymentMethod === 'Mixto';
+  const need = m.cashNeeded;
+  const quick = need > 0 ? [...new Set([need, Math.ceil(need / 5) * 5, Math.ceil(need / 10) * 10, Math.ceil(need / 20) * 20, 50, 100].filter(v => v >= need))].slice(0, 4) : [];
+  const usesPad = need > 0 || m.chargeMode === 'PARCIAL' || m.paymentMethod === 'Mixto' || target === 'propina';
+  const tipBase = Number.isFinite(m.chargeAmount) ? m.chargeAmount : 0;
+  const tipPct = p => (Math.round(tipBase * p) / 100).toFixed(2);
   const payPanel = sel ? <View style={{ padding: phone ? 16 : 20, gap: 14 }}>
     <View style={{ gap: 2 }}>
       <T c={c} size={14} weight="600" color={c.muted}>{m.chargeMode === 'PARCIAL' ? 'Saldo de la cuenta' : 'Por cobrar'}</T>
@@ -344,11 +370,20 @@ export default function CashierWorkspace({ model: m, actions: a, helpers: h }) {
       <T c={c} size={13} weight="600" color={Math.round(m.mixedTotal * 100) === Math.round(m.chargeAmount * 100) ? c.green : c.amber}>
         Desglose {money(m.mixedTotal)} de {money(m.chargeAmount)}</T>
     </View> : null}
-    {m.cashPortion > 0 ? <View style={{ gap: 8 }}>
-      {display('recibido', m.paymentMethod === 'Mixto' ? 'Recibido en efectivo' : 'Efectivo recibido', m.cashReceived, m.paymentMethod === 'Mixto' ? `Parte en efectivo ${money(m.cashPortion)}` : null)}
+    <View style={{ gap: 6 }}>
+      <T c={c} size={13} weight="600" color={c.muted}>Propina{m.tip > 0 ? ` · va en ${String(m.tipMethod || '').toLowerCase()}, aparte de la cuenta` : ''}</T>
+      <View style={{ flexDirection: 'row', gap: 6 }}>
+        {[['0', 'Sin'], ['5', '5 %'], ['10', '10 %']].map(([p, l]) => { const v = p === '0' ? '' : tipPct(Number(p)); const on = (m.tipAmount || '') === v && target !== 'propina';
+          return <Btn key={p} c={c} size="sm" style={{ flex: 1, paddingHorizontal: 4 }} variant={on ? 'ink' : 'outline'} disabled={m.busy} onPress={() => { a.setTipAmount(v); if (target === 'propina') setTarget(need > 0 ? 'recibido' : 'abono'); }}>{l}</Btn>; })}
+        <Btn c={c} size="sm" style={{ flex: 1, paddingHorizontal: 4 }} variant={target === 'propina' ? 'ink' : 'outline'} disabled={m.busy} onPress={() => { setTarget('propina'); fresh.current = true; }}>Otra</Btn>
+      </View>
+      {target === 'propina' || (m.tip > 0 && ![tipPct(5), tipPct(10)].includes(m.tipAmount)) ? display('propina', 'Propina', m.tipAmount) : null}
+    </View>
+    {need > 0 ? <View style={{ gap: 8 }}>
+      {display('recibido', m.paymentMethod === 'Mixto' ? 'Recibido en efectivo' : 'Efectivo recibido', m.cashReceived, m.paymentMethod === 'Mixto' || m.tip > 0 ? `Efectivo a cubrir ${money(need)}${m.tipMethod === 'Efectivo' ? ` (propina ${money(m.tip)})` : ''}` : null)}
       <View style={{ flexDirection: 'row', gap: 6 }}>
         {quick.map(v => <Btn key={v} c={c} size="sm" style={{ flex: 1, paddingHorizontal: 4 }} disabled={m.busy}
-          onPress={() => { a.setCashReceived(v.toFixed(2)); fresh.current = true; setTarget('recibido'); }}>{v === m.cashPortion ? 'Exacto' : money(v).replace(',00', '')}</Btn>)}
+          onPress={() => { a.setCashReceived(v.toFixed(2)); fresh.current = true; setTarget('recibido'); }}>{v === need ? 'Exacto' : money(v).replace(',00', '')}</Btn>)}
       </View>
     </View> : null}
     {usesPad ? <Keypad c={c} onKey={pressKey} disabled={m.busy} compact={!roomy || phone} /> : null}
@@ -370,14 +405,14 @@ export default function CashierWorkspace({ model: m, actions: a, helpers: h }) {
   </View>;
 
   // Pie fijo del panel de cobro en escritorio: el botón siempre a la vista.
-  const changeLine = sel && m.cashPortion > 0 ? <View accessibilityLiveRegion="polite" style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 8, borderRadius: r.md,
+  const changeLine = sel && need > 0 ? <View accessibilityLiveRegion="polite" style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 8, borderRadius: r.md,
     backgroundColor: missing > 0 ? c.paperAlt : c.greenSoft }}>
     <T c={c} size={15} weight="700" color={missing > 0 ? c.text : c.green}>{missing > 0 ? 'Falta' : 'Cambio'}</T>
     <Num c={c} size={24} weight="800" color={missing > 0 ? c.text : c.green}>{money(missing > 0 ? missing : m.change)}</Num>
   </View> : null;
   const chargeFoot = sel ? <View style={{ padding: 16, gap: 8, borderTopWidth: 1, borderColor: c.rule, backgroundColor: c.paper }}>
     {changeLine}
-    {blockers.length ? <T c={c} size={13} color={c.amber} accessibilityLiveRegion="polite" numberOfLines={2}>{blockers[0]}</T> : <T c={c} size={13} color={c.faint} numberOfLines={1}>Se emite {invoice ? 'factura' : 'ticket'} {nextNumber || ''}{WEB ? ' · F9 precuenta' : ''}</T>}
+    {blockers.length ? <T c={c} size={13} color={c.amber} accessibilityLiveRegion="polite" numberOfLines={2}>{blockers[0]}</T> : <T c={c} size={13} color={c.faint} numberOfLines={1}>{m.tip > 0 ? `+ propina ${money(m.tip)} · ` : ''}{invoice ? 'Factura' : 'Ticket'} {nextNumber || ''}{m.printAgent?.online ? ' · impresión directa' : ''}{WEB && !m.tip ? ' · F9 precuenta' : ''}</T>}
     <View style={{ flexDirection: 'row', gap: 8 }}>
       <Btn c={c} icon={Printer} onPress={() => a.printReceipt()} disabled={m.busy} accessibilityLabel="Imprimir precuenta (F9)" style={{ width: 56, paddingHorizontal: 0 }} size="lg">{null}</Btn>
       <Btn c={c} variant="ink" size="lg" full icon={Receipt} onPress={a.handleCharge} loading={m.busy} disabled={!m.canCharge || !!m.pendingPayment || !docOk} kbd="F8">{chargeLabel}</Btn>
@@ -517,6 +552,7 @@ export default function CashierWorkspace({ model: m, actions: a, helpers: h }) {
   const ledger = useMemo(() => {
     const rows = [{ label: 'Fondo de apertura', amount: fondo, sign: 1, at: m.caja?.caja?.fecha_apertura }];
     rows.push({ label: 'Cobros en efectivo', amount: Number(tt.efectivo || 0), sign: 1 });
+    if (Number(tt.propinas_efectivo) > 0) rows.push({ label: 'Propinas en efectivo (para los meseros)', amount: Number(tt.propinas_efectivo), sign: 1 });
     [...moves].sort((x, y) => String(x.created_at).localeCompare(String(y.created_at))).forEach(mv => {
       const t = String(mv.tipo || '').toUpperCase();
       if (String(mv.metodo || 'Efectivo') !== 'Efectivo' || !['INGRESO', 'RETIRO', 'GASTO'].includes(t)) return;
@@ -528,7 +564,7 @@ export default function CashierWorkspace({ model: m, actions: a, helpers: h }) {
     if (devol > 0 && Math.round((run - devol - Number(expected)) * 100) >= -1 && expected != null && Number(expected) < run) { run = Math.round((run - Math.min(devol, run - Number(expected))) * 100) / 100; out.push({ label: 'Devoluciones', amount: devol, sign: -1, run }); }
     if (expected != null && Math.abs(Number(expected) - run) >= 0.01) out.push({ label: 'Diferencia sin detallar (según el sistema)', amount: Math.abs(Number(expected) - run), sign: Number(expected) > run ? 1 : -1, run: Number(expected), warn: true });
     return out;
-  }, [fondo, tt.efectivo, tt.devoluciones, moves, m.caja?.efectivo_esperado]);
+  }, [fondo, tt.efectivo, tt.propinas_efectivo, tt.devoluciones, moves, m.caja?.efectivo_esperado]);
   const methods = Object.entries(m.stats.byMethod).filter(([k, v]) => v > 0 || ['Efectivo', 'Tarjeta', 'Transferencia'].includes(k));
   const turno = !openCaja ? <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: phone ? 16 : 32, alignItems: 'center' }}>
     <View style={{ width: '100%', maxWidth: 640, backgroundColor: c.paper, borderWidth: 1, borderColor: c.rule, padding: phone ? 20 : 28, gap: 16 }}>
@@ -589,8 +625,39 @@ export default function CashierWorkspace({ model: m, actions: a, helpers: h }) {
           </View>
         </View>
       </View>
+      {Number(tt.propinas) > 0 || Number(tt.descuentos) > 0 || Number(tt.cortesias) > 0 ? <View style={{ flexDirection: phone ? 'column' : 'row', gap: 20 }}>
+        <View style={{ flex: 1, gap: 8 }}>
+          <T c={c} size={16} weight="800">Propinas por mesero</T>
+          <View style={{ borderTopWidth: 1, borderColor: c.text }}>
+            {(tt.propinas_por_mesero || []).map(row => <View key={`${row.mesero_id}-${row.mesero}`} style={{ flexDirection: 'row', gap: 10, paddingVertical: 9, borderBottomWidth: 1, borderColor: c.line }}>
+              <T c={c} size={14} weight="600" style={{ flex: 1 }} numberOfLines={1}>{row.mesero}</T>
+              {row.efectivo > 0 ? <Num c={c} size={13} weight="500" color={c.faint}>{`${money(row.efectivo)} en efectivo`}</Num> : null}
+              <Num c={c} size={15} weight="700" style={{ width: 92, textAlign: 'right' }}>{money(row.propina)}</Num>
+            </View>)}
+            {!(tt.propinas_por_mesero || []).length ? <T c={c} size={14} color={c.faint} style={{ paddingVertical: 9 }}>Sin propinas en este turno.</T> : null}
+            <View style={{ flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 8, backgroundColor: c.paperAlt }}><T c={c} size={15} weight="800" style={{ flex: 1 }}>Total propinas</T><Num c={c} size={16} weight="800">{money(tt.propinas)}</Num></View>
+          </View>
+        </View>
+        <View style={{ width: phone ? '100%' : 260, gap: 8 }}>
+          <T c={c} size={16} weight="800">Descuentos y cortesías</T>
+          <View style={{ borderWidth: 1, borderColor: c.rule }}>
+            <TotalRow c={c} label="Descuentos" value={Number(tt.descuentos || 0)} />
+            <TotalRow c={c} label="Cortesías" value={Number(tt.cortesias || 0)} />
+            <TotalRow c={c} label="Total dejado de cobrar" value={Number(tt.descuentos || 0) + Number(tt.cortesias || 0)} strong />
+          </View>
+        </View>
+      </View> : null}
     </View>
     <View style={{ width: three ? 320 : '100%', gap: 12 }}>
+      <View style={{ backgroundColor: c.paper, borderWidth: 1, borderColor: c.rule, padding: 16, gap: 8 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Printer size={16} color={m.printAgent?.online ? c.green : c.faint} />
+          <T c={c} size={15} weight="800" style={{ flex: 1 }}>Impresora de caja</T>
+          <Badge c={c} tone={m.printAgent?.online ? 'green' : 'neutral'}>{m.printAgent?.online ? 'Directa' : 'Por ventana'}</Badge>
+        </View>
+        <T c={c} size={13} color={c.muted}>{m.printAgent?.online ? 'Los comprobantes salen solos en la térmica y el cajón se abre en los cobros en efectivo.' : 'No hay agente de impresión en esta caja: cada comprobante abre la ventana de imprimir del navegador.'}</T>
+        <Btn c={c} icon={PackageOpen} onPress={a.openDrawer} disabled={!m.printAgent?.online || !m.canManageCash}>Abrir cajón</Btn>
+      </View>
       <View style={{ backgroundColor: c.paper, borderWidth: 1, borderColor: c.rule, padding: 16, gap: 8 }}>
         <T c={c} size={15} weight="800">Movimientos de efectivo</T>
         <Btn c={c} icon={ArrowDownLeft} onPress={() => a.openMovement('INGRESO')} disabled={!m.canManageCash}>Registrar ingreso</Btn>
@@ -615,6 +682,9 @@ export default function CashierWorkspace({ model: m, actions: a, helpers: h }) {
   return <SafeAreaView {...webAttr} style={{ flex: 1, backgroundColor: c.ground }}>
     {topBar}
     {notices}
+    {sel ? <AdjustDialog c={c} visible={adjustOpen || !!removing} removing={removing} onClose={() => { setAdjustOpen(false); setRemoving(null); }} order={sel} canAuthorize={m.canVoidPayments}
+      servicePercent={m.servicePercent} onApply={body => a.applyAdjustment(sel.id, body)} onRemove={a.removeAdjustment} /> : null}
+    {sel ? <SplitDialog c={c} visible={splitOpen} onClose={() => setSplitOpen(false)} order={sel} onSplit={body => a.splitByItems(sel.id, body)} /> : null}
     <View style={{ flex: 1, minHeight: 0 }}>{body}</View>
     {phone && !(view === 'cobrar' && sel) && !(view === 'venta' && phoneDraft) ? <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: c.ink, paddingBottom: BOTTOM_INSET }}>
       {nav.map(n => { const on = view === n.key; const Icon = n.icon; return <Press key={n.key} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={n.label} onPress={() => go(n.key)} scaleTo={0.96}

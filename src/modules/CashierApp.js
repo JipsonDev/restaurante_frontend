@@ -323,6 +323,19 @@ function CashierShell() {
     return () => { active = false; };
   }, [pendingKey]);
   const [cashReceived, setCashReceived] = useState('');
+  const [tipAmount, setTipAmount] = useState('');
+  // Agente de impresión de caja: si está conectado, los comprobantes salen directo en la térmica (y se abre el cajón).
+  const [printAgent, setPrintAgent] = useState({ online: false, checked: false });
+  const printAgentRef = useRef(false);
+  useEffect(() => {
+    let alive = true;
+    const check = () => axios.get(`${BASE_URL}/impresiones/estado`, { params: { modulo: 'caja' } })
+      .then(({ data }) => { if (alive) { printAgentRef.current = !!data?.agente_activo; setPrintAgent({ online: !!data?.agente_activo, checked: true, counts: data?.counts || {} }); } })
+      .catch(() => { if (alive) { printAgentRef.current = false; setPrintAgent({ online: false, checked: true }); } });
+    check();
+    const timer = setInterval(check, 15000);
+    return () => { alive = false; clearInterval(timer); };
+  }, []);
   const [reference, setReference] = useState('');
   const [billingMode, setBillingMode] = useState('FINAL');
   const [billingName, setBillingName] = useState('Consumidor Final');
@@ -516,6 +529,7 @@ function CashierShell() {
     const suggested = Math.ceil(Number(selectedOrder.saldo_pendiente ?? selectedOrder.total ?? 0) / 5) * 5;
     setChargeMode('TOTAL'); setPartialAmount(''); setDivisionId(null); setMixedAmounts({ Efectivo: '', Tarjeta: '' });
     setCashReceived(String(suggested || ''));
+    setTipAmount('');
     setReference('');
     setPaymentMethod('Efectivo');
     setBillingMode('FINAL');
@@ -536,10 +550,14 @@ function CashierShell() {
   const cashPortion = paymentMethod === 'Mixto' ? Number(mixedAmounts.Efectivo || 0) : paymentMethod === 'Efectivo' ? chargeAmount : 0;
   const mixedTotal = mixedParts.reduce((sum, part) => sum + Math.round(part.monto * 100), 0) / 100;
   const validCents = (amount) => Number.isFinite(amount) && amount >= 0 && Math.abs(amount * 100 - Math.round(amount * 100)) < 0.000001;
-  const change = Math.max(0, Number(cashReceived || 0) - cashPortion);
+  // Propina: aparte de la cuenta. Va con el mismo método del cobro (en mixto, en efectivo).
+  const tip = Number(String(tipAmount || 0).replace(',', '.')) || 0;
+  const tipMethod = tip > 0 ? (paymentMethod === 'Mixto' ? 'Efectivo' : paymentMethod) : null;
+  const cashNeeded = Math.round((cashPortion + (tipMethod === 'Efectivo' ? tip : 0)) * 100) / 100;
+  const change = Math.max(0, Math.round((Number(cashReceived || 0) - cashNeeded) * 100) / 100);
   const canCharge = pendingReady && !!selectedOrder && canManageCash && caja?.caja && validCents(chargeAmount) && chargeAmount > 0 && chargeAmount <= balanceDue &&
     (paymentMethod !== 'Mixto' || (mixedParts.length >= 2 && Object.values(mixedAmounts).every(value => value === '' || validCents(Number(value))) && Math.round(mixedTotal*100) === Math.round(chargeAmount*100))) &&
-    (!cashPortion || (validCents(Number(cashReceived)) && Number(cashReceived) >= cashPortion));
+    validCents(tip) && (!cashNeeded || (validCents(Number(cashReceived)) && Math.round(Number(cashReceived) * 100) >= Math.round(cashNeeded * 100)));
   const connected = syncStatus === 'connected';
   const selectedSplit = selectedOrder ? splitByOrder.get(Number(selectedOrder.id)) : null;
   const cartSubtotal = useMemo(
@@ -728,7 +746,25 @@ function CashierShell() {
     }
   });
 
+  // Envía a la térmica por el agente. Devuelve false si el agente no está (la caja usa la ventana del navegador).
+  const directPrint = async (texto, titulo, extra = {}) => {
+    try {
+      await axios.post(`${BASE_URL}/caja/imprimir`, { texto, titulo, logo_url: businessConfig.logo_url || null, ...extra });
+      return true;
+    } catch (error) {
+      if (error.response?.status === 409 && error.response?.data?.sin_agente) { printAgentRef.current = false; setPrintAgent((p) => ({ ...p, online: false })); return false; }
+      throw new Error(error.response?.data?.message || 'No se pudo enviar a la impresora de caja.');
+    }
+  };
+  const openDrawer = async () => {
+    try { await directPrint('', 'Cajón', { solo_cajon: true, motivo: 'Abrir cajón desde caja' }) || Alert.alert('Sin impresora de caja', 'El cajón se abre desde la impresora: conecta el agente de impresión de caja.'); }
+    catch (error) { Alert.alert('No se pudo abrir el cajón', error.message); }
+  };
+
   const printText = async (text, title = 'Ticket', options = {}) => {
+    if (printAgentRef.current && !options.forceWindow) {
+      if (await directPrint(text, title, options.direct || {})) { options.printWindow?.close?.(); return; }
+    }
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       const win = options.printWindow || window.open('', '_blank', 'width=420,height=680');
       if (win) {
@@ -842,7 +878,7 @@ function CashierShell() {
     }
     setCashBusy(true);
     // La ventana de impresión se abre en el mismo toque para que el navegador no la bloquee.
-    const printWindow = Platform.OS === 'web' && typeof window !== 'undefined' ? window.open('', '_blank', 'width=420,height=680') : null;
+    const printWindow = Platform.OS === 'web' && typeof window !== 'undefined' && !printAgentRef.current ? window.open('', '_blank', 'width=420,height=680') : null;
     try {
       const { data } = await axios.post(`${BASE_URL}/caja/cerrar`, {
         caja_id: closeCajaId,
@@ -856,7 +892,9 @@ function CashierShell() {
         total_ventas: turnTotals.total, total_efectivo: stats.byMethod.Efectivo, total_tarjeta: stats.byMethod.Tarjeta, total_transferencia: stats.byMethod.Transferencia, total_qr: stats.byMethod.QR,
         monto_inicial: caja?.caja?.monto_inicial, total_ingresos: movementStats.INGRESO, total_retiros: movementStats.RETIRO, total_gastos: movementStats.GASTO, total_devoluciones: movementStats.DEVOLUCION,
         total_anulaciones: turnTotals.anulaciones, efectivo_esperado: r.efectivo_esperado ?? caja?.efectivo_esperado, monto_final: r.monto_final ?? closeAmount,
-        diferencia_cierre: r.diferencia ?? (Number(closeAmount) - Number(caja?.efectivo_esperado || 0)), observacion_cierre: closeNote.trim() || null };
+        diferencia_cierre: r.diferencia ?? (Number(closeAmount) - Number(caja?.efectivo_esperado || 0)), observacion_cierre: closeNote.trim() || null,
+        total_descuentos: turnTotals.descuentos, total_cortesias: turnTotals.cortesias, total_propinas: turnTotals.propinas, total_propinas_efectivo: turnTotals.propinas_efectivo,
+        propinas_por_mesero: turnTotals.propinas_por_mesero || [] };
       printText(closureText(cerrado), `Corte Z caja ${closeCajaId}`, { ...businessConfig, printWindow }).catch(() => { printWindow?.close(); });
       await refreshAll();
     } catch (error) {
@@ -867,8 +905,17 @@ function CashierShell() {
     }
   });
 
-  const printSavedPayment = async (data, printWindow) => {
+  const printSavedPayment = async (data, printWindow, { direct = false, drawer = false } = {}) => {
     const paymentId = data.pago?.id || data.pago_id;
+    const texto = savedPaymentText(data.snapshot, data.pago || { id: paymentId, estado: 'ACTIVO' });
+    if (direct) {
+      // El agente imprime y registra el resultado en el pago. El cajón se abre si entró efectivo.
+      const cash = data.snapshot?.metodo === 'Efectivo' || (data.snapshot?.desglose || []).some((part) => part.metodo === 'Efectivo') || data.snapshot?.propina_metodo === 'Efectivo';
+      try {
+        if (await directPrint(texto, data.snapshot.comprobante_numero || 'Comprobante', { pago_id: paymentId, pedido_id: data.snapshot?.pedido?.id, abrir_cajon: drawer && cash })) { setHistoryVersion(v => v + 1); return; }
+      } catch (error) { await axios.post(`${BASE_URL}/caja/pagos/${paymentId}/impresion`, { estado: 'ERROR', error: error.message }).catch(() => {}); throw error; }
+      throw new Error('El agente de impresión se desconectó.');
+    }
     try {
       if (Platform.OS === 'web' && !printWindow) throw new Error('La ventana de impresion fue bloqueada. Permite ventanas emergentes.');
       await printText(savedPaymentText(data.snapshot, data.pago || { id: paymentId, estado: 'ACTIVO' }), data.snapshot.comprobante_numero || 'Comprobante',
@@ -881,9 +928,10 @@ function CashierShell() {
   };
   const reprintPayment = async (id) => {
     if (printBusy) return;
-    const win = Platform.OS === 'web' ? window.open('', '_blank', 'width=420,height=680') : null;
+    const direct = printAgentRef.current;
+    const win = Platform.OS === 'web' && !direct ? window.open('', '_blank', 'width=420,height=680') : null;
     setPrintBusy(true);
-    try { const { data } = await axios.get(`${BASE_URL}/caja/pagos/${id}`); await printSavedPayment(data, win); }
+    try { const { data } = await axios.get(`${BASE_URL}/caja/pagos/${id}`); await printSavedPayment(data, win, { direct }); }
     catch (error) { win?.close(); Alert.alert('No se pudo reimprimir', error.response?.data?.message || error.message); }
     finally { setPrintBusy(false); }
   };
@@ -895,7 +943,8 @@ function CashierShell() {
         Alert.alert('Datos incompletos', 'Ingresa nombre y cedula de 10 digitos o RUC de 13 digitos.'); return;
       }
     }
-    const printWindow = Platform.OS === 'web' ? window.open('', '_blank', 'width=420,height=680') : null;
+    const direct = printAgentRef.current;
+    const printWindow = Platform.OS === 'web' && !direct ? window.open('', '_blank', 'width=420,height=680') : null;
     setBusy(true);
     let registered = false;
     try {
@@ -903,7 +952,8 @@ function CashierShell() {
       if (!payload) {
         payload = { pedido_id: selectedOrder.id, metodo: paymentMethod, caja_id: caja?.caja?.id,
           monto: chargeAmount, parcial: chargeMode === 'PARCIAL', division_id: divisionId,
-          desglose: paymentMethod === 'Mixto' ? mixedParts : null, efectivo_recibido: cashPortion ? cashReceived : 0,
+          desglose: paymentMethod === 'Mixto' ? mixedParts : null, efectivo_recibido: cashNeeded ? cashReceived : 0,
+          propina: tip > 0 ? tip.toFixed(2) : null, propina_metodo: tipMethod,
           referencia: reference.trim() || null,
           factura_tipo: billingMode === 'ID' ? 'DOCUMENTO' : 'FINAL', factura_cliente: billingMode === 'ID' ? billingName.trim() : 'Consumidor Final',
           factura_documento: billingMode === 'ID' ? cleanDocument(billingId) : null,
@@ -918,7 +968,7 @@ function CashierShell() {
       pendingPaymentRef.current = null; setPendingPayment(null);
       setSelectedId(Number(settlement.snapshot.saldo_pendiente) > 0 ? payload.pedido_id : null);
       setHistoryVersion(v=>v+1);
-      try { await printSavedPayment(settlement, printWindow); }
+      try { await printSavedPayment(settlement, printWindow, { direct, drawer: true }); }
       catch (error) { printWindow?.close(); Alert.alert('Cobro guardado · impresión pendiente', `${error.message} Puedes reimprimir desde Comprobantes.`); }
       refreshAll().catch(()=>{});
     } catch (error) {
@@ -1028,6 +1078,21 @@ function CashierShell() {
     }
   });
 
+  // Descuento o cortesía: motivo obligatorio y autorización de admin o supervisor (su sesión o su correo y PIN).
+  const applyAdjustment = async (pedidoId, body) => {
+    await axios.post(`${BASE_URL}/caja/cuentas/${pedidoId}/ajustes`, body);
+    await refreshAll();
+  };
+  const removeAdjustment = async (ajusteId, authorization) => {
+    await axios.post(`${BASE_URL}/caja/ajustes/${ajusteId}/anular`, authorization ? { authorization } : {});
+    await refreshAll();
+  };
+  // Dividir la cuenta por platos desde caja: cada parte se cobra luego con «Cobrar esta parte».
+  const splitByItems = async (pedidoId, body) => {
+    await axios.post(`${BASE_URL}/pedidos/${pedidoId}/split/request`, body);
+    await refreshAll();
+  };
+
   const closureText = (item) => {
     const moneyFmt = (value) => moneyWithSettings(value, businessConfig);
     return [
@@ -1053,6 +1118,11 @@ function CashierShell() {
       receiptRow('Gastos', moneyFmt(item.total_gastos)),
       receiptRow('Devoluciones', moneyFmt(item.total_devoluciones)),
       receiptRow('Anulaciones', moneyFmt(item.total_anulaciones)),
+      Number(item.total_descuentos) ? receiptRow('Descuentos', moneyFmt(item.total_descuentos)) : '',
+      Number(item.total_cortesias) ? receiptRow('Cortesias', moneyFmt(item.total_cortesias)) : '',
+      Number(item.total_propinas) ? receiptRow('Propinas', moneyFmt(item.total_propinas)) : '',
+      Number(item.total_propinas_efectivo) ? receiptRow('  en efectivo (en caja)', moneyFmt(item.total_propinas_efectivo)) : '',
+      ...(item.propinas_por_mesero || []).map((row) => receiptRow(`  ${String(row.mesero).slice(0, 24)}`, moneyFmt(row.propina))),
       separator(),
       centerText('CUADRE'),
       receiptRow('Efectivo esperado', moneyFmt(item.efectivo_esperado)),
@@ -1085,7 +1155,7 @@ function CashierShell() {
       const url = URL.createObjectURL(blob);
       const link = window.document.createElement('a');
       link.href = url;
-      link.download = `cierres-caja-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.download = `cierres-caja-${new Date().toLocaleDateString('sv-SE')}.csv`;
       link.click();
       URL.revokeObjectURL(url);
       return;
@@ -1142,7 +1212,16 @@ function CashierShell() {
       receiptRow('TOTAL COBRADO', moneyFmt(turnTotals.total)), receiptRow('Comprobantes', String(turnTotals.pagos || 0)), separator(), centerText('EFECTIVO'),
       receiptRow('Fondo de apertura', moneyFmt(caja.caja.monto_inicial)), receiptRow('Cobros en efectivo', moneyFmt(stats.byMethod.Efectivo)),
       receiptRow('Ingresos', moneyFmt(movementStats.INGRESO)), receiptRow('Retiros', moneyFmt(movementStats.RETIRO)), receiptRow('Gastos', moneyFmt(movementStats.GASTO)),
-      receiptRow('Devoluciones', moneyFmt(movementStats.DEVOLUCION)), receiptRow('DEBE HABER', moneyFmt(caja.efectivo_esperado)), separator(),
+      receiptRow('Devoluciones', moneyFmt(movementStats.DEVOLUCION)),
+      Number(turnTotals.propinas_efectivo) ? receiptRow('Propinas en efectivo', moneyFmt(turnTotals.propinas_efectivo)) : '',
+      receiptRow('DEBE HABER', moneyFmt(caja.efectivo_esperado)), separator(),
+      Number(turnTotals.descuentos) || Number(turnTotals.cortesias) ? centerText('DESCUENTOS Y CORTESIAS') : '',
+      Number(turnTotals.descuentos) ? receiptRow('Descuentos', moneyFmt(turnTotals.descuentos)) : '',
+      Number(turnTotals.cortesias) ? receiptRow('Cortesias', moneyFmt(turnTotals.cortesias)) : '',
+      Number(turnTotals.propinas) ? centerText('PROPINAS POR MESERO') : '',
+      ...(turnTotals.propinas_por_mesero || []).map((row) => receiptRow(String(row.mesero).slice(0, 26), moneyFmt(row.propina))),
+      Number(turnTotals.propinas) ? receiptRow('TOTAL PROPINAS', moneyFmt(turnTotals.propinas)) : '',
+      Number(turnTotals.propinas) ? separator() : '',
       centerText('Documento interno - no cierra el turno'),
     ].filter(Boolean).join('\n'), `Corte X caja ${caja.caja.id}`, businessConfig).catch((error) => Alert.alert('No se pudo imprimir', error.message));
   };
@@ -1173,7 +1252,8 @@ function CashierShell() {
         customer, customerError, saleType, saleNote, paymentMethods, paymentMethod, cashReceived, reference,
         billingMode, billingName, billingId, billingPhone, billingEmail, matchingClients,
         menuSearch, menuCategory, menuCategories, filteredMenu: visibleProducts, orderSearch, orderFilter,
-        busy, cashBusy, adminBusy, orderBusy, canCharge, canManageCash, canRequestPaymentActions, cashNotice }}
+        busy, cashBusy, adminBusy, orderBusy, canCharge, canManageCash, canRequestPaymentActions, canVoidPayments, cashNotice,
+        tip, tipAmount, tipMethod, cashNeeded, printAgent, servicePercent: Number(businessConfig.servicio_porcentaje || 0) }}
       actions={{ openOrder, closeOrder: closeOrderModal, logout, toggleTheme: toggle,
         setBillingMode, setBillingName, setBillingId: (value) => setBillingId(cleanDocument(value)),
         setBillingPhone, setBillingEmail, selectBillingClient, setPaymentMethod, setCashReceived, setReference,
@@ -1181,7 +1261,7 @@ function CashierShell() {
         setSaleNote: (value) => { if (!orderActionLock.current) setSaleNote(value); },
         setMenuSearch, setMenuCategory, setOrderSearch, setOrderFilter, addToCart, changeCartQty,
         clearCart: () => { if (!orderActionLock.current) setCart([]); }, createPickupOrder, handleCharge,
-        printReceipt, reprintPayment, printShiftReport, setChargeMode, setPartialAmount, setDivisionId, setMixedAmounts, handleOpenCaja, handleCloseCaja, openMovement, openPaymentAuthorization,
+        printReceipt, reprintPayment, printShiftReport, setTipAmount, openDrawer, applyAdjustment, removeAdjustment, splitByItems, setChargeMode, setPartialAmount, setDivisionId, setMixedAmounts, handleOpenCaja, handleCloseCaja, openMovement, openPaymentAuthorization,
         showHistory: () => setHistoryModal(true), dismissNotice: () => setCashNotice(null) }}
       helpers={{ money, orderLabel, itemLineTotal, itemExtras, activePayment, assetUrl }}
     />
