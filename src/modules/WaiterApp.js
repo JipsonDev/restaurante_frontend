@@ -64,7 +64,7 @@ import { useTheme, operationalColors as UI_COLORS, tableStatusMeta, WaiterAppear
 import { ComandaToastProvider, FONT as COMANDA_FONT, useComandaFonts, useComandaToast, useToastLift } from '../components/waiter/comanda';
 import Logo from '../components/Logo';
 import WaiterFloor from '../components/WaiterFloor';
-import { TableActionsSheet, TransferSheet, readyItems, readyRounds, salonHaptic, useTodayReservations } from '../components/waiter/salon'; // Salón:
+import { ReservationHoldSheet, ReservationsTodaySheet, TableActionsSheet, TransferSheet, readyItems, readyRounds, salonHaptic, useTodayReservations } from '../components/waiter/salon'; // Salón:
 import { addDraftProduct, changeDraftQuantity, addCustomizedProduct, addLines } from '../utils/waiterCart.mjs';
 import { topProducts, lastRoundItems, extrasForProduct } from '../utils/waiterFavorites.mjs'; // Menú:
 import CustomizeSheet from '../components/waiter/CustomizeSheet'; // Menú:
@@ -88,7 +88,12 @@ import {
   notifyWaiterInApp,
   registerWaiterPushToken,
 } from '../services/waiterNotifications';
-import { ALERT_TONES, playWebAlertTone } from '../services/webAudioAlerts';
+import { alertWaiter, loadAlertSettings, notificationPermission, requestNotificationPermission } from '../services/waiterAlerts';
+import * as safeStorage from '../services/storage';
+import { packSnapshot, parseSnapshot, queuedByTable, snapshotAge } from '../utils/offlineSnapshot.mjs';
+import { dueReminders } from '../utils/waiterAlertLogic.mjs';
+import { arrivingSoon, timeOf as reservationTime } from '../utils/reservationLogic.mjs';
+import { CalendarClock as ReserveIcon } from 'lucide-react-native';
 
 const DEFAULT_BUSINESS_CONFIG = {
   servicio_porcentaje: '0',
@@ -326,6 +331,18 @@ function App() {
   const [resendTick, setResendTick] = useState(0);
   const [queueAttempt, setQueueAttempt] = useState(0);
   const [queueWakeAt, setQueueWakeAt] = useState(0);
+  // Sin internet: copia local de lo último visto y estado de la red del teléfono.
+  const [snapshotAt, setSnapshotAt] = useState(null);
+  const snapshotSavedAt = useRef(0);
+  const [browserOnline, setBrowserOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine !== false);
+  // Reservas: mesa apartada (pregunta antes de abrir cuenta) y lista de hoy.
+  const [holdSheet, setHoldSheet] = useState(null); // { mesa, reserva, resend? }
+  const reservationChoice = useRef({}); // { [mesa_id]: { reserva_id } | { ignorar: true } }
+  const [reservationsOpen, setReservationsOpen] = useState(false);
+  const [arrivingId, setArrivingId] = useState(null);
+  // Avisos de cocina: permiso del sistema y si ya se descartó la invitación a activarlos.
+  const [alertPermission, setAlertPermission] = useState(() => notificationPermission());
+  const [alertPromptDismissed, setAlertPromptDismissed] = useState(true);
   const [queueRetrying, setQueueRetrying] = useState(false);
   const queueLock = useRef(false);
   const kitchenNoticeTimer = useRef(null);
@@ -586,6 +603,7 @@ function App() {
   const exclusionExtras = useMemo(() => extras.filter((extra) => extra.tipo !== 'EXTRA'), [extras]);
   const paidExtras = useMemo(() => extras.filter((extra) => extra.tipo === 'EXTRA'), [extras]);
 
+  const saveSnapshotRef = useRef(null);
   useEffect(() => {
     const queue = createRefreshQueue(async () => {
       setBackgroundSyncing(true);
@@ -600,6 +618,7 @@ function App() {
     }, ({ tables, orders }) => {
       setMesas(tables); setPedidos(orders); setLoadError(false);
       setLastSyncAt(Date.now());
+      saveSnapshotRef.current?.({ mesas: tables, pedidos: orders });
     }, () => setLoadError(true));
     liveSyncQueue.current = queue;
     return () => { queue.stop(); liveSyncQueue.current = null; };
@@ -610,6 +629,41 @@ function App() {
 
   // BUG FIX #8: loadData en useCallback para que pueda incluirse en deps de useEffect
   // sin crear un loop infinito.
+  // Copia local: se guarda al cargar y, como mucho, cada 20 s con las actualizaciones en vivo.
+  const snapshotKey = `mm:waiter-snapshot:v1:${user?.id}`;
+  const snapshotParts = useRef({});
+  const needsFullLoad = useRef(false); // la última carga completa falló: se repite al volver la conexión
+  const saveSnapshot = useCallback((parts, force = false) => {
+    snapshotParts.current = { ...snapshotParts.current, ...parts };
+    const now = Date.now();
+    if (!force && now - snapshotSavedAt.current < 20000) return;
+    snapshotSavedAt.current = now;
+    try { safeStorage.setItem(snapshotKey, packSnapshot(snapshotParts.current, now)).catch(() => {}); } catch { /* aún faltan datos */ }
+  }, [snapshotKey]);
+  // Al abrir, lo último que se vio aparece al instante (y sirve si no hay internet).
+  useEffect(() => {
+    let alive = true;
+    safeStorage.getItem(snapshotKey).then(raw => {
+      const saved = parseSnapshot(raw);
+      if (!alive || !saved || dataLoaded.current) return;
+      setMesas(saved.mesas); setPedidos(saved.pedidos); setExtras(saved.extras);
+      setProductos(saved.productos.filter((p) => Number(p.disponible ?? 1) === 1));
+      if (saved.config) setBusinessConfig(saved.config);
+      snapshotParts.current = saved;
+      setSnapshotAt(saved.at);
+      dataLoaded.current = true;
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [snapshotKey]);
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
+    const on = () => setBrowserOnline(true), off = () => setBrowserOnline(false);
+    window.addEventListener('online', on); window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
+
+  saveSnapshotRef.current = saveSnapshot;
+
   const loadData = useCallback(async () => {
     if (loadDataLock.current) return;
     loadDataLock.current = true;
@@ -631,11 +685,15 @@ function App() {
       setExtras(extrasRes.data);
       setBusinessConfig(configRes.data || DEFAULT_BUSINESS_CONFIG);
       dataLoaded.current = true;
+      needsFullLoad.current = false;
       setLoadError(false);
       setLastSyncAt(Date.now());
+      saveSnapshot({ mesas: mesasRes.data, productos: productosRes.data, pedidos: pedidosRes.data, extras: extrasRes.data, config: configRes.data || DEFAULT_BUSINESS_CONFIG }, true);
     } catch (error) {
       setLoadError(true);
-      setCustomAlert({
+      needsFullLoad.current = true;
+      // Con la copia local a la vista no se interrumpe al mesero: la franja «Sin internet» ya lo explica.
+      if (!dataLoaded.current) setCustomAlert({
         title: 'No se pudieron cargar los datos',
         message: 'Revisa la conexión y usa Actualizar en el menú para reintentar. ' +
           (error.response?.data?.message || error.message),
@@ -649,8 +707,8 @@ function App() {
   useEffect(() => { loadData(); }, [loadData]);
 
   useEffect(() => {
-    if (realtimeStatus === 'connected' && !dataLoaded.current) loadData();
-  }, [realtimeStatus, loadData]);
+    if ((realtimeStatus === 'connected' || browserOnline) && (!dataLoaded.current || needsFullLoad.current)) loadData();
+  }, [realtimeStatus, browserOnline, loadData]);
 
   const openPedidoFromNotification = useCallback((data = {}) => {
     const mesaId = Number(data.mesa_id || data.mesaId || data.pedido?.mesa_id || 0);
@@ -737,17 +795,8 @@ function App() {
     realtimeStatusRef.current = realtimeStatus;
     if (previous === realtimeStatus || realtimeStatus === 'connected' || realtimeStatus === 'connecting') return;
 
-    if (Platform.OS === 'web') {
-      playWebAlertTone(ALERT_TONES.SYNC_ERROR);
-    }
-    addNotification({
-      key: `sync-${realtimeStatus}-${Date.now()}`,
-      title: 'Error de sincronizacion',
-      body: realtimeStatus === 'error'
-        ? 'No se pudo conectar con el servidor.'
-        : 'El modulo de mesero perdio conexion en tiempo real.',
-      action: 'sync_error',
-    });
+    // Con internet inestable esto pasa seguido: sin sonido ni ventana. La franja «Sin internet» lo muestra
+    // y al volver la conexión se actualiza y se envían solas las rondas guardadas.
   }, [addNotification, realtimeStatus]);
 
   useEffect(() => {
@@ -881,13 +930,38 @@ function App() {
     };
   }, [addNotification, scheduleLiveSync, user?.id]);
 
-  const selectMesa = useCallback((mesa) => {
+  // Salón: reservas de hoy (próxima por mesa, lista completa y mesas apartadas).
+  const salonReservations = useTodayReservations(!!user);
+  const openMesa = useCallback((mesa) => {
     setOrderMode('mesa');
     setSelectedExpressPedidoId(null);
     setMesaSel(mesa.id);
     setEditItemId(null);
     setStep('productos'); // tocar una mesa abre el menú para pedir; la cuenta queda a un toque
-  }, [activeOrderForMesa]);
+  }, []);
+  const selectMesa = useCallback((mesa) => {
+    // Mesa apartada por una reserva y sin cuenta abierta: se pregunta antes de sentar a alguien.
+    const held = !activeOrderForMesa(mesa.id) && !reservationChoice.current[mesa.id] ? salonReservations.held?.(mesa.id) : null;
+    if (held) { setHoldSheet({ mesa, reserva: held }); return; }
+    openMesa(mesa);
+  }, [activeOrderForMesa, salonReservations, openMesa]);
+  const resolveHold = (choice) => {
+    const hold = holdSheet;
+    if (!hold) return;
+    reservationChoice.current[hold.mesa.id] = choice;
+    setHoldSheet(null);
+    if (hold.resend) setResendTick(n => n + 1); else openMesa(hold.mesa);
+  };
+  const markReservationArrived = async (reserva) => {
+    setArrivingId(reserva.id);
+    try {
+      await axios.put(`${BASE_URL}/reservas/${reserva.id}/estado`, { estado: 'LLEGO' }, { timeout: 10000 });
+      toast.show(`${reserva.cliente_nombre}: llegó`, { tone: 'success', detail: reserva.mesa_numero ? `Mesa ${reserva.mesa_numero}` : undefined });
+      salonReservations.reload?.();
+    } catch (error) {
+      toast.show('No se pudo marcar la llegada', { tone: 'error', detail: error.response?.data?.message || error.message });
+    } finally { setArrivingId(null); }
+  };
 
   const startExpressOrder = (tipo = 'Para llevar') => {
     if (!drafts.ready || orderSendLock.current) return;
@@ -1096,6 +1170,10 @@ function App() {
         destino_cocina: true,
         destino_caja: true,
         abrir_cuenta_caja: true,
+        prepared_at: new Date().toISOString(),
+        ...(!isExpressOrder ? { avisar_reserva: true } : {}),
+        ...(!isExpressOrder && reservationChoice.current[mesaSel]?.reserva_id ? { reserva_id: reservationChoice.current[mesaSel].reserva_id }
+          : !isExpressOrder && reservationChoice.current[mesaSel]?.ignorar ? { ignorar_reserva: true } : {}),
         items: cart.map(i => ({
           producto_id: i.producto_id,
           cantidad: i.cantidad,
@@ -1106,9 +1184,10 @@ function App() {
       };
 
       const request = await drafts.prepare(cartKey, payload);
-      const { data } = await axios.post(`${BASE_URL}/pedidos`, request, { timeout: 20000 });
+      const { data } = await axios.post(`${BASE_URL}/pedidos`, request, { timeout: 12000 });
       const savedOrder = confirmedOrder(data, request);
       await drafts.complete(cartKey);
+      if (!isExpressOrder) { delete reservationChoice.current[mesaSel]; if (request.reserva_id) salonReservations.reload?.(); }
 
       // BUG FIX #11 continuación: normalizar mesa_id siempre
       const finalOrder = { ...savedOrder };
@@ -1167,10 +1246,15 @@ function App() {
       const serverMessage = error.response?.data?.message || error.response?.data?.error || error.message;
       if (kind === 'offline' || kind === 'retry') {
         setQueueAttempt(0); setQueueWakeAt(Date.now() + nextDelay(0));
-        toast.show(kind === 'offline' ? 'Sin conexión · ronda en cola' : 'El servidor no respondió · ronda en cola', {
-          tone: 'warning', detail: 'Se enviará sola al volver la red. No se duplica.',
+        toast.show(kind === 'offline' ? 'Sin internet: la ronda quedó guardada' : 'El servidor no respondió: la ronda quedó guardada', {
+          tone: 'warning', detail: 'Cocina todavía no la ve. Se envía sola al volver el internet, sin duplicarse.', duration: 6000,
         });
         setStep(isExpressOrder ? 'express' : 'mesas');
+      } else if (error.response?.data?.code === 'MESA_RESERVADA' && mesaActual) {
+        // Otra persona reservó la mesa mientras tanto: se pregunta y se reenvía con la respuesta.
+        await drafts.reject(cartKey).catch(() => {});
+        salonReservations.reload?.();
+        setHoldSheet({ mesa: mesaActual, reserva: error.response.data.reserva, resend: true });
       } else if (kind === 'changed') {
         await drafts.reject(cartKey).catch(() => {});
         await reviewPriceChanges(serverMessage);
@@ -1442,7 +1526,10 @@ function App() {
   const renderSideMenu = () => <WaiterMoreSheet open={menuOpen} onClose={() => setMenuOpen(false)} name={meseroNombre} navigate={navigate}
     dark={isDark} toggleTheme={toggleTheme} refresh={loadData} logout={logout}
     draftCount={draftKeys.length} draftAttention={!!drafts.error || Object.keys(drafts.pending).length > 0} openDrafts={() => setDraftListOpen(true)}
-    connection={realtimeStatus} lastSyncAt={lastSyncAt} syncing={loading || backgroundSyncing} syncError={loadError} contextLabel={catalog.label} />;
+    connection={realtimeStatus} lastSyncAt={lastSyncAt} syncing={loading || backgroundSyncing} syncError={loadError} contextLabel={catalog.label}
+    pendingCount={Object.keys(drafts.pending || {}).length} retryQueue={() => flushQueue(true)} offline={offline}
+    reservationCount={(salonReservations.list || []).filter(r => ['PENDIENTE', 'CONFIRMADA'].includes(r.estado)).length} openReservations={() => setReservationsOpen(true)}
+    alertPermission={alertPermission} enableAlerts={enableAlerts} />;
 
   // Menú: «Destino del pedido» como hoja inferior, mesas por zona con su estado por forma; Express como secundario.
   const renderTargetPicker = () => <>
@@ -1494,28 +1581,37 @@ function App() {
   const renderDraftStatus = () => {
     // Comanda: errores de guardado + bandeja de rondas en cola (visible en todas las vistas).
     const queued = (step === 'pedido' || orderSending) && pendingSend ? queueSummary(Object.fromEntries(Object.entries(drafts.pending || {}).filter(([k]) => k !== String(cartKey))), mesas) : queueSummary(drafts.pending, mesas);
-    if (!drafts.error && !queued.length) return null;
+    if (!drafts.error && !queued.length && !offline) return null;
     return <View>
       {drafts.error ? <View style={{ paddingHorizontal: bodyPad, paddingVertical: 10, backgroundColor: colors.surface, borderBottomWidth: 1, borderColor: colors.line }}>
         <CT size={14} color={colors.danger}>{drafts.error} Conserva esta página abierta y vuelve a intentar.</CT></View> : null}
-      <OfflineQueue entries={queued} retrying={queueRetrying} onRetry={() => flushQueue(true)} nextIn={queueWakeAt ? Math.max(0, queueWakeAt - Date.now()) : 0} />
+      <OfflineQueue entries={queued} retrying={queueRetrying} onRetry={() => flushQueue(true)} nextIn={queueWakeAt ? Math.max(0, queueWakeAt - Date.now()) : 0}
+        offline={offline} savedLabel={offline && (lastSyncAt || snapshotAt) ? snapshotAge(lastSyncAt || snapshotAt) : null} />
     </View>;
   };
-  const renderDraftList = () => (
-    <Modal visible={draftListOpen} transparent animationType="fade" onRequestClose={() => setDraftListOpen(false)}>
-      <View style={{ flex: 1, backgroundColor: '#0f172a88', padding: 16, alignItems: 'center', justifyContent: 'center' }}>
-        <View style={{ width: '100%', maxWidth: 520, maxHeight: '85%', backgroundColor: colors.surface, borderRadius: 10, padding: 20, gap: 12 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}><Text style={{ flex: 1, color: colors.ink, fontWeight: '500', fontSize: 18 }}>Tus borradores</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar borradores" onPress={() => setDraftListOpen(false)} style={{ padding: 10 }}><X size={20} color={colors.muted} /></TouchableOpacity></View>
-          {drafts.recovered ? <Text style={{ color: colors.success, fontSize: 12 }}>Recuperamos tus borradores guardados.</Text> : null}
-          <Text style={{ color: colors.muted, fontSize: 12 }}>Disponibles para tu usuario en este equipo. Los precios y la disponibilidad se revisan antes del envío.</Text>
-          <ScrollView contentContainerStyle={{ gap: 8 }}>
-            <ExpressDraftList drafts={drafts} colors={colors} onOpen={resumeDraft} onDiscard={discardDraft} />
-            {draftKeys.filter(key => !isExpressDraftKey(key)).map(key => <TouchableOpacity key={key} accessibilityRole="button" accessibilityLabel={`Recuperar ${draftLabel(key)}`} onPress={() => resumeDraft(key)} style={{ padding: 14, borderWidth: 1, borderColor: colors.line, borderRadius: 6, gap: 5 }}><Text style={{ color: colors.ink, fontWeight: '500' }}>{draftLabel(key)}</Text><Text style={{ color: colors.muted, fontSize: 12 }}>{drafts.pending[key] ? 'Envío pendiente de confirmar · reintento protegido' : `${carritos[key]?.length || 0} producto(s) · continuar pedido`}</Text></TouchableOpacity>)}
-          </ScrollView>
-        </View>
-      </View>
-    </Modal>
-  );
+  // Pedidos a medias guardados en este teléfono (mesas y Express).
+  const renderDraftList = () => {
+    const tableKeys = draftKeys.filter(key => !isExpressDraftKey(key));
+    return <CBottomSheet visible={draftListOpen} onClose={() => setDraftListOpen(false)} title="Pedidos guardados" subtitle="Están en este teléfono. Todavía no llegan a cocina.">
+      {!draftKeys.length ? <View style={{ alignItems: 'center', paddingVertical: 24, gap: 6 }}>
+        <CT size={17} weight="800">No hay pedidos a medias</CT>
+        <CT size={14} color={colors.muted} style={{ textAlign: 'center' }}>Lo que empieces a anotar y no envíes aparecerá aquí.</CT>
+      </View> : null}
+      {tableKeys.map(key => {
+        const waiting = !!drafts.pending[key];
+        const count = (carritos[key] || []).reduce((n, it) => n + Number(it.cantidad || 0), 0);
+        return <TouchableOpacity key={key} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={`Continuar ${draftLabel(key)}`} onPress={() => resumeDraft(key)}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 20, backgroundColor: colors.surfaceAlt || colors.elevated, borderWidth: waiting ? 2 : 0, borderColor: colors.warning }}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <CT size={17} weight="800" numberOfLines={1}>{draftLabel(key)}</CT>
+            <CT size={14} color={colors.muted}>{waiting ? 'Sin enviar a cocina · se reintenta sola' : `${count} ${count === 1 ? 'producto' : 'productos'} sin enviar`}</CT>
+          </View>
+          <CT size={15} weight="800" color={colors.brand}>Continuar</CT>
+        </TouchableOpacity>;
+      })}
+      {Object.keys(drafts.expressDrafts).length ? <ExpressDraftList drafts={drafts} colors={colors} onOpen={resumeDraft} onDiscard={discardDraft} /> : null}
+    </CBottomSheet>;
+  };
 
   // Comanda: en tablet (≥900) Menú y Comanda comparten pantalla: catálogo a la izquierda, hoja a la derecha.
   const bareShell = useRef(false);
@@ -1563,8 +1659,7 @@ function App() {
     );
   };
 
-  // Salón: reservas de hoy, acciones rápidas (mantener presionada), bandeja «Listo».
-  const salonReservations = useTodayReservations(!!user);
+  // Salón: acciones rápidas (mantener presionada), bandeja «Listo».
   const [salonActionsMesa, setSalonActionsMesa] = useState(null);
   const [trayDelivering, setTrayDelivering] = useState(null);
   const salonReady = useMemo(() => readyRounds(pedidos, serviceNow), [pedidos, serviceNow]);
@@ -1614,22 +1709,71 @@ function App() {
     }
   }, [kitchenNotice]);
 
+  // Recordatorio: una ronda lista que nadie ha llevado vuelve a sonar a los 3, 6 y 9 minutos.
+  const reminderState = useRef({});
+  useEffect(() => {
+    const { due, state } = dueReminders(salonReady, reminderState.current, Date.now());
+    reminderState.current = state;
+    if (!due.length) return;
+    const first = due[0];
+    const where = first.pedido.mesa_id ? `Mesa ${first.pedido.mesa_numero || first.pedido.mesa_id}` : `Pedido #${first.pedido.id}`;
+    const title = due.length === 1 ? `${where}: lista hace ${first.minutes} min` : `${due.length} rondas listas esperando`;
+    alertWaiter('ready', { title, body: 'Sigue en cocina. Llévala a la mesa.', tag: 'recordatorio-listo' });
+    toast.show(title, { tone: 'warning', detail: 'Sigue en cocina sin entregar.', haptic: false, duration: 6000, action: { label: 'Ver', onPress: () => setNotiOpen(true) } });
+  }, [salonReady]);
+
+  // Reservas: aviso cuando faltan 15 minutos o menos para que lleguen.
+  const soonWarned = useRef(new Set());
+  useEffect(() => {
+    for (const { reserva, minutos } of arrivingSoon(salonReservations.list || [], salonReservations.now)) {
+      if (soonWarned.current.has(reserva.id)) continue;
+      soonWarned.current.add(reserva.id);
+      const title = `Reserva en ${minutos} min: ${reserva.cliente_nombre}`;
+      const detail = `${reservationTime(reserva.fecha_hora)} · ${reserva.personas} ${Number(reserva.personas) === 1 ? 'persona' : 'personas'} · ${reserva.mesa_id != null ? `Mesa ${reserva.mesa_numero}` : 'sin mesa asignada'}`;
+      alertWaiter('reserve', { title, body: detail, tag: `reserva-${reserva.id}` });
+      toast.show(title, { tone: 'info', icon: ReserveIcon, detail, haptic: false, duration: 6000, action: { label: 'Ver', onPress: () => setReservationsOpen(true) } });
+    }
+  }, [salonReservations]);
+
+  // Avisos: preferencias guardadas y la invitación a permitir los avisos del sistema.
+  useEffect(() => {
+    loadAlertSettings().catch(() => null);
+    safeStorage.getItem('mm:waiter-alerts-prompt').then(v => setAlertPromptDismissed(v === 'no')).catch(() => setAlertPromptDismissed(false));
+  }, []);
+  const enableAlerts = async () => {
+    const result = await requestNotificationPermission();
+    setAlertPermission(result);
+    setAlertPromptDismissed(true); safeStorage.setItem('mm:waiter-alerts-prompt', 'no').catch(() => {});
+    if (result === 'granted') { alertWaiter('ready', { title: 'Avisos activados' }); toast.show('Avisos activados', { tone: 'success', detail: 'Así sonará cuando un plato esté listo.' }); }
+    else if (result === 'denied') toast.show('El navegador bloqueó los avisos', { tone: 'warning', detail: 'Igual sonará con la app abierta. Para el aviso del sistema, permite las notificaciones en los ajustes del sitio.', duration: 8000 });
+  };
+  const dismissAlertsPrompt = () => { setAlertPromptDismissed(true); safeStorage.setItem('mm:waiter-alerts-prompt', 'no').catch(() => {}); };
+  const offline = !browserOnline || (loadError && realtimeStatus !== 'connected');
+  const queuedTables = useMemo(() => queuedByTable(drafts.pending), [drafts.pending]);
+
   const renderMesas = () => <>
     {renderShell(<WaiterFloor
       colors={colors} width={width} groups={mesasPorUbicacion} counts={tableCounts} now={serviceNow} alerts={serviceAlerts}
       search={mesaSearch} setSearch={setMesaSearch} filter={mesaFilter} setFilter={setMesaFilter}
       compact={compactTables} setCompact={setCompactTables} selected={mesaSel} selectTable={selectMesa}
       stateFor={mesaEstadoVisual} orderFor={activeOrderForMesa} zones={mesaZones} zone={mesaZone} setZone={setMesaZone}
-      refresh={loadData} refreshing={loading} loadError={loadError}
+      refresh={loadData} refreshing={loading} loadError={loadError} offline={offline} queued={queuedTables}
+      alertsPrompt={{ visible: alertPermission === 'default' && !alertPromptDismissed, enable: enableAlerts, dismiss: dismissAlertsPrompt }}
       reservations={salonReservations} onLongPressTable={setSalonActionsMesa} openTray={() => setNotiOpen(true)} readyCount={salonReady.length + salonPartial.length}
     />)}
     <TableActionsSheet mesa={salonActionsMesa} state={salonActionsMesa ? mesaEstadoVisual(salonActionsMesa) : 'Libre'} order={salonActionsOrder} onClose={() => setSalonActionsMesa(null)}
       actions={{
-        order: () => { const m = salonActionsMesa; salonFocusMesa(m); setStep('productos'); },
+        order: () => selectMesa(salonActionsMesa),
         view: () => selectMesa(salonActionsMesa),
         bill: () => salonPedirCuenta(salonActionsMesa),
         transfer: () => { salonFocusMesa(salonActionsMesa); setTransferOpen(true); },
       }} />
+  </>;
+  const renderReservationSheets = () => <>
+    <ReservationHoldSheet hold={holdSheet} onClose={() => setHoldSheet(null)}
+      onSeat={() => resolveHold({ reserva_id: holdSheet?.reserva?.id })} onUseAnyway={() => resolveHold({ ignorar: true })} />
+    <ReservationsTodaySheet open={reservationsOpen} onClose={() => setReservationsOpen(false)} reservations={salonReservations.list || []} now={salonReservations.now}
+      onArrived={markReservationArrived} busyId={arrivingId} />
   </>;
 
   const renderExpress = () => renderShell(<WaiterExpress
@@ -1667,58 +1811,21 @@ function App() {
     chooseTarget={() => setTargetOpen(true)} onAdd={handleAddProduct} onDecrement={handleDecrementProduct} onCustomize={openCustomize}
     favorites={favoriteProducts} repeat={repeatSummary ? { ...repeatSummary, onPress: handleRepeatRound } : null}
     account={pedidoActual && Number(pedidoActual.total) > 0 ? { total: Number(pedidoActual.total), open: () => setStep('pedido') } : null}
-    refresh={loadData} loading={loading} loadError={loadError} bottomInset={BOTTOM_INSET}
+    refresh={loadData} loading={loading} loadError={loadError && !offline} bottomInset={BOTTOM_INSET}
   />, false);
 
-  const renderPromociones = () => {
-    // Menú: promociones como líneas de comanda, mismo lenguaje que la carta.
-    const listHeader = (
-      <View style={{ paddingBottom: 12, gap: 12 }}>
-        {renderCatalogContext()}
-        <MenuSearch value={promoBusqueda} onChangeText={setPromoBusqueda} placeholder="Buscar promociones" />
-        {promoCategorias.length > 2 ? renderCategoryTabs(promoCategorias, promoCategoria, setPromoCategoria) : null}
-        <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
-          <Text style={{ color: colors.ink, fontSize: 20, fontWeight: '800' }}>Promociones</Text>
-          <Text style={{ color: colors.muted, fontSize: 13 }}>{promocionesFiltradas.length} {promocionesFiltradas.length === 1 ? 'promo' : 'promos'}</Text>
-        </View>
-      </View>
-    );
-
-    return renderShell(
-      <FlatList
-        data={promocionesFiltradas}
-        keyExtractor={(item) => item.id.toString()}
-        showsVerticalScrollIndicator={false}
-        initialNumToRender={12}
-        windowSize={7}
-        removeClippedSubviews={Platform.OS !== 'web'}
-        keyboardShouldPersistTaps="handled"
-        style={{ backgroundColor: colors.pageBg }}
-        contentContainerStyle={{ padding: bodyPad, paddingTop: 16, paddingBottom: BOTTOM_INSET + 32, maxWidth: 760, width: '100%', alignSelf: 'center' }}
-        ListHeaderComponent={listHeader}
-        ListEmptyComponent={
-          <View style={{ alignItems: 'center', paddingVertical: 40, gap: 8 }}>
-            {promociones.length === 0 ? <BadgePercent size={32} color={colors.faint || colors.muted} /> : <Search size={32} color={colors.faint || colors.muted} />}
-            <Text style={{ color: colors.ink, fontSize: 18, fontWeight: '700' }}>{promociones.length === 0 ? 'Sin promociones activas' : 'Nada coincide con la búsqueda'}</Text>
-            <Text style={{ color: colors.muted, fontSize: 15, textAlign: 'center' }}>{promociones.length === 0 ? 'Cuando el administrador cree promos aparecerán aquí.' : 'Prueba con otro nombre.'}</Text>
-          </View>
-        }
-        renderItem={({ item }) => (
-          <ProductCard
-            producto={item}
-            canAdd={catalog.editable}
-            locked={!!pendingSend || orderSending}
-            chooseTarget={() => setTargetOpen(true)}
-            qty={cartQtyByProduct[item.id] || 0}
-            isPromo={true}
-            onPress={(p) => handleAddProduct(p, true)}
-            onDecrement={handleDecrementProduct}
-          />
-        )}
-      />,
-      false
-    );
-  };
+  // Promos y combos: la misma cuadrícula con imágenes que el menú.
+  const renderPromociones = () => renderShell(<WaiterCatalog
+    draftState={{saving:drafts.saving,error:drafts.error,pending:!!pendingSend,sending:orderSending}}
+    colors={colors} width={width} products={promociones} categories={promoCategorias} category={promoCategoria} setCategory={setPromoCategoria}
+    search={promoBusqueda} setSearch={setPromoBusqueda} preferences={menuPreferences}
+    title="Promos y combos" searchPlaceholder="Buscar promociones" emptyTitle="Sin promociones activas" emptyDescription="Cuando el administrador cree promos aparecerán aquí."
+    catalog={catalog} locked={!!pendingSend || orderSending}
+    counts={cartQtyByProduct} cartCount={cartCount} cartTotal={showingCart ? subtotal : 0} openOrder={() => setStep('pedido')}
+    chooseTarget={() => setTargetOpen(true)} onAdd={(p) => handleAddProduct(p, true)} onDecrement={(p) => handleDecrementProduct(p, true)} onCustomize={openCustomize}
+    account={pedidoActual && Number(pedidoActual.total) > 0 ? { total: Number(pedidoActual.total), open: () => setStep('pedido') } : null}
+    refresh={loadData} loading={loading} loadError={loadError && !offline} bottomInset={BOTTOM_INSET}
+  />, false);
 
   // BUG FIX #12: renderOrderItem — extraído como función pura (sin closures sobre
   // estado cambiante) y envuelto en useCallback para evitar re-renders innecesarios
@@ -1909,6 +2016,7 @@ function App() {
       {transferOpen ? renderTransferModal() : null}
       {splitOpen ? renderSplitBillModal() : null}
       {notiOpen ? renderNotifications() : null}
+      {renderReservationSheets()}
       {renderSideMenu()}
     </View>
   );

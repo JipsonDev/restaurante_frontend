@@ -1,24 +1,11 @@
-import { Platform } from 'react-native';
-import { ALERT_TONES, installWebAudioUnlock, playWebAlertTone } from './webAudioAlerts';
+// Avisos del mesero en la web: sonido, vibración y aviso del sistema (ver waiterAlerts.js).
+import { installWebAudioUnlock } from './webAudioAlerts';
+import { alertWaiter, loadAlertSettings } from './waiterAlerts';
 
-function playWebChime() {
-  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-  playWebAlertTone(ALERT_TONES.ORDER_READY);
-}
-
-async function showWebNotification({ title, body, data }) {
-  if (typeof window === 'undefined' || !('Notification' in window)) return;
-  if (window.Notification.permission === 'granted') {
-    const notification = new window.Notification(title, { body, data });
-    notification.onclick = () => {
-      window.focus?.();
-      notification.close();
-    };
-  }
-}
-
+let loaded = false;
 export async function configureWaiterNotifications() {
   installWebAudioUnlock();
+  if (!loaded) { loaded = true; await loadAlertSettings(); }
 }
 
 export async function registerWaiterPushToken() {
@@ -28,15 +15,11 @@ export async function registerWaiterPushToken() {
 export async function unregisterWaiterPushToken() {}
 
 export async function notifyWaiterInApp({ title, body, data }) {
-  installWebAudioUnlock();
-  const notification = {
-    title: title || 'Mesa lista',
-    body: body || 'Pedido listo para recoger.',
-    data: data || {},
-  };
-
-  playWebChime();
-  await showWebNotification(notification);
+  await configureWaiterNotifications();
+  alertWaiter(data?.action === 'manual_ping' ? 'call' : 'ready', {
+    title: title || 'Mesa lista', body: body || 'Pedido listo para recoger.',
+    tag: `listo-${data?.pedido_id ?? ''}`,
+  });
 }
 
 export function addWaiterNotificationResponseListener() {

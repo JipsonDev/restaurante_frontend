@@ -175,22 +175,38 @@ export function TearAway({ tearing, children, style }) {
   return <Animated.View style={[style, { opacity: v.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }), transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [0, -24] }) }, { scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 0.97] }) }] }]}>{children}</Animated.View>;
 }
 
-// Bandeja de rondas en cola (sin conexión). Se reenvían solas al volver la red.
-export function OfflineQueue({ entries = [], retrying, onRetry, nextIn }) {
+// Estado de la conexión y rondas guardadas sin enviar. Siempre a la vista, arriba de todas las pantallas.
+//  · Sin internet y nada pendiente: una línea tranquila («sigue tomando pedidos»).
+//  · Rondas sin enviar: cuáles son, desde cuándo esperan y un botón para reintentar.
+const hhmm = value => { const d = value ? new Date(value) : null; return d && !Number.isNaN(d.getTime()) ? d.toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : ''; };
+export function OfflineQueue({ entries = [], retrying, onRetry, nextIn, offline, savedLabel }) {
   const { c } = useTheme();
-  if (!entries.length) return null;
-  return <View accessibilityLiveRegion="polite" style={{ marginHorizontal: space.lg, marginTop: space.md, padding: space.lg, borderRadius: radius.lg, backgroundColor: c.amberSoft, gap: space.sm }}>
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-      <CloudOff size={18} color={c.amber} />
-      <T size={15} weight="700" style={{ flex: 1 }}>{entries.length === 1 ? '1 ronda en cola' : `${entries.length} rondas en cola`}</T>
-      <Button variant="ink" size="sm" icon={RefreshCw} loading={retrying} onPress={onRetry}>Reintentar</Button>
+  if (!entries.length && !offline) return null;
+  const count = entries.length;
+  const title = count ? (count === 1 ? '1 ronda sin enviar a cocina' : `${count} rondas sin enviar a cocina`) : 'Sin internet';
+  const detail = count
+    ? (offline ? 'Están guardadas en este teléfono. Se envían solas al volver el internet.' : `Reintentando${nextIn ? ` en ${Math.ceil(nextIn / 1000)} s` : '…'} No se duplican.`)
+    : `Puedes seguir tomando pedidos: se guardan aquí y se envían al volver el internet.${savedLabel ? ` Mesas y menú de ${savedLabel}.` : ''}`;
+  return <View accessibilityRole="alert" accessibilityLiveRegion="polite" style={{ marginHorizontal: space.md, marginTop: space.sm, paddingVertical: space.md, paddingHorizontal: space.lg, borderRadius: radius.lg, backgroundColor: c.amberSoft, gap: space.sm }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+      <CloudOff size={20} color={c.amber} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <T size={15} weight="800">{title}</T>
+        <T size={13} color={c.muted}>{detail}</T>
+      </View>
+      {count ? <Button variant="ink" size="sm" icon={RefreshCw} loading={retrying} onPress={onRetry} accessibilityLabel="Reintentar el envío ahora">Reintentar</Button> : null}
     </View>
-    <T size={14} color={c.muted}>Sin confirmar del servidor. Se enviarán solas al volver la conexión{nextIn ? ` (próximo intento en ${Math.ceil(nextIn / 1000)} s)` : ''}. No se duplican.</T>
-    {entries.map(e => <LeaderLine key={e.key} dim left={<T size={15}>{e.label} · <Num size={15}>{e.items}</Num> art.</T>} right={<Num size={15}>{money(e.total)}</Num>} />)}
+    {count ? <View style={{ gap: 4 }}>
+      {entries.map(e => <View key={e.key} style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 32 }}>
+        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: c.amber }} />
+        <T size={15} weight="700" style={{ flex: 1 }} numberOfLines={1}>{e.label}</T>
+        <T size={13} color={c.muted}>{e.items} {e.items === 1 ? 'producto' : 'productos'}{hhmm(e.since) ? ` · ${hhmm(e.since)}` : ''}</T>
+        <Num size={15} weight="700">{money(e.total)}</Num>
+      </View>)}
+    </View> : null}
   </View>;
 }
 
-// Hoja de cambios de precio: muestra antes → ahora y permite aceptar y reenviar.
 export function PriceChangesSheet({ visible, diffs = [], message, onAccept, onClose, busy }) {
   const { c } = useTheme();
   return <BottomSheet visible={visible} onClose={onClose} busy={busy} title="Cambiaron los precios" subtitle={message || 'Revisa antes de enviar la ronda.'}

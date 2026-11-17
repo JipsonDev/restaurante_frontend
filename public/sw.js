@@ -1,4 +1,4 @@
-const CACHE_NAME = 'morena-mia-webapp-v4';
+const CACHE_NAME = 'morena-mia-webapp-v5';
 const APP_SHELL = ['/', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/icon-maskable-192.png', '/icons/icon-maskable-512.png', '/icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (event) => {
@@ -53,5 +53,16 @@ self.addEventListener('fetch', (event) => {
         return response;
       })
       .catch(() => caches.match(request))
+  );
+});
+
+// Al tocar un aviso («Mesa 4 lista») se abre o se trae al frente la app.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      const open = clients.find((client) => 'focus' in client);
+      return open ? open.focus() : self.clients.openWindow(event.notification.data?.url || '/');
+    })
   );
 });
