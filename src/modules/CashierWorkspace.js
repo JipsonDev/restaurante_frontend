@@ -1,215 +1,627 @@
-import CashierPayments from './CashierPayments';
-import React, { useEffect, useRef, useState } from 'react';
-import { Image, Modal, SafeAreaView, ScrollView, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, CheckCircle2, ChevronRight, Clock, FileText, LogOut, Minus, Moon, Plus, Printer, Receipt, Search, ShoppingBag, Sun, Table2, Trash2, User, WalletCards, Wifi, WifiOff, X } from 'lucide-react-native';
+// Caja — punto de cobro. Dirección «Comprobante»: cada cuenta se lee como el comprobante que va a emitirse.
+// Toda la lógica de cobro vive en CashierApp (CashierShell); aquí solo se dibuja y se llama a sus acciones.
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { SafeAreaView, ScrollView, TextInput, View, useWindowDimensions } from 'react-native';
+import {
+  ArrowDownLeft, ArrowLeft, ArrowUpRight, Banknote, Ban, Clock, CreditCard, FileText, Gift, Hash, Layers, LogOut, Minus, Moon, Plus,
+  Printer, Receipt, RefreshCw, Search, ShoppingBag, Store, Sun, Table2, Trash2, WalletCards, Wifi, WifiOff, X,
+} from 'lucide-react-native';
 import Logo from '../components/Logo';
 import { BOTTOM_INSET, TOP_INSET } from '../utils/safeArea';
+import CashierPayments from './CashierPayments';
+import {
+  Badge, Btn, Cell, CellInput, Cells, Empty, FONT, IconBtn, Kbd, Keypad, Lbl, Num, Press, Seg, Serial, T, TotalRow,
+  WEB, applyKey, haptic, money, r, sp, tokens, toNum, useCajaFonts,
+} from '../components/cashier/kit';
 
-const row = { flexDirection: 'row', alignItems: 'center' };
-const moneyStyle = { fontVariant: ['tabular-nums'] };
-function Action({ label, icon: Icon, onPress, p, primary = false, disabled = false, compact = false, style, accessibilityLabel }) {
-  const color = primary ? p.onPrimary : p.text;
-  return <TouchableOpacity accessibilityRole="button" accessibilityLabel={accessibilityLabel || label} disabled={disabled} onPress={onPress} activeOpacity={0.75}
-    style={[row, { minHeight: compact ? 36 : 44, paddingHorizontal: compact ? 12 : 16, borderRadius: 9, gap: 8, justifyContent: 'center', borderWidth: 1, borderColor: primary ? p.accent : p.line, backgroundColor: primary ? p.accent : p.surface, opacity: disabled ? 0.4 : 1 }, style]}>
-    {Icon ? <Icon size={compact ? 15 : 17} color={color} /> : null}<Text style={{ color, fontSize: 13, fontWeight: '600' }}>{label}</Text>
-  </TouchableOpacity>;
-}
-function Input({ p, label, style, ...props }) {
-  return <View style={[{ gap: 7, flex: 1, minWidth: 0 }, style]}>
-    {label ? <Text style={{ color: p.muted, fontSize: 12, fontWeight: '600' }}>{label}</Text> : null}
-    <TextInput accessibilityLabel={label || props.placeholder} placeholderTextColor={p.faint} {...props}
-      style={{ height: 44, flexShrink: 0, paddingHorizontal: 12, borderWidth: 1, borderColor: p.line, borderRadius: 8, backgroundColor: p.surface, color: p.text, fontSize: 14 }} />
-  </View>;
-}
-function Chip({ p, children, onPress, active = false }) {
-  return <TouchableOpacity accessibilityRole="button" accessibilityState={{ selected: active }} onPress={onPress}
-    style={{ paddingHorizontal: 13, paddingVertical: 9, borderRadius: 8, backgroundColor: active ? p.primarySoft : p.surface, borderWidth: 1, borderColor: active ? p.primary : p.line }}>
-    <Text style={{ color: active ? p.primaryText : p.muted, fontSize: 12, fontWeight: '600' }}>{children}</Text>
-  </TouchableOpacity>;
-}
+const METHOD_ICON = { Efectivo: Banknote, Tarjeta: CreditCard, Transferencia: RefreshCw, QR: Hash, Vales: Gift, Mixto: Layers };
+const KITCHEN = { PENDIENTE: 'En cola', PREPARANDO: 'En cocina', LISTO: 'Listo para servir', ENTREGADO: 'Servido' };
+const parseDate = v => { if (!v) return null; const d = new Date(String(v).replace(' ', 'T')); return Number.isNaN(d.getTime()) ? null : d; };
+const hhmm = v => { const d = parseDate(v); return d ? d.toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit', hour12: false }) : '—'; };
+const minutesSince = v => { const d = parseDate(v); return d ? Math.max(0, Math.round((Date.now() - d.getTime()) / 60000)) : null; };
+// Tiempo de la cuenta: «hace 12 min»; pasada una hora, la hora de apertura; otro día, la fecha.
+const ago = v => { const m = minutesSince(v); if (m == null) return ''; if (m < 1) return 'ahora'; if (m < 60) return `hace ${m} min`;
+  const d = parseDate(v); return m < 24 * 60 ? `desde ${hhmm(v)}` : `${d.toLocaleDateString('es-EC', { day: '2-digit', month: 'short' })} ${hhmm(v)}`; };
+const onControl = () => { if (!WEB || typeof document === 'undefined') return false; const el = document.activeElement; return !!el && el !== document.body && (el.getAttribute?.('role') || el.tagName === 'BUTTON'); };
+const typing = () => { if (!WEB || typeof document === 'undefined') return false; const el = document.activeElement; return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable); };
 
 export default function CashierWorkspace({ model: m, actions: a, helpers: h }) {
+  useCajaFonts();
+  const c = tokens[m.isDark ? 'dark' : 'light'];
   const { width } = useWindowDimensions();
-  const [section, setSection] = useState('venta');
-  const scrollRef = useRef(null);
-  useEffect(() => { scrollRef.current?.scrollTo({ y: 0, animated: false }); }, [section, m.selectedOrder?.id]);
-  const [catalog, setCatalog] = useState(false);
-  const desktop = width >= 1200, columns = width >= 860, phone = width < 600;
-  const p = m.pos;
-  const pad = phone ? 16 : 26;
-  const card = { backgroundColor: p.surface, borderWidth: 1, borderColor: p.line, borderRadius: 12, overflow: 'hidden' };
-  const selected = m.selectedOrder;
-  const lines = selected?.items || m.cart;
-  const total = selected ? m.chargeAmount : m.cartTotal;
-  const title = section === 'venta' ? 'Facturación' : section === 'cuentas' ? 'Cuentas pendientes' : section === 'pagos' ? 'Comprobantes' : 'Mi caja';
-  const nav = [['venta', 'Facturación', Receipt], ['cuentas', 'Cuentas pendientes', Table2], ['pagos', 'Comprobantes', FileText], ['turno', 'Mi caja', WalletCards]];
-  const chooseOrder = (order) => { a.openOrder(order); setSection('venta'); };
-  const newSale = () => { a.closeOrder(); setSection('venta'); };
-  const money = (value) => Number.isFinite(Number(value)) ? h.money(value) : '—';
-  const draftService = Math.max(0, m.cartTotal - m.cartSubtotal);
-  const date = new Date().toLocaleDateString('es-EC', { day: 'numeric', month: 'long', year: 'numeric' });
+  const three = width >= 1024, two = width >= 760, phone = width < 760;
+  const roomy = width >= 1280;
+  const [view, setView] = useState('cobrar');
+  const [target, setTarget] = useState('recibido'); // a dónde escribe el teclado numérico
+  const fresh = useRef(true); // la primera tecla reemplaza el monto sugerido
+  const searchRef = useRef(null);
+  const sel = m.selectedOrder;
+  const openCaja = !!m.caja?.caja;
 
-  const empty = (Icon, heading, detail, action) => <View style={{ alignItems: 'center', justifyContent: 'center', padding: phone ? 26 : 44, minHeight: 250, gap: 12 }}>
-    <View style={{ width: 60, height: 60, borderRadius: 18, backgroundColor: p.primarySoft, alignItems: 'center', justifyContent: 'center', marginBottom: 3 }}><Icon size={27} color={p.primaryText} strokeWidth={1.5} /></View>
-    <Text style={{ fontSize: 18, fontWeight: '600', color: p.text, textAlign: 'center' }}>{heading}</Text>
-    <Text style={{ color: p.muted, fontSize: 13, lineHeight: 21, textAlign: 'center', maxWidth: 315 }}>{detail}</Text>
-    {action}
-  </View>;
-  const summaryLine = (label, value) => <View style={[row, { justifyContent: 'space-between' }]} key={label}>
-    <Text style={{ color: p.muted, fontSize: 13 }}>{label}</Text><Text style={[moneyStyle, { color: p.text, fontSize: 14, fontWeight: '500' }]}>{money(value)}</Text>
-  </View>;
+  // Al cambiar de cuenta o de método, el teclado vuelve a «Recibido» (o al abono si se cobra por partes).
+  useEffect(() => { fresh.current = true; setTarget(m.chargeMode === 'PARCIAL' ? 'abono' : m.paymentMethod === 'Mixto' ? 'Efectivo' : 'recibido'); }, [sel?.id, m.paymentMethod, m.chargeMode]);
+  // Una venta directa confirmada pasa sola a cobro.
+  const prevSel = useRef(sel?.id);
+  useEffect(() => { if (sel?.id && sel.id !== prevSel.current && view === 'venta' && !m.cart.length) setView('cobrar'); prevSel.current = sel?.id; }, [sel?.id]);
 
-  const invoice = () => <View style={{ flexDirection: columns ? 'row' : 'column', alignItems: 'flex-start', gap: 20 }}>
-    <View style={{ flex: columns ? 1 : undefined, width: columns ? undefined : '100%', minWidth: 0, gap: 16 }}>
-      <View style={card}>
-        <View style={[row, { padding: 20, justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: p.line, gap: 8 }]}>
-          <View style={{ gap: 5, flex: 1 }}><Text style={{ color: p.faint, fontSize: 10, fontWeight: '700', letterSpacing: 1.6 }}>DOCUMENTO DE VENTA</Text>
-            <Text style={{ color: p.text, fontSize: 20, fontWeight: '600' }}>{selected ? h.orderLabel(selected) : 'Nueva venta'}</Text></View>
-          <View style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, backgroundColor: selected ? p.amberSoft : p.soft }}><Text style={{ color: selected ? p.amber : p.muted, fontSize: 11, fontWeight: '600' }}>{selected ? (Number(selected.abonado)>0?'Abonado':'Por cobrar') : 'Borrador'}</Text></View>
+  const padValue = t => t === 'recibido' ? m.cashReceived : t === 'abono' ? m.partialAmount : (m.mixedAmounts[t] || '');
+  const padWrite = (t, next) => {
+    if (t === 'recibido') a.setCashReceived(next);
+    else if (t === 'abono') { a.setPartialAmount(next); a.setDivisionId(null); }
+    else a.setMixedAmounts(old => ({ ...old, [t]: next }));
+  };
+  const pressKey = k => {
+    if (m.busy) return;
+    const base = fresh.current && k !== 'back' ? '' : padValue(target);
+    fresh.current = false;
+    padWrite(target, applyKey(base, k));
+  };
+
+  // Atajos de teclado (web): F2 buscar, F3 venta directa, F8 cobrar, F9 precuenta, Esc soltar cuenta; números al teclado de cobro.
+  const live = useRef({});
+  live.current = { m, a, view, pressKey, sel, docOk: true };
+  useEffect(() => {
+    if (!WEB || typeof window === 'undefined') return;
+    const onKey = e => {
+      const { m: mm, a: aa, view: v, pressKey: pk, sel: s } = live.current;
+      if (e.key === 'F2') { e.preventDefault(); setView('cobrar'); setTimeout(() => searchRef.current?.focus?.(), 30); return; }
+      if (e.key === 'F3') { e.preventDefault(); aa.closeOrder(); setView('venta'); return; }
+      if (e.key === 'F8') { e.preventDefault(); if (v === 'cobrar' && !mm.busy && (mm.pendingPayment || (s && mm.canCharge && live.current.docOk))) aa.handleCharge(); return; }
+      if (e.key === 'F9') { e.preventDefault(); if (v === 'cobrar' && s && !mm.busy) aa.printReceipt(); return; }
+      if (typing() || v !== 'cobrar' || !s) return;
+      if (e.key === 'Enter' && onControl()) return; // Enter sobre un botón activa ese botón, no cobra
+      if (e.key === 'Escape') { aa.closeOrder(); return; }
+      if (/^[0-9]$/.test(e.key)) { e.preventDefault(); pk(e.key); }
+      else if (e.key === '.' || e.key === ',') { e.preventDefault(); pk('.'); }
+      else if (e.key === 'Backspace') { e.preventDefault(); pk('back'); }
+      else if (e.key === 'Enter' && mm.canCharge && !mm.busy && !mm.pendingPayment && live.current.docOk) { e.preventDefault(); aa.handleCharge(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const porCobrar = m.activeOrders.reduce((s, o) => s + Number(o.saldo_pendiente ?? o.total ?? 0), 0);
+  const nav = [
+    { key: 'cobrar', label: 'Cobrar', icon: Receipt, count: m.activeOrders.length, kbd: 'F2' },
+    { key: 'venta', label: 'Venta directa', short: 'Venta', icon: ShoppingBag, kbd: 'F3' },
+    { key: 'comprobantes', label: 'Comprobantes', icon: FileText },
+    { key: 'turno', label: 'Turno', icon: WalletCards },
+  ];
+  const go = key => { if (key === 'venta') a.closeOrder(); setView(key); };
+
+  // ── Barra superior (tinta) ────────────────────────────────────────────────
+  const topBar = <View style={{ backgroundColor: c.ink, paddingTop: TOP_INSET }}>
+    <View style={{ height: 56, flexDirection: 'row', alignItems: 'center', paddingHorizontal: phone ? 12 : 16, gap: phone ? 8 : 16 }}>
+      <View style={{ width: phone ? 92 : 120, justifyContent: 'center' }}><Logo dark height={phone ? 26 : 30} /></View>
+      {!phone ? <View accessibilityRole="tablist" style={{ flexDirection: 'row', alignItems: 'stretch', height: 56, gap: 2 }}>
+        {nav.map(n => { const on = view === n.key; const Icon = n.icon; return <Press key={n.key} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={n.label}
+          onPress={() => go(n.key)} scaleTo={0.98} hoverStyle={on ? null : { backgroundColor: 'rgba(255,255,255,0.06)' }}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, borderBottomWidth: 3, borderColor: on ? c.onInk : 'transparent' }}>
+          <Icon size={17} color={on ? c.onInk : c.inkMuted} />
+          {three ? <T c={c} size={14} weight={on ? '700' : '500'} color={on ? c.onInk : c.inkMuted}>{width < 1100 && n.short ? n.short : n.label}</T> : null}
+          {n.count ? <Num c={c} size={12} weight="700" color={on ? c.onInk : c.inkMuted} style={{ paddingHorizontal: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.10)' }}>{n.count}</Num> : null}
+        </Press>; })}
+      </View> : null}
+      <View style={{ flex: 1 }} />
+      <Press accessibilityRole="button" accessibilityLabel={openCaja ? `Turno ${m.caja.caja.id} abierto. Ver turno` : 'Caja cerrada. Abrir caja'} onPress={() => openCaja ? setView('turno') : a.handleOpenCaja()}
+        scaleTo={0.97} hoverStyle={{ backgroundColor: 'rgba(255,255,255,0.08)' }}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 8, height: 36, paddingHorizontal: 10, borderRadius: r.md, borderWidth: 1, borderColor: c.inkLine }}>
+        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: openCaja ? '#3FB873' : '#E8A93B' }} />
+        <T c={c} size={13} weight="600" color={c.onInk} numberOfLines={1}>{openCaja ? (!three ? `Turno ${m.caja.caja.id}` : `Turno ${m.caja.caja.id} · desde ${hhmm(m.caja.caja.fecha_apertura)}`) : 'Caja cerrada'}</T>
+      </Press>
+      {!phone ? <View accessibilityLabel={m.connected ? 'Conectado en tiempo real' : 'Sin conexión en tiempo real'} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        {m.connected ? <Wifi size={16} color="#3FB873" /> : <WifiOff size={16} color="#E8A93B" />}
+        {width >= 1180 ? <T c={c} size={13} color={c.inkMuted}>{m.connected ? 'En vivo' : 'Reconectando'}</T> : null}
+      </View> : null}
+      <IconBtn c={c} onInk icon={m.isDark ? Sun : Moon} label={m.isDark ? 'Tema claro' : 'Tema oscuro'} onPress={a.toggleTheme} />
+      {three ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: c.inkLine, alignItems: 'center', justifyContent: 'center' }}>
+          <T c={c} size={12} weight="700" color={c.onInk}>{String(m.user?.nombre || 'C').split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase()}</T>
         </View>
-        <View style={{ padding: 20, gap: 17 }}>
-          <View style={[row, { gap: 8 }]}><User size={16} color={p.muted} /><Text style={{ color: p.text, fontSize: 14, fontWeight: '600' }}>Cliente y comprobante</Text></View>
-          {selected ? <>
-            <View style={[row, { gap: 8, flexWrap: 'wrap' }]}>{[['FINAL','Consumidor final'],['ID','Con cédula / RUC']].map(([key,label]) => <Chip key={key} p={p} active={m.billingMode === key} onPress={() => a.setBillingMode(key)}>{label}</Chip>)}</View>
-            <View style={{ flexDirection: phone ? 'column' : 'row', gap: 12 }}>
-              <Input p={p} label="Nombre o razón social" value={m.billingMode === 'FINAL' ? 'Consumidor Final' : m.billingName} onChangeText={a.setBillingName} editable={m.billingMode === 'ID' && !m.busy} placeholder="Nombre del cliente" />
-              {m.billingMode === 'ID' ? <Input p={p} label="Cédula / RUC" value={m.billingId} onChangeText={a.setBillingId} keyboardType="number-pad" maxLength={13} editable={!m.busy} placeholder="Número de documento" /> : null}
-            </View>
-            {m.billingMode === 'ID' ? <View style={{ flexDirection: phone ? 'column' : 'row', gap: 12 }}><Input p={p} label="Correo electrónico" value={m.billingEmail} onChangeText={a.setBillingEmail} keyboardType="email-address" editable={!m.busy} placeholder="Opcional" /><Input p={p} label="Teléfono" value={m.billingPhone} onChangeText={a.setBillingPhone} editable={!m.busy} keyboardType="phone-pad" placeholder="Opcional" /></View> : null}
-            {m.matchingClients.map((client) => <TouchableOpacity accessibilityRole="button" key={client.id} onPress={() => a.selectBillingClient(client)} style={{ padding: 10, backgroundColor: p.surfaceAlt, borderRadius: 6 }}><Text style={{ color: p.primaryText, fontSize: 12 }}>{client.nombre} · {client.documento}</Text></TouchableOpacity>)}
-          </> : <>
-            <View style={[row, { gap: 8 }]}>{['Para llevar','Delivery'].map((kind) => <Chip p={p} key={kind} active={kind === m.saleType} onPress={() => !m.orderBusy && a.setSaleType(kind)}>{kind}</Chip>)}</View>
-            <Input p={p} label="Nombre del cliente" value={m.customer.nombre} onChangeText={a.setCustomerName} placeholder="¿A nombre de quién es el pedido?" editable={!m.orderBusy} />
-            {m.customerError ? <Text style={{ color: p.red, fontSize: 12 }}>{m.customerError}</Text> : null}
-          </>}
+        {roomy ? <T c={c} size={13} color={c.onInk} numberOfLines={1}>{m.user?.nombre || 'Caja'}</T> : null}
+      </View> : null}
+      <IconBtn c={c} onInk icon={LogOut} label="Cerrar sesión" onPress={a.logout} />
+    </View>
+  </View>;
+
+  // ── Avisos (cobro pendiente, caja cerrada, eventos) ────────────────────────
+  const notices = <>
+    {m.pendingPayment ? <View accessibilityRole="alert" style={{ flexDirection: phone ? 'column' : 'row', alignItems: phone ? 'stretch' : 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: c.amberSoft, borderBottomWidth: 1, borderColor: c.line }}>
+      <T c={c} size={14} weight="600" color={c.amber} style={{ flex: 1 }}>Hay un cobro sin confirmar del pedido #{m.pendingPayment.pedido_id} por {money(m.pendingPayment.monto)}. Reintenta: se usa el mismo identificador y no se duplica.</T>
+      <Btn c={c} size="sm" variant="ink" icon={RefreshCw} onPress={a.handleCharge} loading={m.busy} kbd="F8">Reintentar cobro</Btn>
+    </View> : null}
+    {m.cashNotice ? <View accessibilityRole="alert" style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderColor: c.line,
+      backgroundColor: m.cashNotice.type === 'error' ? c.redSoft : m.cashNotice.type === 'warning' ? c.amberSoft : m.cashNotice.type === 'success' ? c.greenSoft : c.blueSoft }}>
+      <T c={c} size={14} weight="700" color={m.cashNotice.type === 'error' ? c.red : m.cashNotice.type === 'warning' ? c.amber : m.cashNotice.type === 'success' ? c.green : c.blue}>{m.cashNotice.title}</T>
+      <T c={c} size={14} color={c.text} style={{ flex: 1 }} numberOfLines={1}>{m.cashNotice.message}</T>
+      <IconBtn c={c} icon={X} label="Cerrar aviso" onPress={a.dismissNotice} size={32} />
+    </View> : null}
+  </>;
+
+  // ── Lista de cuentas ───────────────────────────────────────────────────────
+  const filters = [['TODOS', 'Todas'], ['CUENTA', 'Pidieron cuenta'], ['MESAS', 'Mesas'], ['EXPRESS', 'Para llevar'], ['DELIVERY', 'Delivery']];
+  const countFor = key => m.activeOrders.filter(o => {
+    const pickup = !o.mesa_id || ['Para llevar', 'Delivery'].includes(o.tipo);
+    if (key === 'MESAS') return !pickup; if (key === 'EXPRESS') return pickup && o.tipo !== 'Delivery'; if (key === 'DELIVERY') return o.tipo === 'Delivery'; if (key === 'CUENTA') return !!o.cuenta_solicitada_at; return true;
+  }).length;
+  const accountRow = o => {
+    const on = sel && Number(sel.id) === Number(o.id);
+    const asked = !!o.cuenta_solicitada_at;
+    const fg = on ? (c.isDark ? c.ink : c.onInk) : c.text;
+    const sub = on ? (c.isDark ? '#3A3D43' : c.inkMuted) : c.faint;
+    const items = (o.items || []).reduce((s, i) => s + Number(i.cantidad || 0), 0);
+    return <Press key={o.id} accessibilityRole="button" accessibilityState={{ selected: !!on }} accessibilityLabel={`${h.orderLabel(o)}, saldo ${money(o.saldo_pendiente ?? o.total)}${asked ? ', pidió la cuenta' : ''}`}
+      onPress={() => { haptic('select'); a.openOrder(o); }} scaleTo={0.99} hoverStyle={on ? null : { backgroundColor: c.hover }}
+      style={{ flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderColor: c.line, backgroundColor: on ? (c.isDark ? c.onInk : c.ink) : 'transparent' }}>
+      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {o.mesa_id ? <Table2 size={15} color={sub} /> : <ShoppingBag size={15} color={sub} />}
+          <T c={c} size={15} weight="700" color={fg} numberOfLines={1} style={{ flexShrink: 1 }}>{h.orderLabel(o)}</T>
+        </View>
+        <T c={c} size={13} color={sub} numberOfLines={1}>{[`#${o.id}`, `${items} ${items === 1 ? 'producto' : 'productos'}`, KITCHEN[o.estado] || o.estado, ago(o.created_at)].filter(Boolean).join(' · ')}</T>
+        {asked || Number(o.abonado) > 0 ? <View style={{ flexDirection: 'row', gap: 6, marginTop: 3 }}>
+          {asked ? <Badge c={c} tone="amber">{`Pidió la cuenta ${hhmm(o.cuenta_solicitada_at)}`}</Badge> : null}
+          {Number(o.abonado) > 0 ? <Badge c={c} tone="blue">{`Abonado ${money(o.abonado)}`}</Badge> : null}
+        </View> : null}
+      </View>
+      <Num c={c} size={16} weight="700" color={fg}>{money(o.saldo_pendiente ?? o.total)}</Num>
+    </Press>;
+  };
+  const accounts = <View style={{ flex: 1, backgroundColor: c.paper }}>
+    <View style={{ padding: 12, gap: 10, borderBottomWidth: 1, borderColor: c.line }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, height: 44, paddingHorizontal: 12, borderRadius: r.md, borderWidth: 1, borderColor: c.rule, backgroundColor: c.paper }}>
+        <View style={{ flexShrink: 0 }}><Search size={17} color={c.faint} /></View>
+        <TextInput ref={searchRef} value={m.orderSearch} onChangeText={a.setOrderSearch} placeholder="Buscar mesa, cliente o pedido" placeholderTextColor={c.faint} accessibilityLabel="Buscar cuenta"
+          style={[{ flex: 1, fontFamily: FONT, fontSize: 15, color: c.text, height: 42 }, WEB ? { outlineStyle: 'none' } : null]} />
+        {m.orderSearch ? <IconBtn c={c} icon={X} label="Borrar búsqueda" onPress={() => a.setOrderSearch('')} size={30} /> : <Kbd c={c}>F2</Kbd>}
+      </View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+        {filters.map(([k, l]) => { const on = m.orderFilter === k; const n = countFor(k); return <Press key={k} accessibilityRole="button" accessibilityState={{ selected: on }} onPress={() => a.setOrderFilter(k)} scaleTo={0.97}
+          hoverStyle={on ? null : { backgroundColor: c.hover }}
+          style={{ height: 32, paddingHorizontal: 10, borderRadius: r.md, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: on ? 'transparent' : c.rule, backgroundColor: on ? (c.isDark ? c.onInk : c.ink) : c.paper }}>
+          <T c={c} size={13} weight={on ? '700' : '600'} color={on ? (c.isDark ? c.ink : c.onInk) : c.muted}>{l}</T>
+          <Num c={c} size={12} weight="700" color={on ? (c.isDark ? '#3A3D43' : c.inkMuted) : c.faint}>{n}</Num>
+        </Press>; })}
+      </View>
+    </View>
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: phone ? 24 : 0 }}>
+      {m.filteredOrders.map(accountRow)}
+      {!m.filteredOrders.length ? <Empty c={c} icon={Table2} title={m.activeOrders.length ? 'Ninguna cuenta coincide' : 'No hay cuentas abiertas'}
+        description={m.activeOrders.length ? 'Prueba otra búsqueda o cambia el filtro.' : 'Cuando un mesero tome un pedido, la cuenta aparece aquí para cobrarla.'}
+        action={m.activeOrders.length ? <Btn c={c} size="sm" onPress={() => { a.setOrderSearch(''); a.setOrderFilter('TODOS'); }}>Ver todas</Btn> : <Btn c={c} size="sm" icon={ShoppingBag} onPress={() => go('venta')}>Venta directa</Btn>} /> : null}
+    </ScrollView>
+    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: 1, borderColor: c.line, backgroundColor: c.paperAlt }}>
+      <T c={c} size={13} color={c.muted}>{m.activeOrders.length} {m.activeOrders.length === 1 ? 'cuenta abierta' : 'cuentas abiertas'}</T>
+      <T c={c} size={13} color={c.muted}>Por cobrar <Num c={c} size={14} weight="800">{money(porCobrar)}</Num></T>
+    </View>
+  </View>;
+
+  // ── Comprobante en curso (documento) ──────────────────────────────────────
+  const invoice = m.billingMode === 'ID';
+  const nextNumber = invoice ? m.caja?.siguiente_factura : m.caja?.siguiente_ticket;
+  const docIds = useMemo(() => new Set((sel?.originalOrders || (sel ? [sel] : [])).map(o => Number(o.id))), [sel]);
+  const abonos = (m.caja?.pagos || []).filter(p => docIds.has(Number(p.pedido_id)) && String(p.estado || 'ACTIVO') === 'ACTIVO');
+  const docOk = !invoice || (m.billingName.trim() && m.billingName !== 'Consumidor Final' && [10, 13].includes(String(m.billingId).length));
+  live.current.docOk = !!docOk;
+  const document = sel ? <View style={{ padding: phone ? 16 : 24, gap: 20 }}>
+    <View style={{ flexDirection: roomy ? 'row' : 'column', gap: 16, alignItems: roomy ? 'flex-start' : 'stretch' }}>
+      <View style={{ flex: roomy ? 1 : undefined, minWidth: 0, gap: 4 }}>
+        <T c={c} size={phone ? 22 : 26} weight="800" accessibilityRole="header" style={{ letterSpacing: -0.4 }}>{h.orderLabel(sel)}</T>
+        <T c={c} size={14} color={c.muted}>{[`Pedido #${sel.id}`, sel.mesero_nombre ? `Atiende ${sel.mesero_nombre}` : null, `Abierta ${hhmm(sel.created_at)}`, KITCHEN[sel.estado]].filter(Boolean).join(' · ')}</T>
+      </View>
+      <View style={{ gap: roomy ? 8 : 12, width: roomy ? 236 : '100%', flexDirection: roomy ? 'column' : 'row', alignItems: roomy ? 'stretch' : 'flex-end', justifyContent: 'space-between' }}>
+        <View style={{ width: roomy ? '100%' : 168 }}><Seg c={c} size="sm" label="Tipo de comprobante" value={m.billingMode} disabled={m.busy} onChange={a.setBillingMode}
+          options={[{ value: 'FINAL', label: 'Ticket', a11y: 'Ticket a consumidor final' }, { value: 'ID', label: 'Factura', a11y: 'Factura con cédula o RUC' }]} /></View>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Lbl c={c}>Próximo número</Lbl>
+          <Serial c={c} value={nextNumber} size={roomy ? 20 : 17} />
         </View>
       </View>
-      <View style={card}>
-        <View style={[row, { padding: 20, justifyContent: 'space-between', gap: 8 }]}><View style={[row, { gap: 8 }]}><ShoppingBag size={17} color={p.muted} /><Text style={{ fontSize: 14, fontWeight: '600', color: p.text }}>Detalle de la venta</Text><Text style={{ color: p.faint, fontSize: 12 }}>({lines.length})</Text></View>
-          {!selected ? <Action p={p} compact label="Agregar" icon={Plus} disabled={m.orderBusy || !m.canManageCash} onPress={() => setCatalog(true)} /> : null}
-        </View>
-        {lines.length ? <>
-          <View style={[row, { paddingHorizontal: 20, paddingVertical: 12, backgroundColor: p.surfaceAlt, borderTopWidth: 1, borderBottomWidth: 1, borderColor: p.line }]}>
-            <Text style={{ flex: 1, fontSize: 10, fontWeight: '700', letterSpacing: 0.8, color: p.faint }}>PRODUCTO</Text>
-            {!phone ? <Text style={{ width: 72, fontSize: 10, color: p.faint, textAlign: 'right' }}>PRECIO</Text> : null}
-            <Text style={{ width: selected ? 60 : 104, fontSize: 10, color: p.faint, textAlign: 'center' }}>CANT.</Text><Text style={{ width: 76, fontSize: 10, color: p.faint, textAlign: 'right' }}>IMPORTE</Text>
+    </View>
+
+    {invoice ? <View style={{ gap: 8 }}>
+      <Cells c={c}>
+        <CellInput c={c} label="Nombre o razón social" basis={phone ? '100%' : '58%'} value={m.billingName === 'Consumidor Final' ? '' : m.billingName} onChangeText={a.setBillingName} editable={!m.busy} placeholder="Como figura en el documento" />
+        <CellInput c={c} label="Cédula o RUC" basis={phone ? '100%' : '42%'} value={m.billingId} onChangeText={a.setBillingId} editable={!m.busy} keyboardType="number-pad" maxLength={13} placeholder="10 o 13 dígitos"
+          error={m.billingId && ![10, 13].includes(String(m.billingId).length)} />
+        <CellInput c={c} label="Correo" basis={phone ? '100%' : '58%'} value={m.billingEmail} onChangeText={a.setBillingEmail} editable={!m.busy} keyboardType="email-address" autoCapitalize="none" placeholder="Opcional" />
+        <CellInput c={c} label="Teléfono" basis={phone ? '100%' : '42%'} value={m.billingPhone} onChangeText={a.setBillingPhone} editable={!m.busy} keyboardType="phone-pad" placeholder="Opcional" />
+      </Cells>
+      {m.billingId && ![10, 13].includes(String(m.billingId).length) ? <T c={c} size={13} color={c.red}>La cédula tiene 10 dígitos y el RUC 13. Van {String(m.billingId).length}.</T> : null}
+      {m.matchingClients.length ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+        <T c={c} size={13} color={c.faint}>Clientes guardados:</T>
+        {m.matchingClients.map(cl => <Btn key={cl.id} c={c} size="sm" onPress={() => a.selectBillingClient(cl)}>{`${cl.nombre} · ${cl.documento}`}</Btn>)}
+      </View> : null}
+    </View> : <Cells c={c}>
+      <Cell c={c} label="Cliente" basis={phone ? '100%' : '58%'}>Consumidor final</Cell>
+      <Cell c={c} label="Ubicación" basis={phone ? '100%' : '42%'}>{sel.mesa_id ? `Mesa ${sel.mesa_numero || sel.mesa_id}` : sel.tipo === 'Delivery' ? 'Delivery' : 'Para llevar'}</Cell>
+    </Cells>}
+
+    <View accessibilityRole="table" style={{ borderTopWidth: 1, borderColor: c.text }}>
+      <View style={{ flexDirection: 'row', paddingVertical: 8, borderBottomWidth: 1, borderColor: c.rule, gap: 12 }}>
+        <Lbl c={c} style={{ width: 40, textAlign: 'right' }}>Cant.</Lbl>
+        <Lbl c={c} style={{ flex: 1 }}>Descripción</Lbl>
+        {!phone ? <Lbl c={c} style={{ width: 96, textAlign: 'right' }}>P. unit. con IVA</Lbl> : null}
+        <Lbl c={c} style={{ width: 92, textAlign: 'right' }}>Importe</Lbl>
+      </View>
+      {(sel.items || []).filter(i => Number(i.cantidad) > 0).map((item, idx) => {
+        const extra = [item.notas, ...(item.modificadores || []).map(mod => `${mod.nombre}${Number(mod.precio_extra) ? ` +${money(mod.precio_extra)}` : ''}`)].filter(Boolean).join(' · ');
+        return <View key={item.id || idx} style={{ flexDirection: 'row', paddingVertical: 10, borderBottomWidth: 1, borderColor: c.line, gap: 12 }}>
+          <Num c={c} size={15} weight="700" style={{ width: 40, textAlign: 'right' }}>{item.cantidad}</Num>
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <T c={c} size={15} weight="600">{item.nombre}</T>
+            {extra ? <T c={c} size={13} color={c.faint}>{extra}</T> : null}
           </View>
-          {lines.map((item, index) => <View key={item.id || item.producto_id || index} style={[row, { paddingHorizontal: 20, paddingVertical: 19, borderBottomWidth: 1, borderBottomColor: p.line }]}>
-            <View style={{ flex: 1, minWidth: 0, gap: 5 }}><Text style={{ color: p.text, fontSize: 13, fontWeight: '600' }}>{item.nombre}</Text>
-              <Text style={{ color: p.faint, fontSize: 11, lineHeight: 16 }}>{[item.notas, ...(item.modificadores || []).map((mod) => mod.nombre)].filter(Boolean).join(' · ') || (item.ronda_id ? `Ronda ${item.ronda_id}` : 'Producto del catálogo')}</Text></View>
-            {!phone ? <Text style={[moneyStyle, { width: 72, textAlign: 'right', color: p.muted, fontSize: 12 }]}>{money(Number(item.precio) + h.itemExtras(item))}</Text> : null}
-            <View style={[row, { width: selected ? 60 : 104, justifyContent: 'center', gap: 5 }]}>
-              {!selected ? <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Quitar una unidad de ${item.nombre}`} disabled={m.orderBusy} onPress={() => a.changeCartQty(item.producto_id,-1)} style={{ padding: 7, backgroundColor: p.soft, borderRadius: 6 }}><Minus size={13} color={p.muted} /></TouchableOpacity> : null}
-              <Text style={{ color: p.text, fontSize: 13, fontWeight: '600', minWidth: 18, textAlign: 'center' }}>{item.cantidad}</Text>
-              {!selected ? <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Añadir una unidad de ${item.nombre}`} disabled={m.orderBusy} onPress={() => a.changeCartQty(item.producto_id,1)} style={{ padding: 7, backgroundColor: p.soft, borderRadius: 6 }}><Plus size={13} color={p.muted} /></TouchableOpacity> : null}
-            </View><Text style={[moneyStyle, { width: 76, textAlign: 'right', color: p.text, fontSize: 13, fontWeight: '600' }]}>{money(h.itemLineTotal(item))}</Text>
+          {!phone ? <Num c={c} size={14} weight="500" color={c.muted} style={{ width: 96, textAlign: 'right' }}>{money(Number(item.precio) + h.itemExtras(item))}</Num> : null}
+          <Num c={c} size={15} weight="700" style={{ width: 92, textAlign: 'right' }}>{money(h.itemLineTotal(item))}</Num>
+        </View>;
+      })}
+    </View>
+
+    <View style={{ flexDirection: phone || !three ? 'column' : 'row', gap: 20, alignItems: 'flex-start' }}>
+      <View style={{ flex: 1, minWidth: 0, gap: 12, width: phone || !three ? '100%' : undefined }}>
+        {sel.notas ? <View style={{ gap: 2 }}><Lbl c={c}>Observaciones</Lbl><T c={c} size={14} color={c.muted}>{sel.notas}</T></View> : null}
+        {abonos.length ? <View style={{ gap: 6 }}>
+          <Lbl c={c}>Abonos de este turno</Lbl>
+          {abonos.map(p => <View key={p.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <Serial c={c} value={p.comprobante_numero} size={13} />
+            <T c={c} size={13} color={c.muted} style={{ flex: 1 }}>{p.metodo} · {hhmm(p.created_at)}</T>
+            <Num c={c} size={14} weight="700">{money(p.monto)}</Num>
           </View>)}
-          <View style={[row, { padding: 15, gap: 7 }]}><CheckCircle2 size={13} color={p.faint} /><Text style={{ color: p.faint, fontSize: 11, flex: 1 }}>{selected ? 'Productos enviados a cocina. Cantidades confirmadas.' : 'Borrador · aún no se ha enviado a cocina.'}</Text></View>
-        </> : empty(ShoppingBag, 'Todo listo para tu próxima venta', 'Busca un producto del catálogo y agrégalo al detalle para comenzar.', <Action p={p} label="Explorar catálogo" icon={Plus} primary onPress={() => setCatalog(true)} disabled={!m.canManageCash} />)}
-        <View style={{ padding: 20, paddingTop: 6 }}>{selected ? (selected.notas ? <Text style={{ color: p.muted, fontSize: 12, lineHeight: 19 }}>Observaciones: {selected.notas}</Text> : null) : <Input p={p} label="Observaciones" value={m.saleNote} onChangeText={a.setSaleNote} editable={!m.orderBusy} placeholder="Indicaciones para cocina (opcional)" />}</View>
+        </View> : null}
+        {m.selectedSplit ? <View style={{ gap: 8 }}>
+          <Lbl c={c}>Reparto pedido por el mesero</Lbl>
+          {m.selectedSplit.divisions.map(part => { const on = Number(m.divisionId) === Number(part.id); return <View key={part.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 }}>
+            <T c={c} size={14} weight="600" style={{ flex: 1 }}>{part.nombre}</T>
+            <Num c={c} size={14} weight="700">{money(part.monto)}</Num>
+            <Btn c={c} size="sm" variant={on ? 'ink' : 'outline'} disabled={m.busy || part.estado === 'PAGADO'} onPress={() => { a.setChargeMode('PARCIAL'); a.setPartialAmount(Number(part.monto).toFixed(2)); a.setDivisionId(part.id); fresh.current = true; }}>
+              {part.estado === 'PAGADO' ? 'Cobrado' : on ? 'Elegido' : 'Cobrar esta parte'}</Btn>
+          </View>; })}
+        </View> : null}
       </View>
-      {m.selectedSplit && selected ? <View style={[card,{padding:20,gap:10}]}><Text style={{color:p.amber,fontSize:13,fontWeight:'600'}}>Reparto solicitado por el mesero</Text>{m.selectedSplit.divisions.map((part) => summaryLine(part.nombre,part.monto))}<Text style={{color:p.faint,fontSize:11}}>Selecciona «Por partes» para cobrar una persona y conservar el saldo pendiente.</Text></View> : null}
+      <View style={{ width: phone || !three ? '100%' : 300, borderWidth: 1, borderColor: c.rule }}>
+        <TotalRow c={c} label="Subtotal sin IVA" value={m.subtotal} />
+        <TotalRow c={c} label={`IVA ${m.taxPercent != null ? `${String(m.taxPercent).replace('.', ',')} %` : ''}`.trim()} value={m.tax} />
+        {Number(m.service) > 0 ? <TotalRow c={c} label="Servicio" value={m.service} /> : null}
+        <TotalRow c={c} label="Total" value={m.total} strong />
+        {Number(sel.abonado) > 0 ? <>
+          <TotalRow c={c} label="Abonado" value={`−${money(sel.abonado)}`} tone="green" />
+          <TotalRow c={c} label="Saldo" value={m.balanceDue} strong />
+        </> : null}
+      </View>
     </View>
-    <View style={{ width: columns ? (desktop ? 330 : 290) : '100%', gap: 14 }}>
-      <View style={card}>
-        <View style={{ padding: 22, gap: 15 }}>
-          <Text style={{ color: p.text, fontSize: 16, fontWeight: '600' }}>Resumen de venta</Text>
-          <View style={{ gap: 12 }}>{summaryLine(selected ? 'Subtotal' : 'Productos',selected ? m.subtotal : m.cartSubtotal)}{selected ? summaryLine('IVA incluido',m.tax) : null}{summaryLine('Servicio',selected ? m.service : draftService)}</View>
-          {selected && (Number(selected.abonado) > 0 || m.chargeMode === 'PARCIAL') ? <View style={{gap:10}}>{summaryLine('Total de cuenta',m.total)}{summaryLine('Abonos registrados',selected.abonado)}{summaryLine('Saldo pendiente',m.balanceDue)}</View> : null}
-          {selected ? <View style={{gap:10}}>
-            <View style={[row,{gap:7,flexWrap:'wrap'}]}><Chip p={p} active={m.chargeMode==='TOTAL'} onPress={()=>{if(!m.busy){a.setChargeMode('TOTAL');a.setDivisionId(null);}}}>Cobrar saldo</Chip><Chip p={p} active={m.chargeMode==='PARCIAL'} onPress={()=>{if(!m.busy){a.setChargeMode('PARCIAL');a.setDivisionId(null);}}}>Por partes</Chip></View>
-            {m.chargeMode==='PARCIAL'?<Input p={p} label="Monto de este abono" value={m.partialAmount} onChangeText={(v)=>{a.setPartialAmount(v.replace(',','.'));a.setDivisionId(null);}} keyboardType="decimal-pad" editable={!m.busy} placeholder="0.00"/>:null}
-            {m.chargeMode==='PARCIAL'&&m.selectedSplit?<View style={{gap:7}}>{m.selectedSplit.divisions.map(part=><Chip key={part.id} p={p} active={Number(m.divisionId)===Number(part.id)} onPress={()=>{if(!m.busy){a.setPartialAmount(Number(part.monto).toFixed(2));a.setDivisionId(part.id);}}}>{part.nombre}: {money(part.monto)}</Chip>)}</View>:null}
-          </View>:null}
-          <View style={{ borderTopWidth: 1, borderTopColor: p.line, paddingTop: 18, gap: 6 }}><Text style={{ color: p.muted, fontSize: 12 }}>Total a cobrar</Text><Text style={[moneyStyle,{color:p.text,fontSize:38,fontWeight:'600',letterSpacing:-1.5}]}>{money(total)}</Text></View>
-          {selected ? <>
-            <Text style={{ color: p.text, fontSize: 13, fontWeight: '600' }}>Método de pago</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{m.paymentMethods.map(({label,icon:Icon}) => <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Pagar con ${label}`} accessibilityState={{selected:m.paymentMethod === label}} key={label} disabled={m.busy} onPress={() => a.setPaymentMethod(label)} style={{ width:'48%',padding:10,gap:6,flexDirection:'row',alignItems:'center',borderRadius:8,borderWidth:1,borderColor:m.paymentMethod === label?p.primary:p.line,backgroundColor:m.paymentMethod===label?p.primarySoft:p.surface }}><Icon size={18} color={m.paymentMethod===label?p.primaryText:p.faint} /><Text style={{color:m.paymentMethod===label?p.primaryText:p.muted,fontSize:12,fontWeight:'600'}}>{label}</Text></TouchableOpacity>)}</View>
-            {m.paymentMethod==='Mixto'?<View style={{gap:10}}>{m.paymentMethods.filter(method=>method.label!=='Mixto').map(method=><Input key={method.label} p={p} label={`Monto ${method.label}`} value={m.mixedAmounts[method.label]||''} keyboardType="decimal-pad" placeholder="0.00" editable={!m.busy} onChangeText={value=>a.setMixedAmounts(old=>({...old,[method.label]:value.replace(',','.')}))}/>)}<Text style={{color:Math.round(m.mixedTotal*100)===Math.round(total*100)?p.green:p.amber,fontSize:12}}>Desglose: {money(m.mixedTotal)} / {money(total)}</Text></View>:null}
-            {m.cashPortion > 0 ? <>
-              <Input p={p} label="Efectivo recibido" value={m.cashReceived} onChangeText={(value)=>a.setCashReceived(value.replace(',','.'))} keyboardType="decimal-pad" editable={!m.busy} placeholder="0.00" />
-              <View style={[row,{gap:6,flexWrap:'wrap'}]}>{[...new Set([m.cashPortion,Math.ceil(m.cashPortion/10)*10,Math.ceil(m.cashPortion/20)*20])].map((amount)=><Chip key={amount} p={p} onPress={()=>!m.busy&&a.setCashReceived(amount.toFixed(2))}>{amount===m.cashPortion?'Exacto':money(amount)}</Chip>)}</View>
-              <View style={[row,{justifyContent:'space-between',padding:12,backgroundColor:p.greenSoft,borderRadius:8}]}><Text style={{color:p.green,fontSize:12}}>Cambio a entregar</Text><Text style={[moneyStyle,{color:p.green,fontWeight:'700',fontSize:16}]}>{money(m.change)}</Text></View>
-              {Number(m.cashReceived || 0)<m.cashPortion?<Text style={{color:p.amber,fontSize:12}}>Faltan {money(m.cashPortion-Number(m.cashReceived||0))} para completar el pago.</Text>:null}
-            </> : <Input p={p} label="Referencia de pago" value={m.reference} onChangeText={a.setReference} placeholder="Voucher, transferencia o nota" editable={!m.busy} />}
-            {m.paymentMethod==='Mixto'&&m.cashPortion>0?<Input p={p} label="Referencia de tarjeta o transferencia" value={m.reference} onChangeText={a.setReference} placeholder="Voucher o referencia" editable={!m.busy}/>:null}
-            {m.chargeMode==='PARCIAL'&&total>0&&total<=m.balanceDue?<Text style={{color:p.muted,fontSize:12}}>Saldo después de este abono: {money(m.balanceDue-total)}</Text>:null}
-            <Action p={p} primary label={m.busy?'Registrando…':`Cobrar ${money(total)}`} icon={CheckCircle2} disabled={!m.canCharge||m.busy||!!m.pendingPayment} onPress={a.handleCharge} style={{minHeight:50}} />
-            <Action p={p} label="Imprimir precuenta" icon={Printer} disabled={m.busy} onPress={()=>a.printReceipt()} />
-          </> : <>
-            <View style={{padding:14,borderRadius:8,backgroundColor:p.surfaceAlt,gap:6}}><Text style={{color:p.text,fontSize:12,fontWeight:'600'}}>Primero confirma el pedido</Text><Text style={{color:p.muted,fontSize:12,lineHeight:19}}>Se enviará a cocina y podrás continuar con los datos de facturación y el pago.</Text></View>
-            <Action p={p} primary label={m.orderBusy?'Enviando…':'Confirmar pedido'} icon={ArrowRight} disabled={!lines.length||m.orderBusy||!m.caja?.caja||!m.canManageCash} onPress={()=>{setCatalog(false);a.createPickupOrder();}} style={{minHeight:50}} />
-            {lines.length?<Action p={p} label="Vaciar borrador" icon={Trash2} disabled={m.orderBusy} onPress={a.clearCart}/>:null}
-          </>}
-          {!m.caja?.caja?<Action p={p} label="Abrir caja para vender" icon={WalletCards} onPress={a.handleOpenCaja} disabled={!m.canManageCash}/>:null}
-          <View style={[row,{gap:6,justifyContent:'center'}]}><Receipt size={12} color={p.faint}/><Text style={{color:p.faint,fontSize:11}}>El comprobante se genera al cobrar</Text></View>
+  </View> : <Empty c={c} icon={Receipt} title="Elige una cuenta para cobrar"
+    description="Las cuentas que pidieron cobro aparecen primero. Busca con F2 o empieza una venta directa con F3."
+    action={<Btn c={c} icon={ShoppingBag} onPress={() => go('venta')} kbd="F3">Venta directa</Btn>} />;
+
+  // ── Panel de cobro ─────────────────────────────────────────────────────────
+  const received = toNum(m.cashReceived || 0);
+  const missing = Math.max(0, Math.round(m.cashPortion * 100) - Math.round((received || 0) * 100)) / 100;
+  const chargeLabel = `Cobrar ${money(Number.isFinite(m.chargeAmount) ? m.chargeAmount : 0)}`;
+  const blockers = [];
+  if (sel) {
+    if (!openCaja) blockers.push('La caja está cerrada.');
+    else if (!m.canManageCash) blockers.push('Tu usuario no puede cobrar.');
+    if (m.chargeMode === 'PARCIAL' && !(m.chargeAmount > 0)) blockers.push('Escribe el monto del abono.');
+    else if (m.chargeAmount > m.balanceDue + 0.0001) blockers.push(`El abono supera el saldo (${money(m.balanceDue)}).`);
+    if (m.paymentMethod === 'Mixto' && Math.round(m.mixedTotal * 100) !== Math.round(m.chargeAmount * 100)) blockers.push(`El desglose suma ${money(m.mixedTotal)} y debe sumar ${money(m.chargeAmount)}.`);
+    if (invoice && !docOk) blockers.push('Completa nombre y cédula o RUC.');
+  }
+  const display = (t, label, value, hint) => {
+    const on = target === t;
+    return <Press key={t} accessibilityRole="button" accessibilityState={{ selected: on }} accessibilityLabel={`${label}: ${money(toNum(value || 0))}. Tocar para escribir con el teclado`}
+      onPress={() => { setTarget(t); fresh.current = true; }} scaleTo={0.99}
+      style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, minHeight: 52, paddingHorizontal: 12, borderRadius: r.md, borderWidth: on ? 2 : 1,
+        borderColor: on ? c.blue : c.rule, backgroundColor: c.paper }}>
+      <View style={{ gap: 1 }}><T c={c} size={13} weight="600" color={c.muted}>{label}</T>{hint ? <T c={c} size={12} color={c.faint}>{hint}</T> : null}</View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+        <Num c={c} size={22} weight="800">{value === '' || value == null ? '$0' : `$${String(value).replace('.', ',')}`}</Num>
+        {on ? <View style={{ width: 2, height: 22, backgroundColor: c.blue, marginLeft: 2 }} /> : null}
+      </View>
+    </Press>;
+  };
+  const quick = m.cashPortion > 0 ? [...new Set([m.cashPortion, Math.ceil(m.cashPortion / 5) * 5, Math.ceil(m.cashPortion / 10) * 10, Math.ceil(m.cashPortion / 20) * 20, 50, 100].filter(v => v >= m.cashPortion))].slice(0, 4) : [];
+  const usesPad = m.cashPortion > 0 || m.chargeMode === 'PARCIAL' || m.paymentMethod === 'Mixto';
+  const payPanel = sel ? <View style={{ padding: phone ? 16 : 20, gap: 14 }}>
+    <View style={{ gap: 2 }}>
+      <T c={c} size={14} weight="600" color={c.muted}>{m.chargeMode === 'PARCIAL' ? 'Saldo de la cuenta' : 'Por cobrar'}</T>
+      <Num c={c} size={40} weight="800" accessibilityLabel={`Por cobrar ${money(m.balanceDue)}`}>{money(m.balanceDue)}</Num>
+    </View>
+    <Seg c={c} label="Cuánto se cobra" value={m.chargeMode} disabled={m.busy} onChange={v => { a.setChargeMode(v); a.setDivisionId(null); if (v === 'TOTAL') a.setPartialAmount(''); }}
+      options={[{ value: 'TOTAL', label: 'Todo el saldo' }, { value: 'PARCIAL', label: m.selectedSplit ? 'Una parte' : 'Abono parcial' }]} />
+    {m.chargeMode === 'PARCIAL' ? display('abono', 'Monto de este abono', m.partialAmount, m.chargeAmount > 0 && m.chargeAmount <= m.balanceDue ? `Queda ${money(m.balanceDue - m.chargeAmount)}` : null) : null}
+    <View style={{ gap: 6 }}>
+      <T c={c} size={13} weight="600" color={c.muted}>Forma de pago</T>
+      <Seg c={c} wrap size="sm" label="Forma de pago" value={m.paymentMethod} disabled={m.busy} onChange={a.setPaymentMethod}
+        options={m.paymentMethods.map(pm => ({ value: pm.label, label: pm.label === 'Transferencia' ? 'Transf.' : pm.label, a11y: pm.label, icon: roomy ? METHOD_ICON[pm.label] : undefined, basis: '30%' }))} />
+    </View>
+    {m.paymentMethod === 'Mixto' ? <View style={{ gap: 8 }}>
+      {m.paymentMethods.filter(pm => pm.label !== 'Mixto').map(pm => (target === pm.label || toNum(m.mixedAmounts[pm.label]) > 0 || ['Efectivo', 'Tarjeta'].includes(pm.label)) ? display(pm.label, pm.label, m.mixedAmounts[pm.label] || '') : null)}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+        {m.paymentMethods.filter(pm => pm.label !== 'Mixto' && !['Efectivo', 'Tarjeta'].includes(pm.label) && target !== pm.label && !(toNum(m.mixedAmounts[pm.label]) > 0)).map(pm =>
+          <Btn key={pm.label} c={c} size="sm" variant="ghost" icon={Plus} onPress={() => { setTarget(pm.label); fresh.current = true; }}>{pm.label}</Btn>)}
+      </View>
+      <T c={c} size={13} weight="600" color={Math.round(m.mixedTotal * 100) === Math.round(m.chargeAmount * 100) ? c.green : c.amber}>
+        Desglose {money(m.mixedTotal)} de {money(m.chargeAmount)}</T>
+    </View> : null}
+    {m.cashPortion > 0 ? <View style={{ gap: 8 }}>
+      {display('recibido', m.paymentMethod === 'Mixto' ? 'Recibido en efectivo' : 'Efectivo recibido', m.cashReceived, m.paymentMethod === 'Mixto' ? `Parte en efectivo ${money(m.cashPortion)}` : null)}
+      <View style={{ flexDirection: 'row', gap: 6 }}>
+        {quick.map(v => <Btn key={v} c={c} size="sm" style={{ flex: 1, paddingHorizontal: 4 }} disabled={m.busy}
+          onPress={() => { a.setCashReceived(v.toFixed(2)); fresh.current = true; setTarget('recibido'); }}>{v === m.cashPortion ? 'Exacto' : money(v).replace(',00', '')}</Btn>)}
+      </View>
+    </View> : null}
+    {usesPad ? <Keypad c={c} onKey={pressKey} disabled={m.busy} compact={!roomy || phone} /> : null}
+    {m.paymentMethod !== 'Efectivo' ? <View style={{ gap: 6 }}>
+      <T c={c} size={13} weight="600" color={c.muted}>Referencia</T>
+      <TextInput value={m.reference} onChangeText={a.setReference} editable={!m.busy} placeholder="Voucher, n.º de transferencia o nota" placeholderTextColor={c.faint} accessibilityLabel="Referencia del pago"
+        style={[{ height: 44, paddingHorizontal: 12, borderRadius: r.md, borderWidth: 1, borderColor: c.rule, backgroundColor: c.paper, fontFamily: FONT, fontSize: 15, color: c.text }, WEB ? { outlineStyle: 'none' } : null]} />
+    </View> : null}
+  </View> : <View style={{ padding: 20, gap: 14 }}>
+    <T c={c} size={16} weight="800">Resumen del salón</T>
+    <View style={{ borderWidth: 1, borderColor: c.rule, backgroundColor: c.paper }}>
+      <TotalRow c={c} label="Cuentas abiertas" value={String(m.activeOrders.length)} />
+      <TotalRow c={c} label="Pidieron la cuenta" value={String(countFor('CUENTA'))} tone={countFor('CUENTA') ? 'amber' : undefined} />
+      <TotalRow c={c} label="Cobrado en el turno" value={Number(m.turnTotals.total || 0)} />
+      <TotalRow c={c} label="Por cobrar" value={porCobrar} strong />
+    </View>
+    {!openCaja ? <Btn c={c} variant="ink" icon={WalletCards} onPress={a.handleOpenCaja} disabled={!m.canManageCash}>Abrir caja</Btn> : null}
+    <T c={c} size={13} color={c.faint}>F2 buscar · F3 venta directa · F8 cobrar · F9 precuenta · Esc volver a la lista</T>
+  </View>;
+
+  // Pie fijo del panel de cobro en escritorio: el botón siempre a la vista.
+  const changeLine = sel && m.cashPortion > 0 ? <View accessibilityLiveRegion="polite" style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 8, borderRadius: r.md,
+    backgroundColor: missing > 0 ? c.paperAlt : c.greenSoft }}>
+    <T c={c} size={15} weight="700" color={missing > 0 ? c.text : c.green}>{missing > 0 ? 'Falta' : 'Cambio'}</T>
+    <Num c={c} size={24} weight="800" color={missing > 0 ? c.text : c.green}>{money(missing > 0 ? missing : m.change)}</Num>
+  </View> : null;
+  const chargeFoot = sel ? <View style={{ padding: 16, gap: 8, borderTopWidth: 1, borderColor: c.rule, backgroundColor: c.paper }}>
+    {changeLine}
+    {blockers.length ? <T c={c} size={13} color={c.amber} accessibilityLiveRegion="polite" numberOfLines={2}>{blockers[0]}</T> : <T c={c} size={13} color={c.faint} numberOfLines={1}>Se emite {invoice ? 'factura' : 'ticket'} {nextNumber || ''}{WEB ? ' · F9 precuenta' : ''}</T>}
+    <View style={{ flexDirection: 'row', gap: 8 }}>
+      <Btn c={c} icon={Printer} onPress={() => a.printReceipt()} disabled={m.busy} accessibilityLabel="Imprimir precuenta (F9)" style={{ width: 56, paddingHorizontal: 0 }} size="lg">{null}</Btn>
+      <Btn c={c} variant="ink" size="lg" full icon={Receipt} onPress={a.handleCharge} loading={m.busy} disabled={!m.canCharge || !!m.pendingPayment || !docOk} kbd="F8">{chargeLabel}</Btn>
+    </View>
+  </View> : null;
+
+  // Barra fija de cobro (celular y tablet vertical).
+  const chargeBar = sel ? <View style={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10 + BOTTOM_INSET, gap: 6, borderTopWidth: 1, borderColor: c.rule, backgroundColor: c.paper }}>
+    {changeLine}
+    {blockers.length ? <T c={c} size={13} color={c.amber} numberOfLines={1}>{blockers[0]}</T> : null}
+    <View style={{ flexDirection: 'row', gap: 8 }}>
+      <Btn c={c} icon={Printer} onPress={() => a.printReceipt()} disabled={m.busy} accessibilityLabel="Imprimir precuenta">{phone ? null : 'Precuenta'}</Btn>
+      <Btn c={c} variant="ink" size="lg" full icon={Receipt} onPress={a.handleCharge} loading={m.busy} disabled={!m.canCharge || !!m.pendingPayment || !docOk}>{chargeLabel}</Btn>
+    </View>
+  </View> : null;
+
+  const closedBanner = !openCaja ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: c.amberSoft, borderBottomWidth: 1, borderColor: c.line }}>
+    <T c={c} size={14} weight="600" color={c.amber} style={{ flex: 1 }}>La caja está cerrada: puedes revisar cuentas, pero para cobrar hay que abrir el turno.</T>
+    <Btn c={c} size="sm" variant="ink" icon={WalletCards} onPress={a.handleOpenCaja} disabled={!m.canManageCash}>Abrir caja</Btn>
+  </View> : null;
+
+  const cobrar = three
+    ? <View style={{ flex: 1, flexDirection: 'row' }}>
+      <View style={{ width: roomy ? 340 : 290, borderRightWidth: 1, borderColor: c.rule }}>{accounts}</View>
+      <ScrollView style={{ flex: 1, backgroundColor: c.paper }} contentContainerStyle={{ flexGrow: 1 }}>{document}</ScrollView>
+      <View style={{ width: roomy ? 380 : 340, borderLeftWidth: 1, borderColor: c.rule, backgroundColor: c.paperAlt }}>
+        <ScrollView style={{ flex: 1 }}>{payPanel}</ScrollView>{chargeFoot}
+      </View>
+    </View>
+    : two
+      ? <View style={{ flex: 1, flexDirection: 'row' }}>
+        <View style={{ width: 290, borderRightWidth: 1, borderColor: c.rule }}>{accounts}</View>
+        <View style={{ flex: 1 }}>
+          <ScrollView style={{ flex: 1, backgroundColor: c.paper }}>{document}{sel ? <View style={{ borderTopWidth: 1, borderColor: c.rule, backgroundColor: c.paperAlt }}>{payPanel}</View> : null}</ScrollView>
+          {chargeBar}
         </View>
       </View>
-      {selected?<Action p={p} label="Elegir otra cuenta" onPress={()=>setSection('cuentas')} icon={Table2}/>:<Action p={p} label={`${m.activeOrders.length} cuentas pendientes`} onPress={()=>setSection('cuentas')} icon={Table2}/>}
-    </View>
-  </View>;
-
-  const accounts = () => <View style={card}>
-    <View style={{padding:20,gap:15}}><View style={[row,{gap:10}]}><Search size={18} color={p.faint}/><Input p={p} value={m.orderSearch} onChangeText={a.setOrderSearch} placeholder="Buscar mesa, pedido o cliente"/></View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:8}}>{[['TODOS','Todas'],['MESAS','Mesas'],['EXPRESS','Para llevar'],['DELIVERY','Delivery'],['CUENTA','Cobro solicitado']].map(([key,label])=><Chip p={p} key={key} active={m.orderFilter===key} onPress={()=>a.setOrderFilter(key)}>{label}</Chip>)}</ScrollView>
-    </View>
-    <View style={[row,{paddingHorizontal:20,paddingVertical:13,backgroundColor:p.surfaceAlt}]}><Text style={{flex:1,color:p.faint,fontSize:11}}>CUENTA / CLIENTE</Text>{!phone?<Text style={{width:130,color:p.faint,fontSize:11}}>ESTADO DE COCINA</Text>:null}<Text style={{width:105,textAlign:'right',color:p.faint,fontSize:11}}>POR COBRAR</Text><View style={{width:35}}/></View>
-    {m.filteredOrders.map((order)=><TouchableOpacity accessibilityRole="button" accessibilityLabel={`Facturar ${h.orderLabel(order)}`} key={order.id} onPress={()=>chooseOrder(order)} style={[row,{padding:20,borderTopWidth:1,borderTopColor:p.line,gap:12}]}>
-      <View style={{width:38,height:38,borderRadius:10,backgroundColor:p.primarySoft,alignItems:'center',justifyContent:'center'}}>{order.mesa_id?<Table2 size={18} color={p.primaryText}/>:<ShoppingBag size={18} color={p.primaryText}/>}</View>
-      <View style={{flex:1,minWidth:0,gap:5}}><Text style={{color:p.text,fontSize:14,fontWeight:'600'}}>{h.orderLabel(order)}</Text><Text style={{color:p.faint,fontSize:11}}>Pedido #{order.id} · {(order.items||[]).length} productos</Text></View>
-      {!phone?<Text style={{width:130,color:p.muted,fontSize:11}}>{order.estado_cocina||order.estado}</Text>:null}<Text style={[moneyStyle,{width:93,textAlign:'right',color:p.text,fontSize:16,fontWeight:'600'}]}>{money(order.saldo_pendiente ?? order.total)}</Text><ChevronRight size={18} color={p.faint}/>
-    </TouchableOpacity>)}
-    {!m.filteredOrders.length?empty(Table2,'No hay cuentas en esta vista','Prueba otra búsqueda o cambia el filtro.'):null}
-  </View>;
-
-  const payments = () => <CashierPayments p={p} onReprint={a.reprintPayment} onAuthorize={a.openPaymentAuthorization}
-    canAuthorize={m.canRequestPaymentActions} busy={m.adminBusy || m.printBusy} version={m.historyVersion}/>;
-
-  const cash = () => <View style={{gap:18}}>
-    <View style={[card,{padding:24,gap:20}]}><View style={[row,{justifyContent:'space-between',gap:12,flexWrap:'wrap'}]}><View style={{gap:7}}><Text style={{color:p.text,fontSize:20,fontWeight:'600'}}>Turno {m.caja?.caja?`#${m.caja.caja.id}`:'sin abrir'}</Text><Text style={{color:p.muted,fontSize:13}}>Control de efectivo y movimientos</Text></View><View style={[row,{gap:8}]}><Action p={p} label="Ver cierres" icon={Clock} onPress={a.showHistory}/><Action p={p} primary label={m.caja?.caja?'Cerrar turno':'Abrir caja'} icon={WalletCards} disabled={!m.canManageCash||m.cashBusy} onPress={m.caja?.caja?a.handleCloseCaja:a.handleOpenCaja}/></View></View>
-      <View style={{flexDirection:phone?'column':'row',gap:12}}>{[['Cobrado en el turno',m.turnTotals.total],['Efectivo esperado',m.caja?.efectivo_esperado],['Fondo de apertura',m.caja?.caja?.monto_inicial]].map(([label,value])=><View key={label} style={{flex:1,padding:20,borderRadius:9,backgroundColor:p.surfaceAlt,gap:8}}><Text style={{color:p.muted,fontSize:12}}>{label}</Text><Text style={[moneyStyle,{color:p.text,fontSize:26,fontWeight:'600'}]}>{money(value)}</Text></View>)}</View>
-      <View style={[row,{gap:10,flexWrap:'wrap'}]}>{[['INGRESO','Registrar ingreso',ArrowDownLeft],['RETIRO','Registrar retiro',ArrowUpRight],['GASTO','Registrar gasto',WalletCards]].map(([key,label,Icon])=><Action p={p} key={key} label={label} icon={Icon} disabled={!m.caja?.caja||!m.canManageCash} onPress={()=>a.openMovement(key)}/>)}</View>
-    </View>
-    <View style={{flexDirection:columns?'row':'column',gap:18}}><View style={[card,{padding:22,gap:17,flex:1}]}><Text style={{color:p.text,fontSize:15,fontWeight:'600'}}>Cobros por método</Text>{Object.entries(m.stats.byMethod).map(([label,value])=>summaryLine(label,value))}</View>
-      <View style={[card,{padding:22,gap:17,flex:1}]}><Text style={{color:p.text,fontSize:15,fontWeight:'600'}}>Movimientos del turno</Text>{(m.caja?.movimientos||[]).map((move)=><View key={move.id} style={[row,{gap:10}]}><View style={{flex:1,gap:4}}><Text style={{color:p.text,fontSize:12,fontWeight:'600'}}>{move.tipo}</Text><Text style={{color:p.faint,fontSize:11}}>{move.motivo}</Text></View><Text style={{color:move.tipo==='INGRESO'?p.green:p.muted,fontWeight:'600'}}>{money(move.monto)}</Text></View>)}{!(m.caja?.movimientos||[]).length?<Text style={{color:p.faint,fontSize:13}}>No hay movimientos registrados.</Text>:null}</View></View>
-  </View>;
-
-  return <SafeAreaView style={{flex:1,backgroundColor:p.bg,paddingTop:TOP_INSET}}>
-    <View style={{flex:1,flexDirection:'row'}}>
-      {columns?<View style={{width:desktop?206:72,backgroundColor:p.sidebar,padding:desktop?18:12,gap:28}}>
-        <View style={{height:60,justifyContent:'center',alignItems:desktop?'flex-start':'center'}}>{desktop?<Logo dark height={45}/>:<Receipt size={26} color="#93C5FD"/>}</View>
-        <View style={{gap:7}}>{desktop?<Text style={{color:'#8494AE',fontSize:10,letterSpacing:1.8,fontWeight:'600',marginBottom:9,marginLeft:12}}>PUNTO DE VENTA</Text>:null}{nav.map(([key,label,Icon])=><TouchableOpacity accessibilityRole="button" accessibilityLabel={label} accessibilityState={{selected:section===key}} key={key} onPress={()=>setSection(key)} style={[row,{gap:11,paddingVertical:13,paddingHorizontal:desktop?12:0,justifyContent:desktop?'flex-start':'center',backgroundColor:section===key?'#223B63':'transparent',borderRadius:9}]}><Icon size={19} color={section===key?'#FFFFFF':'#94A3B8'}/>{desktop?<Text style={{color:section===key?'#FFFFFF':'#CBD5E1',fontSize:13,fontWeight:section===key?'600':'400'}}>{label}</Text>:null}</TouchableOpacity>)}</View>
-        <View style={{flex:1}}/>{desktop?<View style={{padding:14,borderRadius:10,borderWidth:1,borderColor:'#2A3A54',gap:8}}><View style={[row,{gap:6}]}><View style={{width:6,height:6,borderRadius:3,backgroundColor:m.caja?.caja?'#8DCEAC':'#93C5FD'}}/><Text style={{color:'#E2E8F0',fontSize:12}}>Caja {m.caja?.caja?'abierta':'cerrada'}</Text></View><Text style={{color:'#94A3B8',fontSize:11}}>Tu operación, en un solo lugar.</Text></View>:null}
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar sesión" onPress={a.logout} style={[row,{gap:10,padding:12}]}><LogOut size={18} color="#94A3B8"/>{desktop?<Text style={{color:'#CBD5E1',fontSize:12}}>Cerrar sesión</Text>:null}</TouchableOpacity>
-      </View>:null}
-      <View style={{flex:1,minWidth:0}}>
-        <View style={[row,{minHeight:70,paddingHorizontal:pad,gap:12,backgroundColor:p.surface,borderBottomWidth:1,borderBottomColor:p.line}]}>
-          <Text style={{color:p.faint,fontSize:12}}>Punto de venta</Text><ChevronRight size={13} color={p.faint}/><Text style={{color:p.text,fontSize:12,fontWeight:'600',flex:1}}>{title}</Text>
-          {!phone?<View style={[row,{gap:6}]}>{m.connected?<Wifi size={14} color={p.green}/>:<WifiOff size={14} color={p.amber}/>}<Text style={{color:p.muted,fontSize:11}}>{m.connected?'Conectado':'Reconectando'}</Text></View>:null}
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel={m.isDark?'Usar tema claro':'Usar tema oscuro'} onPress={a.toggleTheme} style={{padding:9}}>{m.isDark?<Sun size={17} color={p.muted}/>:<Moon size={17} color={p.muted}/>}</TouchableOpacity>
-          <View style={[row,{gap:9}]}><View style={{width:32,height:32,borderRadius:16,backgroundColor:p.primarySoft,alignItems:'center',justifyContent:'center'}}><Text style={{color:p.primaryText,fontWeight:'600',fontSize:12}}>{(m.user?.nombre||'C').slice(0,2).toUpperCase()}</Text></View>{desktop?<Text style={{fontSize:12,color:p.text}}>{m.user?.nombre||'Caja'}</Text>:null}</View>
+      : sel
+        ? <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 4, height: 48, borderBottomWidth: 1, borderColor: c.line, backgroundColor: c.paper }}>
+            <IconBtn c={c} icon={ArrowLeft} label="Volver a las cuentas" onPress={a.closeOrder} size={44} />
+            <T c={c} size={15} weight="700" numberOfLines={1} style={{ flex: 1 }}>{h.orderLabel(sel)}</T>
+          </View>
+          <ScrollView style={{ flex: 1, backgroundColor: c.paper }}>{document}<View style={{ borderTopWidth: 1, borderColor: c.rule, backgroundColor: c.paperAlt }}>{payPanel}</View></ScrollView>
+          {chargeBar}
         </View>
-        {!columns?<ScrollView horizontal style={{flexGrow:0,backgroundColor:p.surface}} showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal:pad,paddingVertical:10,gap:8}}>{nav.map(([key,label,Icon])=><Action compact key={key} p={p} label={label} icon={Icon} onPress={()=>setSection(key)} style={section===key?{backgroundColor:p.primarySoft,borderColor:p.primary}:null}/>)}</ScrollView>:null}
-        <ScrollView ref={scrollRef} style={{flex:1}} contentContainerStyle={{padding:pad,paddingBottom:BOTTOM_INSET+24,gap:22}}>
-          <View style={[row,{justifyContent:'space-between',gap:14,flexWrap:'wrap'}]}><View style={{gap:7}}><Text style={{color:p.text,fontSize:phone?25:30,fontWeight:'600',letterSpacing:-0.8}}>{title}</Text><Text style={{color:p.muted,fontSize:12}}>{section==='venta'?'Gestiona tus ventas y comprobantes.':date}</Text></View><Action p={p} label="Nueva venta" icon={Plus} primary onPress={newSale} disabled={m.busy||m.orderBusy}/></View>
-          <View style={{flexDirection:'row',gap:phone?8:14}}>{[['Ventas del turno',money(m.turnTotals.total),Receipt],['Por cobrar',money(m.activeOrders.reduce((sum,o)=>sum+Number(o.saldo_pendiente ?? o.total ?? 0),0)),WalletCards],['Cuentas abiertas',String(m.activeOrders.length).padStart(2,'0'),Table2]].map(([label,value,Icon])=><View key={label} style={[card,{flex:1,padding:phone?12:17,gap:10}]}><View style={[row,{justifyContent:'space-between'}]}><Text style={{fontSize:phone?10:11,color:p.muted}}>{label}</Text>{!phone?<Icon size={15} color={p.faint}/>:null}</View><Text style={[moneyStyle,{fontSize:phone?18:24,fontWeight:'600',color:p.text,letterSpacing:-0.5}]}>{value}</Text></View>)}</View>
-          {m.pendingPayment?<View style={{padding:16,borderRadius:10,backgroundColor:p.amberSoft,gap:10}}><Text style={{color:p.text,fontSize:13}}>Hay un cobro por confirmar del pedido #{m.pendingPayment.pedido_id}. Reintenta para recuperar el resultado sin duplicarlo.</Text><Action p={p} label="Reintentar cobro pendiente" disabled={m.busy} onPress={a.handleCharge}/></View>:null}
-          {m.cashNotice?<View style={[row,{padding:13,borderRadius:9,backgroundColor:m.cashNotice.type==='error'?p.redSoft:p.greenSoft,gap:10}]}><CheckCircle2 size={17} color={p.green}/><Text style={{flex:1,color:p.text,fontSize:12}}>{m.cashNotice.title} · {m.cashNotice.message}</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar aviso" onPress={a.dismissNotice}><X size={16} color={p.muted}/></TouchableOpacity></View>:null}
-          {section==='venta'?invoice():section==='cuentas'?accounts():section==='pagos'?payments():cash()}
-          {!columns?<Action p={p} label="Cerrar sesión" icon={LogOut} onPress={a.logout}/>:null}
-        </ScrollView>
+        : accounts;
+
+  // ── Venta directa ──────────────────────────────────────────────────────────
+  const qtyOf = id => m.cart.find(i => Number(i.producto_id) === Number(id))?.cantidad || 0;
+  const [gridW, setGridW] = useState(0);
+  const cols = Math.max(2, Math.floor((gridW - 24 + 8) / (phone ? 150 : 190)));
+  const tileW = gridW ? Math.floor((gridW - 24 - (cols - 1) * 8) / cols) : (phone ? '48%' : '31%');
+  const catalog = <View style={{ flex: 1, backgroundColor: c.paper }}>
+    <View style={{ padding: 12, gap: 10, borderBottomWidth: 1, borderColor: c.line }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, height: 44, paddingHorizontal: 12, borderRadius: r.md, borderWidth: 1, borderColor: c.rule }}>
+        <View style={{ flexShrink: 0 }}><Search size={17} color={c.faint} /></View>
+        <TextInput value={m.menuSearch} onChangeText={a.setMenuSearch} placeholder="Buscar producto" placeholderTextColor={c.faint} accessibilityLabel="Buscar producto"
+          style={[{ flex: 1, fontFamily: FONT, fontSize: 15, color: c.text, height: 42 }, WEB ? { outlineStyle: 'none' } : null]} />
+        {m.menuSearch ? <IconBtn c={c} icon={X} label="Borrar búsqueda" onPress={() => a.setMenuSearch('')} size={30} /> : null}
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+        {m.menuCategories.map(cat => { const on = cat === m.menuCategory; return <Press key={cat} accessibilityRole="button" accessibilityState={{ selected: on }} onPress={() => a.setMenuCategory(cat)} scaleTo={0.97}
+          hoverStyle={on ? null : { backgroundColor: c.hover }}
+          style={{ height: 32, paddingHorizontal: 10, borderRadius: r.md, justifyContent: 'center', borderWidth: 1, borderColor: on ? 'transparent' : c.rule, backgroundColor: on ? (c.isDark ? c.onInk : c.ink) : c.paper }}>
+          <T c={c} size={13} weight={on ? '700' : '600'} color={on ? (c.isDark ? c.ink : c.onInk) : c.muted}>{cat === 'TODAS' ? 'Todo' : cat}</T>
+        </Press>; })}
+      </ScrollView>
+    </View>
+    <ScrollView style={{ flex: 1 }} onLayout={e => setGridW(e.nativeEvent.layout.width)} contentContainerStyle={{ padding: 12, flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+      {m.filteredMenu.map(p => { const q = qtyOf(p.id); return <Press key={p.id} accessibilityRole="button" accessibilityLabel={`Agregar ${p.nombre}, ${money(p.precio)}${q ? `, van ${q}` : ''}`}
+        disabled={m.orderBusy || !m.canManageCash} onPress={() => { haptic('tap'); a.addToCart(p); }} scaleTo={0.97} hoverStyle={{ borderColor: c.text }}
+        style={{ width: tileW, minHeight: 84, padding: 12, borderRadius: r.md, borderWidth: q ? 2 : 1, borderColor: q ? c.text : c.rule, backgroundColor: c.paper, justifyContent: 'space-between', gap: 8 }}>
+        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'flex-start' }}>
+          <T c={c} size={14} weight="700" style={{ flex: 1 }} numberOfLines={2}>{p.nombre}</T>
+          {q ? <Num c={c} size={13} weight="800" color={c.isDark ? c.ink : c.onInk} style={{ minWidth: 22, textAlign: 'center', paddingHorizontal: 5, borderRadius: 3, backgroundColor: c.isDark ? c.onInk : c.ink }}>{q}</Num> : null}
+        </View>
+        <Num c={c} size={15} weight="700" color={c.muted}>{money(p.precio)}</Num>
+      </Press>; })}
+      {!m.filteredMenu.length ? <View style={{ width: '100%' }}><Empty c={c} icon={Search} title="Sin productos" description="Prueba con otro nombre o categoría. Los productos agotados no aparecen." /></View> : null}
+    </ScrollView>
+  </View>;
+  const draft = <View style={{ flex: 1, backgroundColor: c.paperAlt }}>
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 14 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <T c={c} size={18} weight="800" accessibilityRole="header">Nueva venta</T>
+        {m.cart.length ? <Btn c={c} size="sm" variant="ghost" icon={Trash2} onPress={a.clearCart} disabled={m.orderBusy}>Vaciar</Btn> : null}
+      </View>
+      <Seg c={c} size="sm" label="Tipo de venta" value={m.saleType} disabled={m.orderBusy} onChange={a.setSaleType} options={[{ value: 'Para llevar', label: 'Para llevar' }, { value: 'Delivery', label: 'Delivery' }]} />
+      <Cells c={c}>
+        <CellInput c={c} label={m.saleType === 'Delivery' ? 'Nombre del delivery' : 'A nombre de'} basis="100%" value={m.customer.nombre} onChangeText={a.setCustomerName} editable={!m.orderBusy} placeholder="Nombre del cliente" error={!!m.customerError} />
+      </Cells>
+      {m.customerError ? <T c={c} size={13} color={c.red}>{m.customerError}</T> : null}
+      <View style={{ borderTopWidth: 1, borderColor: c.text }}>
+        {m.cart.map(item => <View key={item.producto_id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderColor: c.line }}>
+          <View style={{ flex: 1, minWidth: 0 }}><T c={c} size={14} weight="600" numberOfLines={1}>{item.nombre}</T><Num c={c} size={13} weight="500" color={c.faint}>{money(item.precio)} c/u</Num></View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: c.rule, borderRadius: r.md }}>
+            <IconBtn c={c} icon={Minus} label={`Quitar una unidad de ${item.nombre}`} onPress={() => a.changeCartQty(item.producto_id, -1)} disabled={m.orderBusy} size={36} />
+            <Num c={c} size={15} weight="800" style={{ minWidth: 24, textAlign: 'center' }}>{item.cantidad}</Num>
+            <IconBtn c={c} icon={Plus} label={`Añadir una unidad de ${item.nombre}`} onPress={() => a.changeCartQty(item.producto_id, 1)} disabled={m.orderBusy} size={36} />
+          </View>
+          <Num c={c} size={15} weight="700" style={{ width: 76, textAlign: 'right' }}>{money(item.precio * item.cantidad)}</Num>
+        </View>)}
+        {!m.cart.length ? <T c={c} size={14} color={c.faint} style={{ paddingVertical: 16 }}>Toca productos del catálogo para agregarlos.</T> : null}
+      </View>
+      <TextInput value={m.saleNote} onChangeText={a.setSaleNote} editable={!m.orderBusy} placeholder="Indicaciones para cocina (opcional)" placeholderTextColor={c.faint} accessibilityLabel="Indicaciones para cocina" multiline
+        style={[{ minHeight: 60, padding: 10, borderRadius: r.md, borderWidth: 1, borderColor: c.rule, backgroundColor: c.paper, fontFamily: FONT, fontSize: 14, color: c.text, textAlignVertical: 'top' }, WEB ? { outlineStyle: 'none' } : null]} />
+      <View style={{ borderWidth: 1, borderColor: c.rule, backgroundColor: c.paper }}>
+        <TotalRow c={c} label="Productos" value={m.cartSubtotal} />
+        {m.cartTotal - m.cartSubtotal > 0.004 ? <TotalRow c={c} label="Servicio" value={m.cartTotal - m.cartSubtotal} /> : null}
+        <TotalRow c={c} label="Total" value={m.cartTotal} strong />
+      </View>
+    </ScrollView>
+    <View style={{ padding: 16, paddingBottom: 16 + (phone ? BOTTOM_INSET : 0), gap: 6, borderTopWidth: 1, borderColor: c.rule, backgroundColor: c.paper }}>
+      {!openCaja ? <T c={c} size={13} color={c.amber}>Abre la caja para registrar ventas.</T> : null}
+      <Btn c={c} variant="ink" size="lg" full icon={ArrowUpRight} onPress={a.createPickupOrder} loading={m.orderBusy} disabled={!m.cart.length || !openCaja || !m.canManageCash}>{m.cart.length ? `Enviar a cocina · ${money(m.cartTotal)}` : 'Enviar a cocina'}</Btn>
+    </View>
+  </View>;
+  const [phoneDraft, setPhoneDraft] = useState(false);
+  const cartCount = m.cart.reduce((s, i) => s + Number(i.cantidad || 0), 0);
+  const venta = two
+    ? <View style={{ flex: 1, flexDirection: 'row' }}><View style={{ flex: 1, borderRightWidth: 1, borderColor: c.rule }}>{catalog}</View><View style={{ width: three ? (roomy ? 420 : 380) : 340 }}>{draft}</View></View>
+    : phoneDraft ? <View style={{ flex: 1 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 4, height: 48, borderBottomWidth: 1, borderColor: c.line, backgroundColor: c.paper }}>
+        <IconBtn c={c} icon={ArrowLeft} label="Volver al catálogo" onPress={() => setPhoneDraft(false)} size={44} /><T c={c} size={15} weight="700">Catálogo</T>
+      </View>{draft}</View>
+      : <View style={{ flex: 1 }}>{catalog}
+        {cartCount ? <View style={{ padding: 12, borderTopWidth: 1, borderColor: c.rule, backgroundColor: c.paper }}>
+          <Btn c={c} variant="ink" size="lg" full onPress={() => setPhoneDraft(true)}>{`Ver venta · ${cartCount} · ${money(m.cartTotal)}`}</Btn>
+        </View> : null}
+      </View>;
+
+  // ── Turno ──────────────────────────────────────────────────────────────────
+  const tt = m.turnTotals || {};
+  const fondo = Number(m.caja?.caja?.monto_inicial || 0);
+  const moves = m.caja?.movimientos || [];
+  const ledger = useMemo(() => {
+    const rows = [{ label: 'Fondo de apertura', amount: fondo, sign: 1, at: m.caja?.caja?.fecha_apertura }];
+    rows.push({ label: 'Cobros en efectivo', amount: Number(tt.efectivo || 0), sign: 1 });
+    [...moves].sort((x, y) => String(x.created_at).localeCompare(String(y.created_at))).forEach(mv => {
+      const t = String(mv.tipo || '').toUpperCase();
+      if (String(mv.metodo || 'Efectivo') !== 'Efectivo' || !['INGRESO', 'RETIRO', 'GASTO'].includes(t)) return;
+      rows.push({ label: `${t === 'INGRESO' ? 'Ingreso' : t === 'RETIRO' ? 'Retiro' : 'Gasto'}: ${mv.motivo || 'sin motivo'}`, amount: Number(mv.monto || 0), sign: t === 'INGRESO' ? 1 : -1, at: mv.created_at });
+    });
+    let run = 0; const out = rows.map(row => { run = Math.round((run + row.sign * row.amount) * 100) / 100; return { ...row, run }; });
+    const expected = m.caja?.efectivo_esperado;
+    const devol = Number(tt.devoluciones || 0);
+    if (devol > 0 && Math.round((run - devol - Number(expected)) * 100) >= -1 && expected != null && Number(expected) < run) { run = Math.round((run - Math.min(devol, run - Number(expected))) * 100) / 100; out.push({ label: 'Devoluciones', amount: devol, sign: -1, run }); }
+    if (expected != null && Math.abs(Number(expected) - run) >= 0.01) out.push({ label: 'Diferencia sin detallar (según el sistema)', amount: Math.abs(Number(expected) - run), sign: Number(expected) > run ? 1 : -1, run: Number(expected), warn: true });
+    return out;
+  }, [fondo, tt.efectivo, tt.devoluciones, moves, m.caja?.efectivo_esperado]);
+  const methods = Object.entries(m.stats.byMethod).filter(([k, v]) => v > 0 || ['Efectivo', 'Tarjeta', 'Transferencia'].includes(k));
+  const turno = !openCaja ? <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: phone ? 16 : 32, alignItems: 'center' }}>
+    <View style={{ width: '100%', maxWidth: 640, backgroundColor: c.paper, borderWidth: 1, borderColor: c.rule, padding: phone ? 20 : 28, gap: 16 }}>
+      <T c={c} size={22} weight="800" accessibilityRole="header">La caja está cerrada</T>
+      <T c={c} size={15} color={c.muted}>Abre el turno con el fondo de efectivo que hay en el cajón. Desde ese momento se registran los cobros, ingresos, retiros y gastos.</T>
+      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+        <Btn c={c} variant="ink" size="lg" icon={WalletCards} onPress={a.handleOpenCaja} disabled={!m.canManageCash}>Abrir caja</Btn>
+        <Btn c={c} size="lg" icon={Clock} onPress={a.showHistory}>Cierres anteriores</Btn>
+      </View>
+      {m.caja?.cierres?.[0] ? <View style={{ borderWidth: 1, borderColor: c.rule }}>
+        <View style={{ paddingHorizontal: 12, paddingVertical: 8, backgroundColor: c.paperAlt, borderBottomWidth: 1, borderColor: c.rule }}><T c={c} size={14} weight="700">Último cierre · caja #{m.caja.cierres[0].id}</T></View>
+        <TotalRow c={c} label="Ventas" value={Number(m.caja.cierres[0].total_ventas || 0)} />
+        <TotalRow c={c} label="Efectivo esperado" value={Number(m.caja.cierres[0].efectivo_esperado || 0)} />
+        <TotalRow c={c} label="Efectivo contado" value={Number(m.caja.cierres[0].monto_final || 0)} />
+        <TotalRow c={c} label="Diferencia" value={Number(m.caja.cierres[0].diferencia_cierre || 0)} strong tone={Number(m.caja.cierres[0].diferencia_cierre) < 0 ? 'red' : Number(m.caja.cierres[0].diferencia_cierre) > 0 ? 'amber' : 'green'} />
+      </View> : null}
+    </View>
+  </ScrollView> : <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: phone ? 12 : 24, gap: 16, flexDirection: three ? 'row' : 'column', alignItems: 'flex-start' }}>
+    <View style={{ flex: three ? 1 : undefined, width: three ? undefined : '100%', minWidth: 0, backgroundColor: c.paper, borderWidth: 1, borderColor: c.rule, padding: phone ? 16 : 24, gap: 20 }}>
+      <View style={{ gap: 4 }}>
+        <T c={c} size={22} weight="800" accessibilityRole="header">Corte del turno #{m.caja.caja.id}</T>
+        <T c={c} size={14} color={c.muted}>Abierto {parseDate(m.caja.caja.fecha_apertura)?.toLocaleString('es-EC', { dateStyle: 'medium', timeStyle: 'short', hour12: false }) || '—'} · {m.user?.nombre || 'Caja'}</T>
+      </View>
+      <Cells c={c}>
+        <Cell c={c} label="Fondo de apertura" basis={phone ? '50%' : '25%'}><Num c={c} size={18} weight="800">{money(fondo)}</Num></Cell>
+        <Cell c={c} label="Cobrado" basis={phone ? '50%' : '25%'}><Num c={c} size={18} weight="800">{money(tt.total)}</Num></Cell>
+        <Cell c={c} label="Comprobantes" basis={phone ? '50%' : '25%'}><Num c={c} size={18} weight="800">{Number(tt.pagos || 0)}</Num></Cell>
+        <Cell c={c} label="Efectivo en caja" basis={phone ? '50%' : '25%'}><Num c={c} size={18} weight="800">{money(m.caja?.efectivo_esperado)}</Num></Cell>
+      </Cells>
+      <View style={{ gap: 8 }}>
+        <T c={c} size={16} weight="800">Cobros por forma de pago</T>
+        <View style={{ borderTopWidth: 1, borderColor: c.text }}>
+          {methods.map(([k, v]) => { const Icon = METHOD_ICON[k] || WalletCards; const share = Number(tt.total) > 0 ? v / Number(tt.total) : 0; return <View key={k} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, borderBottomWidth: 1, borderColor: c.line }}>
+            <Icon size={16} color={c.faint} /><T c={c} size={14} weight="600" style={{ width: 110 }}>{k}</T>
+            <View style={{ flex: 1 }} />
+            <Num c={c} size={13} weight="600" color={c.faint} style={{ width: 40, textAlign: 'right' }}>{Math.round(share * 100)}%</Num>
+            <Num c={c} size={15} weight="700" style={{ width: 96, textAlign: 'right' }}>{money(v)}</Num>
+          </View>; })}
+          <View style={{ flexDirection: 'row', paddingVertical: 10, backgroundColor: c.paperAlt, paddingHorizontal: 8 }}>
+            <T c={c} size={15} weight="800" style={{ flex: 1 }}>Total cobrado</T><Num c={c} size={17} weight="800">{money(tt.total)}</Num>
+          </View>
+        </View>
+      </View>
+      <View style={{ gap: 8 }}>
+        <T c={c} size={16} weight="800">Libro de efectivo</T>
+        <View style={{ borderTopWidth: 1, borderColor: c.text }}>
+          <View style={{ flexDirection: 'row', gap: 10, paddingVertical: 6, borderBottomWidth: 1, borderColor: c.rule }}>
+            <Lbl c={c} style={{ flex: 1 }}>Concepto</Lbl>{!phone ? <Lbl c={c} style={{ width: 48 }}>Hora</Lbl> : null}<Lbl c={c} style={{ width: 92, textAlign: 'right' }}>Monto</Lbl><Lbl c={c} style={{ width: 92, textAlign: 'right' }}>Saldo</Lbl>
+          </View>
+          {ledger.map((row, i) => <View key={i} style={{ flexDirection: 'row', gap: 10, paddingVertical: 9, borderBottomWidth: 1, borderColor: c.line }}>
+            <T c={c} size={14} weight="500" color={row.warn ? c.amber : c.text} style={{ flex: 1 }} numberOfLines={2}>{row.label}</T>
+            {!phone ? <Num c={c} size={13} weight="500" color={c.faint} style={{ width: 48 }}>{row.at ? hhmm(row.at) : ''}</Num> : null}
+            <Num c={c} size={14} weight="600" color={row.warn ? c.amber : c.text} style={{ width: 92, textAlign: 'right' }}>{`${row.sign < 0 ? '−' : '+'}${money(row.amount)}`}</Num>
+            <Num c={c} size={14} weight="700" style={{ width: 92, textAlign: 'right' }}>{money(row.run)}</Num>
+          </View>)}
+          <View style={{ flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 8, backgroundColor: c.paperAlt }}>
+            <T c={c} size={15} weight="800" style={{ flex: 1 }}>Debe haber en el cajón</T><Num c={c} size={17} weight="800">{money(m.caja?.efectivo_esperado)}</Num>
+          </View>
+        </View>
       </View>
     </View>
-    <Modal visible={catalog} transparent animationType="fade" onRequestClose={()=>setCatalog(false)}>
-      <View style={{flex:1,backgroundColor:'rgba(15,23,42,0.55)',alignItems:'center',justifyContent:'center',padding:phone?10:28}}><View style={[card,{width:'100%',maxWidth:920,maxHeight:'92%'}]}>
-        <View style={[row,{padding:20,borderBottomWidth:1,borderBottomColor:p.line,gap:12,flexShrink:0}]}><ShoppingBag size={21} color={p.primaryText}/><View style={{flex:1,gap:4}}><Text style={{color:p.text,fontSize:phone?17:20,fontWeight:'600'}}>Catálogo de productos</Text><Text style={{color:p.faint,fontSize:12}}>Selecciona los productos para esta venta.</Text></View><Action p={p} label="Cerrar" icon={X} compact onPress={()=>setCatalog(false)}/></View>
-        <View style={{padding:20,gap:12,flexShrink:0}}><Input style={{flex:undefined}} p={p} value={m.menuSearch} onChangeText={a.setMenuSearch} placeholder="Buscar producto…"/><ScrollView horizontal style={{flexGrow:0}} showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:7}}>{m.menuCategories.map((category)=><Chip key={category} p={p} active={category===m.menuCategory} onPress={()=>a.setMenuCategory(category)}>{category==='TODAS'?'Todas las categorías':category}</Chip>)}</ScrollView></View>
-        <ScrollView contentContainerStyle={{padding:20,paddingTop:0,flexDirection:'row',flexWrap:'wrap',gap:12}}>{m.filteredMenu.map((product)=>{const qty=m.cart.find((item)=>Number(item.producto_id)===Number(product.id))?.cantidad||0;return <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Agregar ${product.nombre}`} disabled={m.orderBusy||!m.canManageCash} key={product.id} onPress={()=>a.addToCart(product)} style={{width:phone?'47%':'31.5%',borderRadius:10,borderWidth:1,borderColor:qty?p.primary:p.line,overflow:'hidden',backgroundColor:p.surface}}>
-          <View style={{height:phone?100:125,backgroundColor:p.surfaceAlt,alignItems:'center',justifyContent:'center'}}>{product.imagen_url?<Image source={{uri:h.assetUrl(product.imagen_url)}} style={{width:'100%',height:'100%'}} resizeMode="cover"/>:<ShoppingBag size={28} color={p.faint}/>}<View style={{position:'absolute',right:9,top:9,width:28,height:28,backgroundColor:qty?p.primary:p.surface,borderRadius:8,alignItems:'center',justifyContent:'center'}}>{qty?<Text style={{color:p.onPrimary,fontWeight:'600'}}>{qty}</Text>:<Plus size={16} color={p.text}/>}</View></View>
-          <View style={{padding:13,gap:6}}><Text style={{color:p.text,fontSize:13,fontWeight:'600'}}>{product.nombre}</Text><Text style={{color:p.faint,fontSize:11}}>{product.categoria_nombre||product.categoria||'General'}</Text><Text style={[moneyStyle,{color:p.primaryText,fontSize:17,fontWeight:'600',marginTop:3}]}>{money(product.precio)}</Text></View>
-        </TouchableOpacity>;})}{!m.filteredMenu.length?<View style={{width:'100%'}}>{empty(Search,'Sin resultados','Prueba con otro nombre o categoría.')}</View>:null}</ScrollView>
-        <View style={[row,{padding:20,borderTopWidth:1,borderTopColor:p.line,justifyContent:'space-between',gap:12,flexShrink:0}]}><Text style={{color:p.muted,fontSize:13}}>{m.cart.reduce((sum,item)=>sum+Number(item.cantidad),0)} productos · {money(m.cartTotal)}</Text><Action p={p} primary label="Volver a la venta" icon={ArrowRight} onPress={()=>setCatalog(false)}/></View>
-      </View></View>
-    </Modal>
+    <View style={{ width: three ? 320 : '100%', gap: 12 }}>
+      <View style={{ backgroundColor: c.paper, borderWidth: 1, borderColor: c.rule, padding: 16, gap: 8 }}>
+        <T c={c} size={15} weight="800">Movimientos de efectivo</T>
+        <Btn c={c} icon={ArrowDownLeft} onPress={() => a.openMovement('INGRESO')} disabled={!m.canManageCash}>Registrar ingreso</Btn>
+        <Btn c={c} icon={ArrowUpRight} onPress={() => a.openMovement('RETIRO')} disabled={!m.canManageCash}>Registrar retiro</Btn>
+        <Btn c={c} icon={Ban} onPress={() => a.openMovement('GASTO')} disabled={!m.canManageCash}>Registrar gasto</Btn>
+      </View>
+      <View style={{ backgroundColor: c.paper, borderWidth: 1, borderColor: c.rule, padding: 16, gap: 8 }}>
+        <T c={c} size={15} weight="800">Cierre</T>
+        <T c={c} size={13} color={c.muted}>El corte X se imprime sin cerrar. El cierre pide contar billetes y monedas y deja registrada la diferencia.</T>
+        <Btn c={c} icon={Printer} onPress={a.printShiftReport}>Imprimir corte X</Btn>
+        <Btn c={c} icon={Clock} onPress={a.showHistory}>Cierres anteriores</Btn>
+        <Btn c={c} variant="ink" icon={Store} onPress={a.handleCloseCaja} disabled={!m.canManageCash || m.cashBusy}>Cerrar turno</Btn>
+      </View>
+    </View>
+  </ScrollView>;
+
+  const body = view === 'cobrar' ? <>{closedBanner}{cobrar}</> : view === 'venta' ? venta : view === 'comprobantes'
+    ? <CashierPayments c={c} phone={phone} onReprint={a.reprintPayment} onAuthorize={a.openPaymentAuthorization} canAuthorize={m.canRequestPaymentActions} busy={m.adminBusy || m.printBusy} version={m.historyVersion} />
+    : turno;
+
+  const webAttr = WEB ? { dataSet: { caja: '1', ...(c.isDark ? { cajaDark: '1' } : {}) } } : {};
+  return <SafeAreaView {...webAttr} style={{ flex: 1, backgroundColor: c.ground }}>
+    {topBar}
+    {notices}
+    <View style={{ flex: 1, minHeight: 0 }}>{body}</View>
+    {phone && !(view === 'cobrar' && sel) && !(view === 'venta' && phoneDraft) ? <View accessibilityRole="tablist" style={{ flexDirection: 'row', backgroundColor: c.ink, paddingBottom: BOTTOM_INSET }}>
+      {nav.map(n => { const on = view === n.key; const Icon = n.icon; return <Press key={n.key} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={n.label} onPress={() => go(n.key)} scaleTo={0.96}
+        style={{ flex: 1, height: 58, alignItems: 'center', justifyContent: 'center', gap: 3, borderTopWidth: 3, borderColor: on ? c.onInk : 'transparent' }}>
+        <Icon size={19} color={on ? c.onInk : c.inkMuted} />
+        <T c={c} size={11} weight={on ? '700' : '500'} color={on ? c.onInk : c.inkMuted}>{n.short || n.label}{n.count ? ` ${n.count}` : ''}</T>
+      </Press>; })}
+    </View> : null}
   </SafeAreaView>;
 }

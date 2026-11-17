@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { savedPaymentText } from '../utils/paymentReceipt.mjs';
 import CashierWorkspace from './CashierWorkspace';
+import CajaDialogs from '../components/cashier/dialogs';
+import { tokens as cajaTokens } from '../components/cashier/kit';
 import { receiptTotals } from '../utils/cashLogic.mjs';
 import { runExclusive } from '../utils/waiterLogic.mjs';
 import { groupUnpaidAccounts } from '../utils/accountLogic.mjs';
@@ -720,7 +722,7 @@ function CashierShell() {
       await refreshAll();
       if (data?.pedido?.id) setSelectedId(data.pedido.id);
     } catch (error) {
-      Alert.alert('No se pudo crear pedido', error.response?.data?.message || error.response?.data?.error || 'Revisa el backend.');
+      Alert.alert('No se pudo crear pedido', error.response?.data?.message || error.response?.data?.error || 'Revisa la conexión e inténtalo de nuevo.');
     } finally {
       setOrderBusy(false);
     }
@@ -810,7 +812,7 @@ function CashierShell() {
       setOpenCajaModal(false);
       await refreshAll();
     } catch (error) {
-      Alert.alert('No se pudo abrir caja', error.response?.data?.message || 'Revisa el backend.');
+      Alert.alert('No se pudo abrir caja', error.response?.data?.message || 'Revisa la conexión e inténtalo de nuevo.');
     } finally {
       setCashBusy(false);
     }
@@ -839,16 +841,27 @@ function CashierShell() {
       return;
     }
     setCashBusy(true);
+    // La ventana de impresión se abre en el mismo toque para que el navegador no la bloquee.
+    const printWindow = Platform.OS === 'web' && typeof window !== 'undefined' ? window.open('', '_blank', 'width=420,height=680') : null;
     try {
-      await axios.post(`${BASE_URL}/caja/cerrar`, {
+      const { data } = await axios.post(`${BASE_URL}/caja/cerrar`, {
         caja_id: closeCajaId,
         monto_final: closeAmount,
         observacion: closeNote.trim() || null,
       });
       setCloseCajaModal(false);
+      // Corte Z: el cierre recién hecho, impreso al momento.
+      const r = data?.resumen || {};
+      const cerrado = { id: closeCajaId, trabajador_nombre: user?.nombre, fecha_apertura: caja?.caja?.fecha_apertura, fecha_cierre: new Date().toISOString(),
+        total_ventas: turnTotals.total, total_efectivo: stats.byMethod.Efectivo, total_tarjeta: stats.byMethod.Tarjeta, total_transferencia: stats.byMethod.Transferencia, total_qr: stats.byMethod.QR,
+        monto_inicial: caja?.caja?.monto_inicial, total_ingresos: movementStats.INGRESO, total_retiros: movementStats.RETIRO, total_gastos: movementStats.GASTO, total_devoluciones: movementStats.DEVOLUCION,
+        total_anulaciones: turnTotals.anulaciones, efectivo_esperado: r.efectivo_esperado ?? caja?.efectivo_esperado, monto_final: r.monto_final ?? closeAmount,
+        diferencia_cierre: r.diferencia ?? (Number(closeAmount) - Number(caja?.efectivo_esperado || 0)), observacion_cierre: closeNote.trim() || null };
+      printText(closureText(cerrado), `Corte Z caja ${closeCajaId}`, { ...businessConfig, printWindow }).catch(() => { printWindow?.close(); });
       await refreshAll();
     } catch (error) {
-      Alert.alert('No se pudo cerrar', error.response?.data?.message || 'Revisa el backend.');
+      printWindow?.close();
+      Alert.alert('No se pudo cerrar', error.response?.data?.message || 'Revisa la conexión e inténtalo de nuevo.');
     } finally {
       setCashBusy(false);
     }
@@ -961,7 +974,7 @@ function CashierShell() {
       setMovementModal(false);
       await refreshAll();
     } catch (error) {
-      Alert.alert('No se pudo registrar', error.response?.data?.message || error.response?.data?.error || 'Revisa el backend.');
+      Alert.alert('No se pudo registrar', error.response?.data?.message || error.response?.data?.error || 'Revisa la conexión e inténtalo de nuevo.');
     } finally {
       setCashBusy(false);
     }
@@ -1009,7 +1022,7 @@ function CashierShell() {
       setPaymentAuth({ visible: false, pago: null, action: 'anular', motivo: '', correo: '', pin: '' });
       await refreshAll();
     } catch (error) {
-      Alert.alert('No se pudo completar', error.response?.data?.message || error.response?.data?.error || 'Revisa el backend.');
+      Alert.alert('No se pudo completar', error.response?.data?.message || error.response?.data?.error || 'Revisa la conexión e inténtalo de nuevo.');
     } finally {
       setAdminBusy(false);
     }
@@ -1020,7 +1033,7 @@ function CashierShell() {
     return [
       ...businessHeader(businessConfig),
       separator(),
-      centerText('CIERRE DE CAJA'),
+      centerText('CIERRE DE CAJA - CORTE Z'),
       receiptRow('Caja', `#${item.id}`),
       receiptRow('Cajera', item.trabajador_nombre || item.trabajador_id || '-'),
       receiptRow('Apertura', item.fecha_apertura ? new Date(item.fecha_apertura).toLocaleString('es-EC') : '-'),
@@ -1105,7 +1118,7 @@ function CashierShell() {
       }
       await refreshAll();
     } catch (error) {
-      Alert.alert('No se pudo completar', error.response?.data?.message || error.response?.data?.error || 'Revisa el backend.');
+      Alert.alert('No se pudo completar', error.response?.data?.message || error.response?.data?.error || 'Revisa la conexión e inténtalo de nuevo.');
     } finally {
       setAdminBusy(false);
     }
@@ -1115,362 +1128,40 @@ function CashierShell() {
   const countedCash = Number(String(closeAmount || 0).replace(',', '.'));
   const closeDiff = countedCash - expectedCash;
 
-  const renderCashModals = () => (
-    <>
-      <Modal visible={openCajaModal} transparent animationType="fade" onRequestClose={() => setOpenCajaModal(false)}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(2,8,23,0.55)', padding: 16, justifyContent: 'center' }}>
-          <View style={{ width: '100%', maxWidth: 520, alignSelf: 'center', borderRadius: 10, backgroundColor: pos.surface, overflow: 'hidden', ...shadow(pos, 2) }}>
-            <View style={{ padding: 14, borderBottomWidth: 1, borderBottomColor: pos.line, flexDirection: 'row', alignItems: 'center', backgroundColor: pos.surfaceAlt }}>
-              <WalletCards size={20} color={pos.primaryText} />
-              <Text style={{ color: pos.text, fontSize: 18, fontWeight: '600', marginLeft: 8, flex: 1 }}>Abrir caja</Text>
-              <TouchableOpacity onPress={() => setOpenCajaModal(false)} style={{ width: 34, height: 34, borderRadius: 7, backgroundColor: pos.redSoft, alignItems: 'center', justifyContent: 'center' }}>
-                <X size={18} color={pos.red} />
-              </TouchableOpacity>
-            </View>
-            <View style={{ padding: 14, gap: 10 }}>
-              <View>
-                <Text style={{ color: pos.muted, fontSize: 12, fontWeight: '600', marginBottom: 5 }}>Cajera responsable</Text>
-                <View style={{ height: 42, paddingHorizontal: 11, justifyContent: 'center', ...field }}>
-                  <Text style={{ color: pos.text, fontWeight: '600' }}>{user?.nombre || user?.name || user?.correo || 'Cajera'}</Text>
-                </View>
-              </View>
-              <View style={{ flexDirection: isPhone ? 'column' : 'row', gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: pos.muted, fontSize: 12, fontWeight: '600', marginBottom: 5 }}>Fecha y hora</Text>
-                  <View style={{ height: 42, paddingHorizontal: 11, justifyContent: 'center', ...field }}>
-                    <Text style={{ color: pos.text, fontWeight: '600' }}>{new Date().toLocaleString('es-EC')}</Text>
-                  </View>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: pos.muted, fontSize: 12, fontWeight: '600', marginBottom: 5 }}>Monto inicial efectivo</Text>
-                  <TextInput
-                    value={openAmount}
-                    onChangeText={(value) => setOpenAmount(value.replace(',', '.'))}
-                    keyboardType="decimal-pad"
-                    placeholder="0.00"
-                    placeholderTextColor={pos.faint}
-                    style={{ height: 42, paddingHorizontal: 11, fontWeight: '600', fontSize: 18, ...field }}
-                  />
-                </View>
-              </View>
-              <View>
-                <Text style={{ color: pos.muted, fontSize: 12, fontWeight: '600', marginBottom: 5 }}>Observacion opcional</Text>
-                <TextInput
-                  value={openNote}
-                  onChangeText={setOpenNote}
-                  placeholder="Ej. Turno manana, billetes revisados..."
-                  placeholderTextColor={pos.faint}
-                  style={{ minHeight: 74, paddingHorizontal: 11, paddingVertical: 10, fontWeight: '600', ...field }}
-                  multiline
-                />
-              </View>
-              <TouchableOpacity
-                onPress={submitOpenCaja}
-                disabled={cashBusy}
-                style={{ height: 48, borderRadius: 8, backgroundColor: pos.blue, alignItems: 'center', justifyContent: 'center', marginTop: 4, opacity: cashBusy ? 0.65 : 1 }}
-              >
-                {cashBusy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>Confirmar apertura</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+  const cajaTheme = cajaTokens[isDark ? 'dark' : 'light'];
+  // Corte X: el resumen del turno abierto, impreso sin cerrarlo.
+  const printShiftReport = () => {
+    if (!caja?.caja) return;
+    const moneyFmt = (value) => moneyWithSettings(value, businessConfig);
+    printText([
+      ...businessHeader(businessConfig), separator(), centerText('CORTE X - TURNO ABIERTO'),
+      receiptRow('Caja', `#${caja.caja.id}`), receiptRow('Cajera', user?.nombre || '-'),
+      receiptRow('Apertura', caja.caja.fecha_apertura ? new Date(String(caja.caja.fecha_apertura).replace(' ', 'T')).toLocaleString('es-EC') : '-'),
+      receiptRow('Impreso', new Date().toLocaleString('es-EC')), separator(), centerText('COBROS POR METODO'),
+      ...Object.entries(stats.byMethod).map(([label, value]) => receiptRow(label, moneyFmt(value))),
+      receiptRow('TOTAL COBRADO', moneyFmt(turnTotals.total)), receiptRow('Comprobantes', String(turnTotals.pagos || 0)), separator(), centerText('EFECTIVO'),
+      receiptRow('Fondo de apertura', moneyFmt(caja.caja.monto_inicial)), receiptRow('Cobros en efectivo', moneyFmt(stats.byMethod.Efectivo)),
+      receiptRow('Ingresos', moneyFmt(movementStats.INGRESO)), receiptRow('Retiros', moneyFmt(movementStats.RETIRO)), receiptRow('Gastos', moneyFmt(movementStats.GASTO)),
+      receiptRow('Devoluciones', moneyFmt(movementStats.DEVOLUCION)), receiptRow('DEBE HABER', moneyFmt(caja.efectivo_esperado)), separator(),
+      centerText('Documento interno - no cierra el turno'),
+    ].filter(Boolean).join('\n'), `Corte X caja ${caja.caja.id}`, businessConfig).catch((error) => Alert.alert('No se pudo imprimir', error.message));
+  };
 
-      <Modal visible={closeCajaModal} transparent animationType="fade" onRequestClose={() => setCloseCajaModal(false)}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(2,8,23,0.55)', padding: 16, justifyContent: 'center' }}>
-          <View style={{ width: '100%', maxWidth: 620, alignSelf: 'center', borderRadius: 10, backgroundColor: pos.surface, overflow: 'hidden', ...shadow(pos, 2) }}>
-            <View style={{ padding: 14, borderBottomWidth: 1, borderBottomColor: pos.line, flexDirection: 'row', alignItems: 'center', backgroundColor: pos.surfaceAlt }}>
-              <Receipt size={20} color={pos.primaryText} />
-              <Text style={{ color: pos.text, fontSize: 18, fontWeight: '600', marginLeft: 8, flex: 1 }}>Cerrar caja</Text>
-              <TouchableOpacity onPress={() => setCloseCajaModal(false)} style={{ width: 34, height: 34, borderRadius: 7, backgroundColor: pos.redSoft, alignItems: 'center', justifyContent: 'center' }}>
-                <X size={18} color={pos.red} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView contentContainerStyle={{ padding: 14, gap: 10 }}>
-              <View style={{ flexDirection: isPhone ? 'column' : 'row', gap: 10 }}>
-                <View style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: pos.surfaceAlt, borderWidth: 1, borderColor: pos.line }}>
-                  <Text style={{ color: pos.faint, fontSize: 11, fontWeight: '600' }}>Monto inicial</Text>
-                  <Text style={{ color: pos.text, fontSize: 20, fontWeight: '600', marginTop: 4 }}>{money(caja?.caja?.monto_inicial)}</Text>
-                </View>
-                <View style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: pos.surfaceAlt, borderWidth: 1, borderColor: pos.line }}>
-                  <Text style={{ color: pos.faint, fontSize: 11, fontWeight: '600' }}>Efectivo esperado</Text>
-                  <Text style={{ color: pos.green, fontSize: 20, fontWeight: '600', marginTop: 4 }}>{money(expectedCash)}</Text>
-                </View>
-                <View style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: closeDiff < 0 ? pos.redSoft : pos.greenSoft, borderWidth: 1, borderColor: closeDiff < 0 ? pos.red : pos.green }}>
-                  <Text style={{ color: closeDiff < 0 ? pos.red : pos.green, fontSize: 11, fontWeight: '600' }}>Diferencia</Text>
-                  <Text style={{ color: closeDiff < 0 ? pos.red : pos.green, fontSize: 20, fontWeight: '600', marginTop: 4 }}>{money(closeDiff)}</Text>
-                </View>
-              </View>
-
-              <View style={{ borderRadius: 8, backgroundColor: pos.surfaceAlt, borderWidth: 1, borderColor: pos.line, padding: 12, gap: 8 }}>
-                {[
-                  ['Total vendido en turno', turnTotals.total],
-                  ['Total efectivo', stats.byMethod.Efectivo],
-                  ['Total tarjeta', stats.byMethod.Tarjeta],
-                  ['Total transferencia', stats.byMethod.Transferencia],
-                  ['Total QR', stats.byMethod.QR],
-                  ['Ingresos de caja', movementStats.INGRESO],
-                  ['Retiros', movementStats.RETIRO],
-                  ['Gastos', movementStats.GASTO],
-                  ['Devoluciones', movementStats.DEVOLUCION],
-                ].map(([label, value]) => (
-                  <View key={label} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                    <Text style={{ color: pos.muted, fontWeight: '600' }}>{label}</Text>
-                    <Text style={{ color: pos.text, fontWeight: '600' }}>{money(value)}</Text>
-                  </View>
-                ))}
-              </View>
-
-              <View>
-                <Text style={{ color: pos.muted, fontSize: 12, fontWeight: '600', marginBottom: 5 }}>Efectivo contado fisicamente</Text>
-                <TextInput
-                  value={closeAmount}
-                  onChangeText={(value) => setCloseAmount(value.replace(',', '.'))}
-                  keyboardType="decimal-pad"
-                  placeholder="0.00"
-                  placeholderTextColor={pos.faint}
-                  style={{ height: 46, paddingHorizontal: 12, fontWeight: '600', fontSize: 20, ...field }}
-                />
-              </View>
-              <View>
-                <Text style={{ color: pos.muted, fontSize: 12, fontWeight: '600', marginBottom: 5 }}>Observacion opcional</Text>
-                <TextInput
-                  value={closeNote}
-                  onChangeText={setCloseNote}
-                  placeholder="Ej. Faltante, sobrante, retiro de caja..."
-                  placeholderTextColor={pos.faint}
-                  style={{ minHeight: 70, paddingHorizontal: 11, paddingVertical: 10, fontWeight: '600', ...field }}
-                  multiline
-                />
-              </View>
-              <TouchableOpacity
-                onPress={submitCloseCaja}
-                disabled={cashBusy}
-                style={{ height: 50, borderRadius: 8, backgroundColor: pos.primary, alignItems: 'center', justifyContent: 'center', opacity: cashBusy ? 0.65 : 1 }}
-              >
-                {cashBusy ? <ActivityIndicator color={pos.onPrimary} /> : <Text style={{ color: pos.onPrimary, fontWeight: '600' }}>Confirmar cierre manual</Text>}
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={movementModal} transparent animationType="fade" onRequestClose={() => setMovementModal(false)}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(2,8,23,0.55)', padding: 16, justifyContent: 'center' }}>
-          <View style={{ width: '100%', maxWidth: 460, alignSelf: 'center', borderRadius: 10, backgroundColor: pos.surface, overflow: 'hidden', ...shadow(pos, 2) }}>
-            <View style={{ padding: 14, borderBottomWidth: 1, borderBottomColor: pos.line, flexDirection: 'row', alignItems: 'center', backgroundColor: pos.surfaceAlt }}>
-              <WalletCards size={20} color={pos.primaryText} />
-              <Text style={{ color: pos.text, fontSize: 18, fontWeight: '600', marginLeft: 8, flex: 1 }}>Movimiento de caja</Text>
-              <TouchableOpacity onPress={() => setMovementModal(false)} style={{ width: 34, height: 34, borderRadius: 7, backgroundColor: pos.redSoft, alignItems: 'center', justifyContent: 'center' }}>
-                <X size={18} color={pos.red} />
-              </TouchableOpacity>
-            </View>
-            <View style={{ padding: 14, gap: 10 }}>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                {['INGRESO', 'RETIRO', 'GASTO'].map((type) => {
-                  const active = movementType === type;
-                  return (
-                    <TouchableOpacity
-                      key={type}
-                      onPress={() => setMovementType(type)}
-                      style={{ flex: 1, height: 38, borderRadius: 7, backgroundColor: active ? pos.primary : pos.soft, alignItems: 'center', justifyContent: 'center' }}
-                    >
-                      <Text style={{ color: active ? pos.onPrimary : pos.muted, fontSize: 11, fontWeight: '600' }}>{type}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-              <View>
-                <Text style={{ color: pos.muted, fontSize: 12, fontWeight: '600', marginBottom: 5 }}>Monto</Text>
-                <TextInput
-                  value={movementAmount}
-                  onChangeText={(value) => setMovementAmount(value.replace(',', '.'))}
-                  keyboardType="decimal-pad"
-                  placeholder="0.00"
-                  placeholderTextColor={pos.faint}
-                  style={{ height: 44, paddingHorizontal: 11, fontWeight: '600', fontSize: 18, ...field }}
-                />
-              </View>
-              <View>
-                <Text style={{ color: pos.muted, fontSize: 12, fontWeight: '600', marginBottom: 5 }}>Motivo</Text>
-                <TextInput
-                  value={movementReason}
-                  onChangeText={setMovementReason}
-                  placeholder="Ej. Compra de servilletas, retiro para deposito..."
-                  placeholderTextColor={pos.faint}
-                  style={{ minHeight: 70, paddingHorizontal: 11, paddingVertical: 10, fontWeight: '600', ...field }}
-                  multiline
-                />
-              </View>
-              <TouchableOpacity
-                onPress={submitMovement}
-                disabled={cashBusy}
-                style={{ height: 48, borderRadius: 8, backgroundColor: pos.green, alignItems: 'center', justifyContent: 'center', opacity: cashBusy ? 0.65 : 1 }}
-              >
-                {cashBusy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>Registrar movimiento</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={paymentAuth.visible} transparent animationType="fade" onRequestClose={() => setPaymentAuth((prev) => ({ ...prev, visible: false }))}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(2,8,23,0.55)', padding: 16, justifyContent: 'center' }}>
-          <View style={{ width: '100%', maxWidth: 500, alignSelf: 'center', borderRadius: 10, backgroundColor: pos.surface, overflow: 'hidden', ...shadow(pos, 2) }}>
-            <View style={{ padding: 14, borderBottomWidth: 1, borderBottomColor: pos.line, flexDirection: 'row', alignItems: 'center', backgroundColor: pos.surfaceAlt }}>
-              <ShieldCheck size={20} color={paymentAuth.action === 'anular' ? pos.red : pos.amber} />
-              <Text style={{ color: pos.text, fontSize: 18, fontWeight: '600', marginLeft: 8, flex: 1 }}>
-                {paymentAuth.action === 'anular' ? 'Autorizar anulacion' : 'Autorizar devolucion'}
-              </Text>
-              <TouchableOpacity onPress={() => setPaymentAuth((prev) => ({ ...prev, visible: false }))} style={{ width: 34, height: 34, borderRadius: 7, backgroundColor: pos.redSoft, alignItems: 'center', justifyContent: 'center' }}>
-                <X size={18} color={pos.red} />
-              </TouchableOpacity>
-            </View>
-            <View style={{ padding: 14, gap: 10 }}>
-              <View style={{ borderRadius: 8, backgroundColor: pos.surfaceAlt, borderWidth: 1, borderColor: pos.line, padding: 11 }}>
-                <Text style={{ color: pos.faint, fontSize: 11, fontWeight: '600' }}>Pago seleccionado</Text>
-                <Text style={{ color: pos.text, fontSize: 14, fontWeight: '600', marginTop: 4 }}>
-                  {paymentAuth.pago?.comprobante_numero || `Pago #${paymentAuth.pago?.id || '-'}`} - {money(paymentAuth.pago?.monto)}
-                </Text>
-              </View>
-
-              <View>
-                <Text style={{ color: pos.muted, fontSize: 12, fontWeight: '600', marginBottom: 5 }}>Motivo obligatorio</Text>
-                <TextInput
-                  value={paymentAuth.motivo}
-                  onChangeText={(value) => setPaymentAuth((prev) => ({ ...prev, motivo: value }))}
-                  placeholder="Ej. Error de metodo de pago, cliente solicito devolucion..."
-                  placeholderTextColor={pos.faint}
-                  style={{ minHeight: 74, paddingHorizontal: 11, paddingVertical: 10, fontWeight: '600', ...field }}
-                  multiline
-                />
-              </View>
-
-              {!canVoidPayments ? (
-                <View style={{ borderRadius: 8, backgroundColor: pos.amberSoft, borderWidth: 1, borderColor: '#F59E0B', padding: 11, gap: 10 }}>
-                  <Text style={{ color: '#92400E', fontSize: 12, fontWeight: '600' }}>
-                    Requiere PIN de administrador o supervisor.
-                  </Text>
-                  <View>
-                    <Text style={{ color: pos.muted, fontSize: 12, fontWeight: '600', marginBottom: 5 }}>Correo autorizador</Text>
-                    <TextInput
-                      value={paymentAuth.correo}
-                      onChangeText={(value) => setPaymentAuth((prev) => ({ ...prev, correo: value }))}
-                      autoCapitalize="none"
-                      keyboardType="email-address"
-                      placeholder="supervisor@morenamia.com"
-                      placeholderTextColor={pos.faint}
-                      style={{ height: 42, paddingHorizontal: 11, fontWeight: '600', ...field }}
-                    />
-                  </View>
-                  <View>
-                    <Text style={{ color: pos.muted, fontSize: 12, fontWeight: '600', marginBottom: 5 }}>PIN</Text>
-                    <TextInput
-                      value={paymentAuth.pin}
-                      onChangeText={(value) => setPaymentAuth((prev) => ({ ...prev, pin: value.replace(/\D/g, '').slice(0, 4) }))}
-                      keyboardType="number-pad"
-                      secureTextEntry
-                      maxLength={4}
-                      placeholder="0000"
-                      placeholderTextColor={pos.faint}
-                      style={{ height: 42, paddingHorizontal: 11, fontWeight: '600', letterSpacing: 8, ...field }}
-                    />
-                  </View>
-                </View>
-              ) : (
-                <Text style={{ color: pos.green, fontSize: 12, fontWeight: '600' }}>
-                  Tu rol puede autorizar esta accion con la sesion actual.
-                </Text>
-              )}
-
-              <TouchableOpacity
-                onPress={submitPaymentAuthorization}
-                disabled={adminBusy}
-                style={{
-                  height: 48,
-                  borderRadius: 8,
-                  backgroundColor: paymentAuth.action === 'anular' ? pos.red : pos.amber,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  opacity: adminBusy ? 0.65 : 1,
-                }}
-              >
-                {adminBusy ? <ActivityIndicator color="#FFFFFF" /> : (
-                  <Text style={{ color: '#FFFFFF', fontWeight: '600' }}>
-                    {paymentAuth.action === 'anular' ? 'Anular pago' : 'Registrar devolucion'}
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={historyModal} transparent animationType="fade" onRequestClose={() => setHistoryModal(false)}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(2,8,23,0.55)', padding: 16, justifyContent: 'center' }}>
-          <View style={{ width: '100%', maxWidth: 760, maxHeight: '86%', alignSelf: 'center', borderRadius: 10, backgroundColor: pos.surface, overflow: 'hidden', ...shadow(pos, 2) }}>
-            <View style={{ padding: 14, borderBottomWidth: 1, borderBottomColor: pos.line, flexDirection: 'row', alignItems: 'center', backgroundColor: pos.surfaceAlt }}>
-              <Receipt size={20} color={pos.primaryText} />
-              <Text style={{ color: pos.text, fontSize: 18, fontWeight: '600', marginLeft: 8, flex: 1 }}>Historial de cierres</Text>
-              <TouchableOpacity onPress={exportClosures} style={{ height: 34, borderRadius: 7, backgroundColor: pos.greenSoft, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
-                <Text style={{ color: pos.green, fontSize: 12, fontWeight: '600' }}>Exportar CSV</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setHistoryModal(false)} style={{ width: 34, height: 34, borderRadius: 7, backgroundColor: pos.redSoft, alignItems: 'center', justifyContent: 'center' }}>
-                <X size={18} color={pos.red} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView contentContainerStyle={{ padding: 12, gap: 8 }}>
-              {(caja?.cierres || []).map((item) => (
-                <View key={item.id} style={{ borderRadius: 8, borderWidth: 1, borderColor: pos.line, backgroundColor: pos.surfaceAlt, padding: 10 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={{ color: pos.text, fontSize: 14, fontWeight: '600' }}>Caja #{item.id} - {item.trabajador_nombre || 'Cajera'}</Text>
-                      <Text style={{ color: pos.faint, fontSize: 11, fontWeight: '600', marginTop: 2 }}>
-                        {item.fecha_cierre ? new Date(item.fecha_cierre).toLocaleString('es-EC') : 'Sin fecha'}
-                      </Text>
-                    </View>
-                    <View style={{ alignItems: 'flex-end' }}>
-                      <Text style={{ color: pos.green, fontSize: 14, fontWeight: '600' }}>{money(item.total_ventas)}</Text>
-                      <Text style={{ color: Number(item.diferencia_cierre || 0) < 0 ? pos.red : pos.muted, fontSize: 11, fontWeight: '600' }}>
-                        Dif. {money(item.diferencia_cierre)}
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
-                    <Text style={{ color: pos.muted, fontSize: 11, fontWeight: '600' }}>Inicial {money(item.monto_inicial)}</Text>
-                    <Text style={{ color: pos.muted, fontSize: 11, fontWeight: '600' }}>Esperado {money(item.efectivo_esperado)}</Text>
-                    <Text style={{ color: pos.muted, fontSize: 11, fontWeight: '600' }}>Contado {money(item.monto_final)}</Text>
-                  </View>
-                  <TouchableOpacity onPress={() => printText(closureText(item), `Cierre caja ${item.id}`)} style={{ height: 32, borderRadius: 7, backgroundColor: pos.soft, alignItems: 'center', justifyContent: 'center', marginTop: 8 }}>
-                    <Text style={{ color: pos.primaryText, fontSize: 11, fontWeight: '600' }}>Imprimir resumen</Text>
-                  </TouchableOpacity>
-                  {canManageClosures ? (
-                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                      <TouchableOpacity disabled={adminBusy} onPress={() => adminClosureAction(item, 'editar')} style={{ flex: 1, height: 30, borderRadius: 7, backgroundColor: pos.blueSoft, alignItems: 'center', justifyContent: 'center' }}>
-                        <Text style={{ color: pos.blue, fontSize: 11, fontWeight: '600' }}>Editar cierre</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity disabled={adminBusy} onPress={() => adminClosureAction(item, 'reabrir')} style={{ flex: 1, height: 30, borderRadius: 7, backgroundColor: pos.amberSoft, alignItems: 'center', justifyContent: 'center' }}>
-                        <Text style={{ color: pos.amber, fontSize: 11, fontWeight: '600' }}>Reabrir</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : null}
-                </View>
-              ))}
-              {!(caja?.cierres || []).length ? (
-                <Text style={{ color: pos.faint, fontWeight: '600', textAlign: 'center', paddingVertical: 30 }}>Aun no hay cierres registrados.</Text>
-              ) : null}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-    </>
-  );
+  const renderCashModals = () => <CajaDialogs c={cajaTheme} s={{
+    user, caja, turnTotals, expectedCash, cashBusy, adminBusy, canVoidPayments, canManageClosures, cierres: caja?.cierres || [],
+    openCajaModal, setOpenCajaModal, openAmount, setOpenAmount, openNote, setOpenNote, submitOpenCaja,
+    closeCajaModal, setCloseCajaModal, closeAmount, setCloseAmount, closeNote, setCloseNote, submitCloseCaja,
+    movementModal, setMovementModal, movementType, setMovementType, movementAmount, setMovementAmount, movementReason, setMovementReason, submitMovement,
+    paymentAuth, setPaymentAuth, submitPaymentAuthorization,
+    historyModal, setHistoryModal, exportClosures, adminClosureAction,
+    printClosure: (item) => printText(closureText(item), `Cierre caja ${item.id}`, businessConfig),
+  }} />;
 
   if (loading && !pedidos.length) {
     return (
-      <SafeAreaView style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: TOP_INSET, backgroundColor: pos.bg }}>
-        <ActivityIndicator size="large" color={pos.blue} />
-        <Text style={{ color: pos.muted, fontWeight: '600', marginTop: 12 }}>Cargando caja...</Text>
+      <SafeAreaView style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: TOP_INSET, backgroundColor: cajaTheme.paper }}>
+        <ActivityIndicator size="large" color={cajaTheme.text} />
+        <Text style={{ color: cajaTheme.muted, fontWeight: '600', marginTop: 12 }}>Cargando caja…</Text>
       </SafeAreaView>
     );
   }
@@ -1478,7 +1169,7 @@ function CashierShell() {
   return <>
     <CashierWorkspace
       model={{ pos, isDark, user, connected, caja, turnTotals, stats, activeOrders, filteredOrders,
-        selectedOrder, selectedSplit, subtotal, tax, service, total, change, balanceDue, chargeAmount, chargeMode, partialAmount, divisionId, mixedAmounts, mixedTotal, cashPortion, historyVersion, printBusy, pendingPayment, cart, cartSubtotal, cartTotal,
+        selectedOrder, selectedSplit, subtotal, tax, service, total, change, taxPercent: selectedOrder ? Number(selectedOrder?.totales_cobro?.taxPercent ?? businessConfig.iva_porcentaje ?? 0) : null, balanceDue, chargeAmount, chargeMode, partialAmount, divisionId, mixedAmounts, mixedTotal, cashPortion, historyVersion, printBusy, pendingPayment, cart, cartSubtotal, cartTotal,
         customer, customerError, saleType, saleNote, paymentMethods, paymentMethod, cashReceived, reference,
         billingMode, billingName, billingId, billingPhone, billingEmail, matchingClients,
         menuSearch, menuCategory, menuCategories, filteredMenu: visibleProducts, orderSearch, orderFilter,
@@ -1490,7 +1181,7 @@ function CashierShell() {
         setSaleNote: (value) => { if (!orderActionLock.current) setSaleNote(value); },
         setMenuSearch, setMenuCategory, setOrderSearch, setOrderFilter, addToCart, changeCartQty,
         clearCart: () => { if (!orderActionLock.current) setCart([]); }, createPickupOrder, handleCharge,
-        printReceipt, reprintPayment, setChargeMode, setPartialAmount, setDivisionId, setMixedAmounts, handleOpenCaja, handleCloseCaja, openMovement, openPaymentAuthorization,
+        printReceipt, reprintPayment, printShiftReport, setChargeMode, setPartialAmount, setDivisionId, setMixedAmounts, handleOpenCaja, handleCloseCaja, openMovement, openPaymentAuthorization,
         showHistory: () => setHistoryModal(true), dismissNotice: () => setCashNotice(null) }}
       helpers={{ money, orderLabel, itemLineTotal, itemExtras, activePayment, assetUrl }}
     />
