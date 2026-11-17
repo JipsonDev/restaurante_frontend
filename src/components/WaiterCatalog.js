@@ -81,7 +81,7 @@ function Categories({ items, value, onChange }) {
   </ScrollView>;
 }
 
-export default function WaiterCatalog({ width, products, categories, category, setCategory, search, setSearch, preferences, catalog, locked, counts, cartCount, cartTotal, openOrder, chooseTarget, onAdd, onDecrement, onCustomize, repeat, refresh, loading, loadError, bottomInset, draftState, account }) {
+export default function WaiterCatalog({ width, products, categories, category, setCategory, search, setSearch, preferences, catalog, locked, counts, cartCount, cartTotal, openOrder, chooseTarget, onAdd, onDecrement, onCustomize, title, emptyTitle, emptyDescription, searchPlaceholder, repeat, refresh, loading, loadError, bottomInset, draftState, account }) {
   const { c } = useTheme();
   const [measured, setMeasured] = useState(null);
   const localWidth = Math.min(width, measured ?? width);
@@ -113,7 +113,8 @@ export default function WaiterCatalog({ width, products, categories, category, s
     {loadError ? <View accessibilityRole="alert" style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
       <T size={14} color={c.red} weight="600" style={{ flex: 1 }}>No se pudo actualizar el menú.</T><Button size="sm" onPress={refresh} loading={loading}>Reintentar</Button>
     </View> : null}
-    <MenuSearch value={search} onChangeText={setSearch} placeholder="Buscar en el menú" />
+    {title ? <T size={24} weight="800" accessibilityRole="header">{title}</T> : null}
+    <MenuSearch value={search} onChangeText={setSearch} placeholder={searchPlaceholder || 'Buscar en el menú'} />
     <Categories items={categories} value={category} onChange={setCategory} />
     {repeat && catalog.editable && !search && category === 'Todas' ? <Press accessibilityRole="button" accessibilityLabel={`Repetir la última ronda: ${repeat.label || ''}`} onPress={repeat.onPress} hapticKind="tap" scaleTo={0.97}
       style={{ alignSelf: 'flex-start', height: 40, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, borderRadius: radius.pill, borderWidth: 1.5, borderColor: c.line }}>
@@ -127,8 +128,8 @@ export default function WaiterCatalog({ width, products, categories, category, s
       initialNumToRender={12} windowSize={7} removeClippedSubviews={Platform.OS !== 'web'}
       contentContainerStyle={{ padding, paddingTop: space.md, paddingBottom: (bottomInset || 0) + 24, maxWidth: 1180, width: '100%', alignSelf: 'center' }}
       columnWrapperStyle={{ gap: 12 }} ItemSeparatorComponent={() => <View style={{ height: 18 }} />}
-      ListEmptyComponent={<EmptyState icon={Search} title={products.length ? 'No hay nada con ese nombre' : 'El menú todavía no tiene productos'}
-        description={products.length ? 'Prueba con otra palabra o elige «Todo».' : 'Cuando el administrador cargue productos aparecerán aquí.'}
+      ListEmptyComponent={<EmptyState icon={Search} title={products.length ? 'No hay nada con ese nombre' : (emptyTitle || 'El menú todavía no tiene productos')}
+        description={products.length ? 'Prueba con otra palabra o elige «Todo».' : (emptyDescription || 'Cuando el administrador cargue productos aparecerán aquí.')}
         action={products.length ? <Button onPress={() => { setSearch(''); setCategory('Todas'); }}>Ver todo el menú</Button> : <Button onPress={refresh} loading={loading}>Actualizar</Button>} />}
       renderItem={({ item, index }) => {
         const tile = <ProductTile producto={item} qty={counts[item.id] || 0} canAdd={catalog.editable} locked={locked} onAdd={onAdd} onDecrement={onDecrement} onCustomize={onCustomize} chooseTarget={chooseTarget} />;

@@ -10,6 +10,7 @@ import WaiterApp   from './src/modules/WaiterApp';
 import KitchenApp  from './src/modules/KitchenApp';
 import CashierApp  from './src/modules/CashierApp';
 import { registerWebApp } from './src/services/pwa';
+import PublicMenu, { publicMenuCode } from './src/modules/PublicMenu';
 
 // Configuración NativeWind para web
 if (Platform.OS === 'web') {
@@ -90,7 +91,17 @@ function RoleRouter() {
   }
 }
 
+// Si la página se abrió desde el QR de una mesa, se muestra el menú del cliente (sin iniciar sesión).
+const MENU_CODE = Platform.OS === 'web' ? publicMenuCode() : null;
+
 export default function App() {
+  if (MENU_CODE !== null) {
+    return (
+      <ThemeProvider defaultMode="light">
+        <PublicMenu code={MENU_CODE} />
+      </ThemeProvider>
+    );
+  }
   return (
     <ThemeProvider defaultMode="light">
       <AuthProvider>

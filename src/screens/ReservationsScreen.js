@@ -2,12 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import { CalendarClock, ChevronLeft, ChevronRight, Minus, Phone, Plus, UsersRound } from 'lucide-react-native';
 import { useAdmin } from '../context/AdminContext';
+import ReservationAgenda from '../components/admin/ReservationAgenda';
 import { useTheme } from '../theme';
 import { MenuButton, MenuChip, MenuField, MenuModal, MenuNotice } from '../components/MenuUI';
 import { Badge, Button, Card, CardHeader, DataTable, EmptyState, IconButton, PageHeader, Segmented, Skeleton, Tabs, space, type, radius, useToast } from '../components/admin/ui';
 import {
   BLOCKING_STATES, DEFAULT_DURATION, RESERVATION_LABELS, addDays, dayOf, findConflict, interval, isLate, localStamp,
-  minutesUntil, reservationPayload, suggestTables, timeOf, fromMinutes,
+  minutesUntil, reservationPayload, suggestTables, timeOf, fromMinutes, arrivingSoon, HOLD_BEFORE_MIN,
 } from '../utils/reservationLogic.mjs';
 
 const TONE = { PENDIENTE: 'warning', CONFIRMADA: 'info', LLEGO: 'success', NO_VINO: 'critical', CANCELADA: 'neutral' };
@@ -38,6 +39,7 @@ export default function ReservationsScreen() {
   const [day, setDay] = useState(today);
   const [weekStart, setWeekStart] = useState(addDays(today, -1));
   const [filter, setFilter] = useState('active');
+  const [view, setView] = useState('agenda'); // agenda por hora o lista
   const [dialog, setDialog] = useState(null); // { reserva? }
   const [form, setForm] = useState(blank(today));
   const [busy, setBusy] = useState(false);
@@ -64,8 +66,19 @@ export default function ReservationsScreen() {
   const chosenStillFree = form.mesa_id == null || free.some(t => Number(t.id) === Number(form.mesa_id));
 
   const change = (key, value) => { setError(''); setForm(f => ({ ...f, [key]: value })); };
-  const open = (reserva = null) => {
+  // Aviso «llega en 15 min» (una vez por reserva) para quien tenga abierta esta pantalla.
+  const soonWarned = useRef(new Set());
+  useEffect(() => {
+    for (const { reserva, minutos } of arrivingSoon(reservas, now)) {
+      if (soonWarned.current.has(reserva.id)) continue;
+      soonWarned.current.add(reserva.id);
+      toast.show(`${reserva.cliente_nombre} llega en ${minutos} min · ${reserva.personas} personas · ${reserva.mesa_id != null ? `mesa ${reserva.mesa_numero}` : 'sin mesa asignada'}`, 'sky', 9000);
+    }
+  }, [reservas, now]);
+
+  const open = (reserva = null, preset = null) => {
     setError('');
+    if (!reserva && preset) { setForm({ ...blank(day < today ? today : day), ...preset }); setDialog({ reserva: null }); return; }
     setForm(reserva ? { cliente_nombre: reserva.cliente_nombre, telefono: reserva.telefono || '', personas: Number(reserva.personas), day: dayOf(reserva.fecha_hora), time: timeOf(reserva.fecha_hora),
       duracion_min: Number(reserva.duracion_min) || DEFAULT_DURATION, mesa_id: reserva.mesa_id, notas: reserva.notas || '' } : blank(day < today ? today : day));
     setDialog({ reserva });
@@ -137,6 +150,22 @@ export default function ReservationsScreen() {
     </View>
   </View>;
 
+  const dayBar = <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.xs, marginBottom: space.md }}>
+    <IconButton icon={ChevronLeft} label="Semana anterior" size={28} onPress={() => setWeekStart(w => addDays(w, -7))} />
+    <View style={{ flex: 1, minWidth: 0 }}>
+      <Tabs value={day} onChange={setDay} options={week.map(d => ({ value: d, label: dayName(d, today), count: countFor(d) || undefined }))} />
+    </View>
+    <IconButton icon={ChevronRight} label="Semana siguiente" size={28} onPress={() => setWeekStart(w => addDays(w, 7))} />
+    {day !== today ? <Button size="sm" variant="tertiary" onPress={() => { setDay(today); setWeekStart(addDays(today, -1)); }}>Hoy</Button> : null}
+  </View>;
+  const timeline = <View style={{ flex: 1, minWidth: 0, alignSelf: 'stretch' }}>
+    {dayBar}
+    <Text style={[type.h3, { color: c.text, marginBottom: space.sm }]}>{longDay(day)}</Text>
+    {loading && !reservas.length ? <Card><View style={{ gap: space.sm }}>{[0, 1, 2].map(i => <Skeleton key={i} height={40} radius={8} />)}</View></Card>
+      : <ReservationAgenda day={day} now={now} reservations={reservas} tables={tables} phone={phone} selectedId={dialog?.reserva?.id}
+          onOpen={r => open(r)} onCreate={day >= today ? preset => open(null, preset) : null} />}
+  </View>;
+
   const agenda = <View style={{ flex: 1, minWidth: 0, alignSelf: 'stretch' }}>
     {loading && !reservas.length ? <Card><View style={{ gap: space.sm }}>{[0, 1, 2].map(i => <Skeleton key={i} height={40} radius={8} />)}</View></Card>
       : <DataTable columns={columns} rows={shown} onRowPress={r => open(r)} selectedKey={dialog?.reserva?.id} toolbar={toolbar} defaultSort={{ key: 'h', dir: 1 }}
@@ -167,15 +196,18 @@ export default function ReservationsScreen() {
   return <View style={{ flex: 1 }}>
     <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: space.x3 }}>
       <PageHeader title="Reservas" description={active.length ? `${dayName(day, today)}: ${active.length} ${active.length === 1 ? 'reserva' : 'reservas'} · ${people} personas${unassigned ? ` · ${unassigned} sin mesa` : ''}` : undefined}
-        actions={<Button variant="primary" onPress={() => open()}>Crear reserva</Button>} />
+        actions={<View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+        <Segmented value={view} onChange={setView} accessibilityLabel="Vista" options={[{ value: 'agenda', label: 'Agenda' }, { value: 'list', label: 'Lista' }]} />
+        <Button variant="primary" onPress={() => open()}>Crear reserva</Button>
+      </View>} />
       <View style={{ flexDirection: wide ? 'row' : 'column', gap: space.lg, alignItems: wide ? 'flex-start' : 'stretch' }}>
         {!wide && upcoming.length ? arrivals : null}
-        {agenda}
+        {view === 'agenda' ? timeline : agenda}
         {wide ? arrivals : null}
       </View>
     </ScrollView>
 
-    <MenuModal visible={!!dialog} title={title} subtitle={dialog?.reserva ? `Registrada por ${dialog.reserva.creado_por_nombre || 'el sistema'}` : 'La mesa queda apartada durante ese horario.'} maxWidth={620} close={close} busy={busy}
+    <MenuModal visible={!!dialog} title={title} subtitle={dialog?.reserva ? `Registrada por ${dialog.reserva.creado_por_nombre || 'el sistema'}` : `La mesa queda apartada desde ${HOLD_BEFORE_MIN} min antes de la hora.`} maxWidth={620} close={close} busy={busy}
       footer={<View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, flexWrap: 'wrap' }}>
         {editingActive ? <Button variant="plain" disabled={busy} onPress={() => mark(dialog.reserva, 'CANCELADA', { fromDialog: true })}><Text style={[type.body, { color: c.red, fontWeight: '600' }]}>Cancelar reserva</Text></Button> : null}
         {dialog?.reserva && !editingActive ? <Button variant="plain" disabled={busy} onPress={() => mark(dialog.reserva, 'CONFIRMADA', { fromDialog: true })}>Reactivar</Button> : null}

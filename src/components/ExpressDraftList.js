@@ -1,11 +1,13 @@
+// Pedidos Express a medias (para llevar y delivery) guardados en este teléfono.
 import React, { useMemo, useState } from 'react';
 import { View } from 'react-native';
-import { ArrowUpRight, FileText, Trash2 } from 'lucide-react-native';
-import { WText, WButton, WSearch } from './WaiterUI';
-import { draftDeliveryStatus } from '../utils/waiterSync.mjs';
+import { FileText, ShoppingBag, Trash2, Truck } from 'lucide-react-native';
+import { useTheme } from '../theme';
+import { Button, EmptyState, Field, IconButton, Num, Press, T, money, radius, space } from './waiter/comanda';
 const normalize = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
-export default function ExpressDraftList({ drafts, colors: c, onOpen, onDiscard }) {
+export default function ExpressDraftList({ drafts, onOpen, onDiscard }) {
+  const { c } = useTheme();
   const [query, setQuery] = useState('');
   const [confirm, setConfirm] = useState(null);
   const [busy, setBusy] = useState(null);
@@ -15,21 +17,38 @@ export default function ExpressDraftList({ drafts, colors: c, onOpen, onDiscard 
     setBusy(key);
     try { await onDiscard(key); setConfirm(null); } finally { setBusy(null); }
   };
-  return <View style={{ gap: 10 }}>
-    <WText style={{ color: c.muted, fontSize: 12, lineHeight: 18 }}>Cada cliente tiene sus productos y datos separados. Guardados para tu usuario en este equipo; aún no son pedidos de cocina.</WText>
-    {entries.length > 2 ? <WSearch colors={c} label="Buscar borradores Express" placeholder="Cliente, teléfono o dirección" value={query} onChangeText={setQuery} /> : null}
-    {!filtered.length ? <View style={{ paddingVertical: 24, alignItems: 'center', gap: 10 }}><FileText size={24} color={c.muted} /><WText style={{ color: c.ink, fontSize: 13 }}>{entries.length ? 'No hay borradores con esta búsqueda' : 'No hay borradores Express guardados'}</WText>{query ? <WButton colors={c} onPress={() => setQuery('')}>Limpiar búsqueda de borradores</WButton> : null}</View> : null}
+  return <View style={{ gap: space.sm }}>
+    {entries.length > 3 ? <Field value={query} onChangeText={setQuery} placeholder="Buscar por cliente o teléfono" accessibilityLabel="Buscar pedidos Express guardados" /> : null}
+    {!filtered.length ? <EmptyState icon={FileText} title={entries.length ? 'Ninguno con esa búsqueda' : 'No hay pedidos Express a medias'}
+      description={entries.length ? null : 'Si empiezas un pedido para llevar y no lo envías, queda guardado aquí.'}
+      action={query ? <Button onPress={() => setQuery('')}>Ver todos</Button> : null} /> : null}
     {filtered.map(([key, meta]) => {
-      const name = meta.expressInfo.nombre.trim() || 'Sin nombre';
-      const type = meta.pickupType === 'Delivery' ? 'Delivery' : 'Para llevar';
+      const name = meta.expressInfo.nombre.trim() || 'Cliente sin nombre';
+      const delivery = meta.pickupType === 'Delivery';
       const items = drafts.carritos[key] || [];
       const count = items.reduce((sum, item) => sum + Number(item.cantidad || 0), 0);
       const subtotal = items.reduce((sum, item) => sum + (Number(item.precio || 0) + (item.modificadores || []).reduce((extra, mod) => extra + Number(mod.precio_extra || 0), 0)) * Number(item.cantidad || 0), 0);
       const pending = !!drafts.pending[key];
-      const deliveryStatus=draftDeliveryStatus({hasDraft:true,pending,saving:drafts.saving,error:drafts.error});
-      return <View key={key} style={{ borderWidth: pending ? 2 : 0, borderColor: c.warning, borderRadius: 20, backgroundColor: c.surfaceAlt || c.elevated, padding: 16, gap: 10 }}>
-        <View style={{ gap: 5 }}><WText style={{ color: c.ink, fontSize: 15 }}>{name}</WText><WText style={{ color: c.muted, fontSize: 11 }}>{type} · {count} {count === 1 ? 'artículo' : 'artículos'} · subtotal ${subtotal.toFixed(2)}</WText>{meta.expressInfo.telefono || meta.expressInfo.direccion ? <WText numberOfLines={2} style={{ color: c.muted, fontSize: 11 }}>{[meta.expressInfo.telefono, meta.expressInfo.direccion].filter(Boolean).join(' · ')}</WText> : null}<WText style={{ color: pending || deliveryStatus.key==='unsaved' ? c.warning : c.muted, fontSize: 11 }}>{deliveryStatus.label} · {key.slice(-6)}</WText></View>
-        {confirm === key ? <View style={{ gap: 10, borderTopWidth: 1, borderColor: c.line, paddingTop: 12 }}><WText style={{ color: c.ink, fontSize: 12 }}>¿Eliminar el borrador de {name}? Se borrarán sus productos y datos de este equipo.</WText><View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}><WButton colors={c} disabled={busy === key} onPress={() => setConfirm(null)}>Conservar borrador</WButton><WButton colors={c} disabled={busy === key} label={`Confirmar eliminar borrador de ${name}`} onPress={() => discard(key)} style={{ borderColor: c.danger }}>Eliminar borrador</WButton></View></View> : <View style={{ flexDirection: 'row', gap: 8 }}><WButton colors={c} label={`Continuar borrador ${name}, ${type}, ${key.slice(-6)}`} Icon={ArrowUpRight} onPress={() => onOpen(key)} style={{ flex: 1 }}>{pending ? 'Revisar envío' : 'Continuar'}</WButton><WButton colors={c} disabled={pending} label={`Eliminar borrador de ${name}`} Icon={Trash2} onPress={() => setConfirm(key)} /></View>}
+      return <View key={key} style={{ borderRadius: radius.lg, backgroundColor: c.surfaceAlt, borderWidth: pending ? 2 : 0, borderColor: c.amber, overflow: 'hidden' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingRight: space.sm }}>
+          <Press accessibilityRole="button" accessibilityLabel={`Continuar el pedido de ${name}, ${delivery ? 'delivery' : 'para llevar'}`} onPress={() => onOpen(key)} hapticKind="tap"
+            style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.md }}>
+            <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: delivery ? c.skySoft : c.primarySoft, alignItems: 'center', justifyContent: 'center' }}>
+              {delivery ? <Truck size={19} color={c.sky} /> : <ShoppingBag size={19} color={c.primaryText} />}
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <T size={16} weight="800" numberOfLines={1}>{name}</T>
+              <T size={14} color={pending ? c.amber : c.muted} weight={pending ? '700' : '400'} numberOfLines={1}>{pending ? 'Sin enviar a cocina · se reintenta sola' : `${delivery ? 'Delivery' : 'Para llevar'} · ${count} ${count === 1 ? 'producto' : 'productos'}`}</T>
+            </View>
+            {count ? <Num size={16} weight="800">{money(subtotal)}</Num> : null}
+          </Press>
+          {!pending ? <IconButton icon={Trash2} label={`Eliminar el pedido guardado de ${name}`} onPress={() => setConfirm(confirm === key ? null : key)} size={44} /> : null}
+        </View>
+        {confirm === key ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, padding: space.md, paddingTop: 0, flexWrap: 'wrap' }}>
+          <T size={14} color={c.muted} style={{ flex: 1, minWidth: 160 }}>¿Eliminar este pedido guardado? No se puede deshacer.</T>
+          <Button size="sm" disabled={busy === key} onPress={() => setConfirm(null)}>Conservar</Button>
+          <Button size="sm" variant="ink" loading={busy === key} onPress={() => discard(key)} accessibilityLabel={`Confirmar eliminar el pedido guardado de ${name}`}>Eliminar</Button>
+        </View> : null}
       </View>;
     })}
   </View>;

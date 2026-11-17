@@ -141,3 +141,48 @@ export function nextByTable(reservations = [], now = localStamp()) {
   }
   return out;
 }
+
+// ── Mesa apartada ──────────────────────────────────────────────────────────
+// La mesa queda apartada desde HOLD_BEFORE_MIN antes de la hora y hasta HOLD_AFTER_MIN después
+// (si no llegan en ese tiempo, se libera sola).
+export const HOLD_BEFORE_MIN = 30;
+export const HOLD_AFTER_MIN = 30;
+export const SOON_MIN = 15;
+
+// La reserva que tiene apartada la mesa en este momento, o null.
+export function holdingReservation(reservations = [], mesaId, now = localStamp()) {
+  const n = toMinutes(now);
+  if (n == null || mesaId == null) return null;
+  let found = null;
+  for (const r of reservations) {
+    if (r.mesa_id == null || Number(r.mesa_id) !== Number(mesaId) || !['PENDIENTE', 'CONFIRMADA'].includes(r.estado)) continue;
+    const start = toMinutes(r.fecha_hora);
+    if (start == null || n < start - HOLD_BEFORE_MIN || n > start + HOLD_AFTER_MIN) continue;
+    if (!found || start < toMinutes(found.fecha_hora)) found = r;
+  }
+  return found;
+}
+
+// Reservas de hoy que llegan en los próximos SOON_MIN minutos (para el aviso «llega en 15 min»).
+export function arrivingSoon(reservations = [], now = localStamp(), within = SOON_MIN) {
+  const n = toMinutes(now), today = dayOf(now);
+  if (n == null) return [];
+  return reservations
+    .filter(r => ['PENDIENTE', 'CONFIRMADA'].includes(r.estado) && dayOf(r.fecha_hora) === today)
+    .map(r => ({ reserva: r, minutos: toMinutes(r.fecha_hora) - n }))
+    .filter(x => Number.isFinite(x.minutos) && x.minutos > 0 && x.minutos <= within)
+    .sort((a, b) => a.minutos - b.minutos);
+}
+
+// Agenda del día: de qué hora a qué hora dibujar (mínimo 11:00–23:00, se estira si hay reservas fuera).
+export function agendaRange(reservations = [], day) {
+  let from = 11, to = 23;
+  for (const r of reservations) {
+    if (dayOf(r.fecha_hora) !== day) continue;
+    const span = interval(r); if (!span) continue;
+    const startHour = Number(timeOf(r.fecha_hora).slice(0, 2));
+    const endHour = Math.ceil((startHour * 60 + Number(timeOf(r.fecha_hora).slice(3, 5)) + (span.end - span.start)) / 60);
+    from = Math.min(from, startHour); to = Math.max(to, Math.min(24, endHour));
+  }
+  return { from, to };
+}

@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
-import { Armchair, ArrowRight, CalendarClock, Check, Edit3, EyeOff, LayoutGrid, MapPin, Plus, ReceiptText, Search, Trash2, Users, X } from 'lucide-react-native';
+import { Armchair, ArrowRight, CalendarClock, Check, Edit3, EyeOff, LayoutGrid, MapPin, Plus, QrCode, ReceiptText, Search, Trash2, Users, X } from 'lucide-react-native';
 import Svg, { G, Rect, Text as SvgText } from 'react-native-svg';
 import { useAdmin } from '../context/AdminContext';
 import { useTheme } from '../theme';
@@ -10,6 +10,7 @@ import { tableLayout } from '../utils/tableLayout.mjs';
 import { tableDraft, tableKey, tablePayload } from '../utils/adminTables.mjs';
 import { normalizeCatalogText as normalize } from '../utils/menuLogic.mjs';
 import { TABLE_STATE } from '../components/admin/states';
+import TableQrDialog from '../components/admin/TableQrDialog';
 import { localStamp, minutesUntil, nextByTable, timeOf } from '../utils/reservationLogic.mjs';
 
 const LABEL = Object.fromEntries(Object.entries(TABLE_STATE).map(([k, [label]]) => [k, label]));
@@ -33,7 +34,9 @@ export default function TablesScreen({ onNavigate }) {
   const { c } = useTheme();
   const { width } = useWindowDimensions();
   const phone = width < 680;
-  const { mesas, ubicaciones, reservas = [], loading, createMesa, updateMesa, deleteMesa, updateMesaEstado } = useAdmin();
+  const { mesas, ubicaciones, reservas = [], loading, createMesa, updateMesa, deleteMesa, updateMesaEstado, configuracion } = useAdmin();
+  const [qrOpen, setQrOpen] = useState(false);
+  const businessName = configuracion?.nombre_restaurante || 'Morena Mía';
   const nextRes = useMemo(() => nextByTable(reservas, localStamp()), [reservas]);
   const toast = useToast();
   const [query, setQuery] = useState(''), [filter, setFilter] = useState('all'), [zone, setZone] = useState('all');
@@ -76,6 +79,7 @@ export default function TablesScreen({ onNavigate }) {
     <ScrollView contentContainerStyle={{ paddingBottom: space.x3 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
       <PageHeader title="Mesas" description={`${active.length} activas · ${active.reduce((sum, t) => sum + Number(t.capacidad || 0), 0)} sillas · ${(counts.Ocupada || 0) + (counts.Cuenta || 0)} en servicio`}
         actions={<>
+          <Button icon={QrCode} onPress={() => setQrOpen(true)}>Códigos QR</Button>
           {onNavigate ? <Button onPress={() => onNavigate('reservas')}>Reservas</Button> : null}
           <Button variant="primary" onPress={() => open(null)} disabled={busy}>Agregar mesa</Button>
         </>} />
@@ -157,6 +161,7 @@ export default function TablesScreen({ onNavigate }) {
         {original && <View style={{ borderTopWidth: 1, borderTopColor: c.line, paddingTop: space.lg, gap: space.sm }}><Text style={[type.h3, { color: c.text }]}>Disponibilidad e historial</Text><Text style={[type.body, { color: c.muted }]}>Desactivar oculta la mesa y conserva sus pedidos anteriores. Eliminar solo está permitido si nunca tuvo pedidos.</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><MenuButton icon={EyeOff} disabled={busy || activeOrders || !!dirty} onPress={() => { ask(original, Number(original.activo) ? 'Desactivar mesa' : 'Reactivar mesa', Number(original.activo) ? 'Se ocultará del salón y se conservará su historial.' : 'Volverá a aparecer en el salón.', Number(original.activo) ? 'Desactivar' : 'Reactivar', t => updateMesa(t.id, { activo: Number(t.activo) ? 0 : 1 })); }}>{Number(original.activo) ? 'Desactivar mesa' : 'Reactivar mesa'}</MenuButton><MenuButton icon={Trash2} disabled={busy || activeOrders || !!dirty} onPress={() => { ask(original, `¿Eliminar la mesa ${original.numero}?`, 'Se eliminará permanentemente si no tiene pedidos históricos.', 'Eliminar mesa', t => deleteMesa(t.id), true); }}>Eliminar</MenuButton></View>{!!dirty && <Text style={[type.small, { color: c.muted }]}>Guarda o descarta los cambios antes de modificar la disponibilidad.</Text>}</View>}
       </>}
     </MenuModal>
+    <TableQrDialog visible={qrOpen} close={() => setQrOpen(false)} business={businessName} />
   </>;
 }
 

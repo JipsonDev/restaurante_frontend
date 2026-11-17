@@ -1,19 +1,19 @@
 // Salón del mesero (dirección «Suave»): «Atender ahora» primero, una sola fila de filtros de estado
 // (las zonas son títulos de sección, no pestañas) y tarjetas de mesa.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, View } from 'react-native';
-import { BellRing, Grid2X2, Grid3X3, RefreshCw, Search } from 'lucide-react-native';
+import { View } from 'react-native';
+import { Search } from 'lucide-react-native';
 import { useTheme } from '../theme';
 import { serviceRounds } from '../utils/serviceTiming.mjs';
-import { Appear, Button, Chip, EmptyState, IconButton, Label, Num, T, WEB, haptic, radius, space, useComandaToast } from './waiter/comanda';
+import { Appear, Button, Chip, EmptyState, Num, T, haptic, radius, space, useComandaToast } from './waiter/comanda';
 import { minutesUntil, timeOf } from '../utils/reservationLogic.mjs';
 import { CalendarClock } from 'lucide-react-native';
-import { AttentionStrip, SearchToggle, TableTile, minutesSince } from './waiter/salon';
+import { AlertsBanner, AttentionStrip, SearchToggle, TableTile, minutesSince } from './waiter/salon';
 import { InstallBanner } from './waiter/install';
 
 const FILTERS = [['Todas', 'Todas'], ['Disponibles', 'Libres'], ['Ocupadas', 'Ocupadas'], ['Cuenta', 'Por cobrar'], ['Reservadas', 'Reservadas']];
 
-export default function WaiterFloor({ width, groups, counts, search, setSearch, filter, setFilter, compact, setCompact, selected, selectTable, stateFor, orderFor, zones, zone, setZone, refresh, refreshing, loadError, now, alerts, reservations = {}, onLongPressTable, openTray, readyCount = 0 }) {
+export default function WaiterFloor({ width, groups, counts, search, setSearch, filter, setFilter, compact, setCompact, selected, selectTable, stateFor, orderFor, zones, zone, setZone, refresh, refreshing, loadError, offline, now, alerts, reservations = {}, queued = {}, alertsPrompt, onLongPressTable, openTray, readyCount = 0 }) {
   const { c } = useTheme();
   const [measuredWidth, setMeasuredWidth] = useState(null);
   const measure = useCallback(event => {
@@ -50,7 +50,10 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
       const resIn = res ? minutesUntil(res) : null;
       // Reserva en menos de 15 min y la mesa sigue ocupada: hay que liberarla o reubicar.
       if (res && resIn != null && resIn <= 15 && resIn >= -15 && (state === 'Ocupada' || state === 'Cuenta')) {
-        items.push({ key: `v${mesa.id}`, mesa, tone: 'reserve', rank: -1, title: `Mesa ${mesa.numero}`, detail: `Reserva ${timeOf(res.fecha_hora)}${res.cliente_nombre ? ` · ${res.cliente_nombre}` : ''} · ocupada`, order: -resIn });
+        items.push({ key: `v${mesa.id}`, mesa, tone: 'reserve', clash: true, rank: -1, title: `Mesa ${mesa.numero}`, detail: `Reserva ${timeOf(res.fecha_hora)}${res.cliente_nombre ? ` · ${res.cliente_nombre}` : ''} · ocupada`, order: -resIn });
+      } else if (res && resIn != null && resIn <= 15 && resIn >= -15) {
+        // Mesa libre con la reserva por llegar: que el mesero la tenga lista.
+        items.push({ key: `s${mesa.id}`, mesa, tone: 'reserve', rank: 3, title: `Mesa ${mesa.numero}`, detail: `${res.cliente_nombre || 'Reserva'} · ${resIn > 0 ? `llega en ${resIn} min` : resIn === 0 ? 'llega ahora' : `${-resIn} min tarde`}`, order: -resIn });
       }
       if (ready) {
         const oldest = serviceRounds(order).filter(r => r.estado === 'LISTO').map(r => minutesSince(r.listo_at || r.created_at, now)).filter(m => m != null).sort((a, b) => b - a)[0];
@@ -69,7 +72,7 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
   const warned = useRef(new Set());
   useEffect(() => {
     for (const it of attention) {
-      if (it.tone !== 'reserve' || warned.current.has(it.key)) continue;
+      if (!it.clash || warned.current.has(it.key)) continue;
       warned.current.add(it.key);
       haptic('warning');
       toast.show(`${it.title}: reserva pronto y sigue ocupada`, { tone: 'warning', icon: CalendarClock, detail: it.detail.replace(/ · ocupada$/, ''), action: { label: 'Ver', onPress: () => selectTable(it.mesa) } });
@@ -87,23 +90,21 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
       <SearchToggle value={search} onChange={setSearch} />
     </View>
 
-    {loadError ? <Appear><View style={{ borderRadius: radius.lg, backgroundColor: c.redSoft, padding: space.md, paddingLeft: space.lg, marginBottom: space.md, flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+    {loadError && !offline ? <Appear><View style={{ borderRadius: radius.lg, backgroundColor: c.redSoft, padding: space.md, paddingLeft: space.lg, marginBottom: space.md, flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
       <T size={14} weight="600" color={c.red} style={{ flex: 1 }}>No se pudieron actualizar las mesas. Lo que ves puede estar desactualizado.</T>
       <Button size="sm" variant="primary" onPress={refresh}>Reintentar</Button>
     </View></Appear> : null}
 
     <InstallBanner />
+    <AlertsBanner visible={!!alertsPrompt?.visible} onEnable={alertsPrompt?.enable} onDismiss={alertsPrompt?.dismiss} />
 
     <AttentionStrip items={attention} onOpen={it => selectTable(it.mesa)} />
 
-    {/* Una sola fila de estado. Llega al borde de la pantalla y se desvanece a la derecha: así se nota que se puede deslizar.
+    {/* Filtros de estado: todos a la vista. Si no caben en una línea bajan a la siguiente (nada queda escondido).
         Los filtros sin mesas se ocultan (salvo el activo). */}
-    <View style={{ marginHorizontal: -padding, marginBottom: space.sm }}>
-      <ScrollView horizontal style={{ flexGrow: 0 }} showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.sm, paddingHorizontal: padding, paddingBottom: space.sm }}>
-        {FILTERS.filter(([key]) => key === 'Todas' || key === filter || counts[key] > 0).map(([key, label]) =>
-          <Chip key={key} selected={filter === key} onPress={() => setFilter(key)} count={counts[key]} accessibilityLabel={`${label}: ${counts[key]}`}>{label}</Chip>)}
-      </ScrollView>
-      {WEB ? <View pointerEvents="none" style={{ position: 'absolute', top: 0, bottom: space.sm, right: 0, width: 36, backgroundImage: `linear-gradient(to right, ${c.bg}00, ${c.bg})` }} /> : null}
+    <View accessibilityRole="tablist" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginBottom: space.md }}>
+      {FILTERS.filter(([key]) => key === 'Todas' || key === filter || counts[key] > 0).map(([key, label]) =>
+        <Chip key={key} selected={filter === key} onPress={() => setFilter(key)} count={counts[key]} accessibilityLabel={`${label}: ${counts[key]}`}>{label}</Chip>)}
     </View>
 
     {!groups.length ? <EmptyState icon={Search} title={counts.Todas ? 'Ninguna mesa con estos filtros' : 'Todavía no hay mesas'}
@@ -119,6 +120,7 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
           const order = orderFor(mesa.id);
           return <TableTile key={mesa.id} mesa={mesa} state={stateFor(mesa)} order={order} width={tileWidth} now={now}
             selected={Number(mesa.id) === Number(selected)} ready={readyFor(order)} alert={lateByTable[mesa.id]} reservation={reservations[mesa.id]}
+            held={!order && reservations.held ? reservations.held(mesa.id) : null} queued={queued[mesa.id]}
             onPress={selectTable} onLongPress={onLongPressTable} />;
         })}
       </View>

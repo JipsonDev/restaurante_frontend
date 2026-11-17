@@ -12,7 +12,7 @@ const strip = v => String(v || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
 
 // Del nombre (más preciso) a la categoría (respaldo).
 const RULES = [
-  [/cafe|capuc|cappuc|latte|espresso|mocac|moca|americano|tinto|te |infusion|aromatica/, Coffee],
+  [/cafe|capuc|cappuc|latte|espresso|mocac|moca|americano|tinto| te |infusion|aromatica|chocolate caliente/, Coffee],
   [/cerveza|pilsener|club|chela/, Beer],
   [/vino|sangria|coctel|mojito|michelada/, Wine],
   [/jugo|batido|limonada|bebida|gaseosa|cola|frappe|smoothie|naranjada|colada/, CupSoda],
@@ -22,7 +22,7 @@ const RULES = [
   [/pollo|carne|seco|res|cerdo|chuleta|costilla|parrill|asado|lomo|fritada|hornado|guatita|estofado/, Drumstick],
   [/ensalada/, Salad],
   [/huevo|desayuno|tortilla|bolon|tigrillo/, EggFried],
-  [/sanduche|sandwich|tostado|hamburg|wrap|empanada|pan |sanduch|humita|tamal|quimbolito|muchin/, Sandwich],
+  [/sanduche|sandwich|tostado|hamburg|wrap|empanada| pan |sanduch|humita|tamal|quimbolito|muchin/, Sandwich],
   [/croissant|pastel|cachito|hojaldre|pan de/, Croissant],
   [/helado|sundae|copa/, IceCreamCone],
   [/postre|torta|cheesecake|pie|brownie|flan|tres leches|mousse|maria pipona|dulce/, CakeSlice],

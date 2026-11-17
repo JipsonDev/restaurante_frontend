@@ -4,11 +4,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, ScrollView, TextInput, View } from 'react-native';
 import axios from 'axios';
-import { ArrowRightLeft, BellRing, CalendarClock, ChefHat, CheckCheck, Clock3, Receipt, Search, Users, Utensils, X } from 'lucide-react-native';
+import { ArrowRightLeft, BellRing, CalendarClock, ChefHat, CheckCheck, Clock3, CloudOff, Lock, Phone, Receipt, Search, Users, UserCheck, Utensils, X } from 'lucide-react-native';
 import { comandaTableMeta, useTheme } from '../../theme';
 import { BASE_URL } from '../../context/AuthContext';
 import { serviceDate, serviceDuration, serviceRounds } from '../../utils/serviceTiming.mjs';
-import { addDays, dayOf, localStamp, minutesUntil, nextByTable, timeOf } from '../../utils/reservationLogic.mjs';
+import { RESERVATION_LABELS, addDays, dayOf, holdingReservation, isLate, localStamp, minutesUntil, nextByTable, timeOf } from '../../utils/reservationLogic.mjs';
+import { REALTIME_EVENTS, subscribeRealtime } from '../../services/realtime';
 import { Appear, BottomSheet, Button, Chip, EASE, EmptyState, IconButton, Label, Num, Perforation, Ping, Press, Stamp, SwipeRow, T, TOUCH, elevate, haptic, money, radius, space } from './comanda';
 
 // Minutos desde una fecha (o null).
@@ -23,8 +24,11 @@ export function minutesSince(value, now = Date.now()) {
 const shortMinutes = m => m == null ? '' : m >= 1440 ? `+${Math.floor(m / 1440)} ${Math.floor(m / 1440) === 1 ? 'día' : 'días'}` : m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}` : `${Math.max(1, m)} min`;
 
 // Reservas de hoy (el mesero solo necesita la próxima de cada mesa). Se refresca cada minuto.
+// Devuelve la próxima por mesa (como antes) y además: .list (todas las de hoy), .now y .reload().
 export function useTodayReservations(enabled = true) {
   const [list, setList] = useState([]);
+  const [now, setNow] = useState(localStamp());
+  const loadRef = useRef(() => {});
   useEffect(() => {
     if (!enabled) return undefined;
     let alive = true;
@@ -34,12 +38,24 @@ export function useTodayReservations(enabled = true) {
         const { data } = await axios.get(`${BASE_URL}/reservas`, { params: { desde: today, hasta: addDays(today, 0) } });
         if (alive && Array.isArray(data)) setList(data);
       } catch { /* sin reservas disponibles: el salón funciona igual */ }
+      if (alive) setNow(localStamp());
     };
+    loadRef.current = load;
     load();
     const t = setInterval(load, 60000);
-    return () => { alive = false; clearInterval(t); };
+    // Una reserva nueva, cambiada o marcada como «Llegó» en otro equipo se ve al instante.
+    const off = subscribeRealtime(REALTIME_EVENTS.RESERVATION_UPDATED, load);
+    return () => { alive = false; clearInterval(t); off?.(); };
   }, [enabled]);
-  return useMemo(() => nextByTable(list, localStamp()), [list]);
+  return useMemo(() => {
+    const byTable = nextByTable(list, now);
+    Object.defineProperties(byTable, {
+      list: { value: list, enumerable: false }, now: { value: now, enumerable: false },
+      reload: { value: () => loadRef.current(), enumerable: false },
+      held: { value: mesaId => holdingReservation(list, mesaId, now), enumerable: false },
+    });
+    return byTable;
+  }, [list, now]);
 }
 
 // Rondas listas para entregar, de la más antigua a la más reciente.
@@ -60,7 +76,7 @@ export function readyItems(pedidos = []) {
 }
 
 // ── Casilla de mesa ────────────────────────────────────────────────────────
-export function TableTile({ mesa, state, order, width, now, selected, ready, alert, reservation, onPress, onLongPress }) {
+export function TableTile({ mesa, state, order, width, now, selected, ready, alert, reservation, held, queued, onPress, onLongPress }) {
   const { c } = useTheme();
   const meta = comandaTableMeta(state, c);
   const filled = meta.shape === 'filled';
@@ -75,27 +91,96 @@ export function TableTile({ mesa, state, order, width, now, selected, ready, ale
     : alert ? { icon: Clock3, text: `${alert.minutos} min`, color: c.red, soft: c.redSoft }
     : cooking ? { icon: ChefHat, text: 'En cocina', color: c.sky, soft: c.skySoft }
     : order ? { icon: Utensils, text: 'Comiendo', color: c.muted, soft: c.surfaceAlt }
+    : held ? { icon: Lock, text: `Reservada ${timeOf(held.fecha_hora)}`, color: c.purple, soft: c.purpleSoft }
     : state === 'Reservada' || (reservation && resMinutes != null && resMinutes <= 90) ? { icon: CalendarClock, text: timeOf(reservation?.fecha_hora) || 'Reserva', color: c.purple, soft: c.purpleSoft }
     : { icon: Users, text: 'Libre', color: c.green, soft: c.isDark ? 'rgba(255,255,255,0.06)' : '#FFFFFF' };
-  const Icon = status.icon;
-  const label = `Mesa ${mesa.numero}, ${status.text}${order ? `, ${money(balance)}` : ''}`;
+  // Una ronda guardada sin enviar manda sobre todo lo demás: el mesero tiene que saber que cocina aún no la ve.
+  const shown = queued ? { icon: CloudOff, text: 'Sin enviar', color: filled ? c.onPrimary : c.amber, soft: filled ? 'rgba(255,255,255,0.18)' : c.amberSoft } : status;
+  const Icon = shown.icon;
+  const label = `Mesa ${mesa.numero}, ${shown.text}${order ? `, ${money(balance)}` : ''}`;
   return <Press accessibilityRole="button" accessibilityLabel={label} accessibilityHint="Toca para pedir; mantén presionado para más acciones" accessibilityState={{ selected }}
     onPress={() => onPress(mesa)} onLongPress={onLongPress ? () => onLongPress(mesa) : undefined} hapticKind="tap" scaleTo={0.95}
     style={[{ width, minHeight: 112, padding: 12, borderRadius: radius.lg, justifyContent: 'space-between', gap: 8, borderWidth: 2,
-      backgroundColor: filled ? c.primary : free ? c.surfaceAlt : c.surface, borderColor: selected ? c.ink : filled ? c.primary : free ? c.surfaceAlt : (c.isDark ? c.line : 'rgba(16,24,40,0.05)') },
+      backgroundColor: filled ? c.primary : held && free ? c.purpleSoft : free ? c.surfaceAlt : c.surface, borderColor: selected ? c.ink : queued && !filled ? c.amber : filled ? c.primary : held && free ? c.purpleSoft : free ? c.surfaceAlt : (c.isDark ? c.line : 'rgba(16,24,40,0.05)') },
       free ? null : elevate(c, filled ? 2 : 1)]}>
-    <Ping trigger={`${state}-${ready}`} color={filled ? c.primary : status.color} radius={radius.lg} />
+    <Ping trigger={`${state}-${ready}`} color={filled ? c.primary : shown.color} radius={radius.lg} />
     <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
       <Num size={32} weight="800" color={filled ? c.onPrimary : c.text} style={{ lineHeight: 36 }}>{mesa.numero}</Num>
-      <View style={{ width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: status.soft }}>
-        <Icon size={16} color={status.color} strokeWidth={2.4} />
+      <View style={{ width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: held && free && !queued ? (c.isDark ? 'rgba(255,255,255,0.08)' : '#FFFFFF') : shown.soft }}>
+        <Icon size={16} color={shown.color} strokeWidth={2.4} />
       </View>
     </View>
     <View style={{ gap: 1 }}>
-      <T size={13} weight="800" color={status.color} numberOfLines={1}>{status.text}</T>
+      <T size={13} weight="800" color={shown.color} numberOfLines={1}>{shown.text}</T>
       {order ? <Num size={16} weight="800" color={filled ? c.onPrimary : c.text}>{money(balance)}</Num> : null}
     </View>
   </Press>;
+}
+
+// ── Mesa apartada por una reserva ──────────────────────────────────────────
+// Al tocar una mesa apartada se pregunta antes de abrir cuenta: ¿llegó la reserva o se usa igual?
+export function ReservationHoldSheet({ hold, onClose, onSeat, onUseAnyway }) {
+  const { c } = useTheme();
+  const r = hold?.reserva;
+  const minutes = r ? minutesUntil(r) : null;
+  const when = minutes == null ? '' : minutes > 0 ? `llega en ${minutes} min` : minutes === 0 ? 'es ahora' : `hace ${-minutes} min`;
+  return <BottomSheet visible={!!hold} onClose={onClose} title={hold ? `Mesa ${hold.mesa.numero} está reservada` : ''} subtitle={r ? `A las ${timeOf(r.fecha_hora)} · ${when}` : ''}>
+    {r ? <View style={{ gap: space.lg }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.lg, borderRadius: radius.lg, backgroundColor: c.purpleSoft }}>
+        <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: c.isDark ? 'rgba(255,255,255,0.08)' : '#FFFFFF', alignItems: 'center', justifyContent: 'center' }}><CalendarClock size={22} color={c.purple} /></View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <T size={18} weight="800" numberOfLines={1}>{r.cliente_nombre}</T>
+          <T size={14} color={c.muted}>{r.personas} {Number(r.personas) === 1 ? 'persona' : 'personas'}{r.notas ? ` · ${r.notas}` : ''}</T>
+        </View>
+      </View>
+      <View style={{ gap: space.sm }}>
+        <Button variant="primary" size="lg" full icon={UserCheck} onPress={onSeat}>Llegó la reserva: tomar pedido</Button>
+        <Button variant="outline" size="lg" full onPress={onUseAnyway}>Usar la mesa para otro cliente</Button>
+        <Button variant="ghost" full onPress={onClose}>Volver</Button>
+      </View>
+    </View> : null}
+  </BottomSheet>;
+}
+
+// ── Reservas de hoy ────────────────────────────────────────────────────────
+export function ReservationsTodaySheet({ open, onClose, reservations = [], now, onArrived, busyId }) {
+  const { c } = useTheme();
+  const sorted = [...reservations].sort((a, b) => String(a.fecha_hora).localeCompare(String(b.fecha_hora)));
+  const active = sorted.filter(r => ['PENDIENTE', 'CONFIRMADA'].includes(r.estado));
+  return <BottomSheet visible={open} onClose={onClose} title="Reservas de hoy" subtitle={active.length ? `${active.length} por llegar` : sorted.length ? 'Ya llegaron todas' : null}>
+    {!sorted.length ? <EmptyState icon={CalendarClock} title="Sin reservas para hoy" description="Las reservas se registran desde administración." />
+      : <View style={{ gap: space.sm }}>
+        {sorted.map(r => {
+          const waiting = ['PENDIENTE', 'CONFIRMADA'].includes(r.estado);
+          const minutes = minutesUntil(r, now);
+          const late = isLate(r, now);
+          const note = !waiting ? RESERVATION_LABELS[r.estado] : late ? `${-minutes} min tarde` : minutes != null && minutes <= 60 && minutes >= 0 ? `en ${minutes} min` : null;
+          return <View key={r.id} style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.md, borderRadius: radius.lg, backgroundColor: c.surfaceAlt, opacity: waiting ? 1 : 0.6 }}>
+            <View style={{ width: 58, alignItems: 'center' }}>
+              <Num size={18} weight="800">{timeOf(r.fecha_hora)}</Num>
+              {note ? <T size={12} weight="800" color={late ? c.red : waiting ? c.purple : c.muted} numberOfLines={1}>{note}</T> : null}
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <T size={16} weight="800" numberOfLines={1}>{r.cliente_nombre}</T>
+              <T size={14} color={c.muted} numberOfLines={1}>{r.personas} {Number(r.personas) === 1 ? 'persona' : 'personas'} · {r.mesa_id != null ? `Mesa ${r.mesa_numero}` : 'sin mesa'}{r.telefono ? ` · ${r.telefono}` : ''}</T>
+            </View>
+            {waiting ? <Button size="sm" variant="ink" icon={UserCheck} loading={busyId === r.id} onPress={() => onArrived(r)} accessibilityLabel={`Marcar que llegó ${r.cliente_nombre}`}>Llegó</Button> : null}
+          </View>;
+        })}
+      </View>}
+  </BottomSheet>;
+}
+
+// ── Aviso para activar las notificaciones de cocina ───────────────────────
+export function AlertsBanner({ visible, onEnable, onDismiss }) {
+  const { c } = useTheme();
+  if (!visible) return null;
+  return <Appear><View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: 6, paddingLeft: space.md, paddingRight: 2, marginBottom: space.md, borderRadius: radius.lg, backgroundColor: c.surfaceAlt }}>
+    <BellRing size={18} color={c.primaryText} />
+    <T size={14} weight="700" style={{ flex: 1 }} numberOfLines={2}>Avisos de plato listo</T>
+    <Button size="sm" variant="primary" onPress={onEnable} accessibilityLabel="Activar los avisos de plato listo">Activar</Button>
+    <IconButton icon={X} label="Ahora no" onPress={onDismiss} size={40} />
+  </View></Appear>;
 }
 
 // ── Atender ahora ──────────────────────────────────────────────────────────

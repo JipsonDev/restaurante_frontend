@@ -280,8 +280,18 @@ export function Tally({ value, onChange, min = 0, max = 99, label = 'Cantidad' }
 
 // ── Hoja inferior ──────────────────────────────────────────────────────────
 // Sube con resorte; se cierra arrastrando hacia abajo (sigue al dedo, cierra al 30 % o con un tirón) o tocando el fondo.
+// Hojas abiertas en este momento: mientras haya una, los avisos flotantes suben para no tapar sus botones.
+let openSheets = 0;
+const sheetListeners = new Set();
+const notifySheets = () => sheetListeners.forEach(fn => fn(openSheets > 0));
+
 export function BottomSheet({ visible, onClose, title, subtitle, children, footer, maxHeight = '88%', busy }) {
   const { c } = useTheme();
+  useEffect(() => {
+    if (!visible) return undefined;
+    openSheets += 1; notifySheets();
+    return () => { openSheets = Math.max(0, openSheets - 1); notifySheets(); };
+  }, [visible]);
   const { height: vh, width: vw } = useWindowDimensions();
   const wide = vw >= 760;
   const y = useRef(new Animated.Value(1)).current; // 0 abierta, 1 cerrada
@@ -371,7 +381,9 @@ export function ComandaToastProvider({ children, bottomOffset = 84, placement = 
   }, []);
   const lift = useCallback(n => setExtra(Number(n) || 0), []);
   const value = useMemo(() => ({ show, lift }), [show, lift]);
-  const host = <View pointerEvents="box-none" style={[{ position: WEB ? 'fixed' : 'absolute', left: 12, right: 12, alignItems: 'center', gap: 8, zIndex: 2147483000 }, placement === 'top' ? { top: topOffset } : { bottom: bottomOffset + extra }]}>
+  const [sheetOpen, setSheetOpen] = useState(openSheets > 0);
+  useEffect(() => { sheetListeners.add(setSheetOpen); return () => { sheetListeners.delete(setSheetOpen); }; }, []);
+  const host = <View pointerEvents="box-none" style={[{ position: WEB ? 'fixed' : 'absolute', left: 12, right: 12, alignItems: 'center', gap: 8, zIndex: 2147483000 }, placement === 'top' || sheetOpen ? { top: topOffset } : { bottom: bottomOffset + extra }]}>
     <View pointerEvents="box-none" style={{ width: '100%', maxWidth: 520, gap: 8 }}>
       {items.map(t => <ToastItem key={t.id} t={t} onDone={id => setItems(list => list.filter(x => x.id !== id))} />)}
     </View>
