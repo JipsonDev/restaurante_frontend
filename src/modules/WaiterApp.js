@@ -886,7 +886,7 @@ function App() {
     setSelectedExpressPedidoId(null);
     setMesaSel(mesa.id);
     setEditItemId(null);
-    setStep(activeOrderForMesa(mesa.id) ? 'pedido' : 'productos');
+    setStep('productos'); // tocar una mesa abre el menú para pedir; la cuenta queda a un toque
   }, [activeOrderForMesa]);
 
   const startExpressOrder = (tipo = 'Para llevar') => {
@@ -1666,6 +1666,7 @@ function App() {
     counts={cartQtyByProduct} cartCount={width >= 900 && (!!mesaActual || isExpressOrder) ? 0 : cartCount} cartTotal={showingCart ? subtotal : 0} openOrder={() => setStep('pedido')}
     chooseTarget={() => setTargetOpen(true)} onAdd={handleAddProduct} onDecrement={handleDecrementProduct} onCustomize={openCustomize}
     favorites={favoriteProducts} repeat={repeatSummary ? { ...repeatSummary, onPress: handleRepeatRound } : null}
+    account={pedidoActual && Number(pedidoActual.total) > 0 ? { total: Number(pedidoActual.total), open: () => setStep('pedido') } : null}
     refresh={loadData} loading={loading} loadError={loadError} bottomInset={BOTTOM_INSET}
   />, false);
 
@@ -1741,7 +1742,7 @@ function App() {
         return { ...prev, [key]: list };
       }) } });
     };
-    return <OrderLine key={itemId} item={item} total={lineTotal(item)} detail={detail} image={!isMobile && imgUrl ? assetUrl(imgUrl) : null}
+    return <OrderLine key={itemId} item={item} total={lineTotal(item)} detail={detail} product={productoOriginal ? { ...productoOriginal, ...(imgUrl ? { imagen_url: imgUrl } : {}) } : item}
       expanded={isEditing} locked={!showingCart || !!pendingSend} onToggle={() => setEditItemId(isEditing ? null : itemId)}
       onQty={delta => changeQty(item, delta)} onRemove={removeWithUndo}>
       <LineCustomizer item={item} custom={customExtras[itemId] || {}}
@@ -1760,7 +1761,7 @@ function App() {
     const paid = pedidoActual?.estado_cobro === 'PAGADO';
     return (
       <View>
-        {rounds.length ? <SectionLabel>Rondas anteriores</SectionLabel> : null}
+        {rounds.length ? <SectionLabel>Ya pedido</SectionLabel> : null}
         {rounds.map((round, index) => {
           const canDeliver = round.estado === 'LISTO' && (!isExpressOrder || round.estado_cobro === 'PAGADO');
           return <PastRound key={round.id} round={round} index={index + 1}
@@ -1770,7 +1771,7 @@ function App() {
         })}
         {paid ? <CT size={15} weight="600" color={colors.success} style={{ marginTop: 12 }}>{pedidoActual.pendiente_entrega ? 'Pago completo · falta la entrega' : 'Pedido completado · guardado en el historial'}</CT> : null}
         <View style={{ gap: 8, marginTop: 16 }}>
-          {catalog.editable && !showingCart ? <CButton variant="primary" size="lg" icon={Plus} full onPress={() => setStep('productos')}>Nueva ronda</CButton> : null}
+          {catalog.editable && !showingCart ? <CButton variant="primary" size="lg" icon={Plus} full onPress={() => setStep('productos')}>Pedir más</CButton> : null}
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <CButton icon={PieChart} disabled={paid} onPress={() => setSplitOpen(true)} style={{ flex: 1, paddingHorizontal: 8 }}>Dividir</CButton>
             {!isExpressOrder ? <CButton icon={ArrowRightLeft} onPress={() => setTransferOpen(true)} style={{ flex: 1, paddingHorizontal: 8 }}>Mover</CButton> : null}
@@ -1796,22 +1797,22 @@ function App() {
     const elapsed = openedAt && serviceNow ? Math.max(0, Math.floor((Number(serviceNow) - openedAt) / 60000)) : null;
     const minutes = elapsed == null || elapsed >= 24 * 60 ? null : elapsed < 60 ? `${elapsed}` : `${Math.floor(elapsed / 60)} h ${elapsed % 60}`;
     const paid = pedidoActual?.estado_cobro === 'PAGADO';
-    const stamp = pendingSend ? 'EN COLA' : paid ? 'PAGADA' : pedidoActual ? 'ABIERTA' : null;
+    const stamp = pendingSend ? 'EN COLA' : paid ? 'PAGADA' : null;
     const stampColor = pendingSend ? colors.warning : paid ? colors.success : colors.ink;
     const meta = isExpressOrder
       ? `${pickupTypeLabel(currentPickupType)}${minutes != null ? ` · ${minutes} min` : ''}`
-      : [mesaActual?.ubicacion, mesaActual?.capacidad ? `${mesaActual.capacidad} plazas` : null, minutes != null ? `${minutes} min` : null].filter(Boolean).join(' · ') || 'Mesa';
+      : [mesaActual?.ubicacion, minutes != null ? `abierta hace ${minutes} min` : null].filter(Boolean).join(' · ') || null;
     const title = isExpressOrder
       ? (pedidoActual ? pickupOrderLabel(pedidoActual) : expressInfo.nombre.trim() || 'Cliente sin nombre')
-      : pedidoActual ? `Cuenta #${pedidoActual.id}` : 'Cuenta nueva';
+      : `Mesa ${activeOrderMesa.numero}`;
     const subtitle = isExpressOrder
       ? (pedidoActual ? pickupDetailLabel(pedidoActual) : pickupDraftDetail) || null
-      : `${totalItemsCount} ${totalItemsCount === 1 ? 'artículo' : 'artículos'}`;
+      : null;
     const split = width >= 900;
 
     return (
       <TearAway tearing={tearing} style={{ padding: split ? 20 : bodyPad, paddingTop: 20, maxWidth: split ? undefined : 760, alignSelf: 'center', width: '100%' }}>
-        <ComandaHeader number={isExpressOrder ? null : activeOrderMesa.numero} meta={meta} title={title} subtitle={subtitle} stamp={stamp} stampColor={stampColor}>
+        <ComandaHeader number={null} meta={meta} title={title} subtitle={subtitle} stamp={stamp} stampColor={stampColor}>
           {isExpressOrder && currentExpressDraft ? <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
             <CButton variant="ghost" onPress={() => setDraftListOpen(true)} accessibilityLabel="Cambiar borrador Express">Cambiar borrador</CButton>
           </View> : null}
@@ -1833,7 +1834,7 @@ function App() {
           </View>
         ) : null}
 
-        {cartItems.length || !pedidoActual ? <SectionLabel right={cartCount ? <CNum size={14} color={colors.muted}>{cartCount} art.</CNum> : null}>{pendingSend ? 'Ronda en cola · sin confirmar' : 'Ronda nueva'}</SectionLabel> : null}
+        {cartItems.length || !pedidoActual ? <SectionLabel right={cartCount ? <CNum size={14} color={colors.muted}>{cartCount} {cartCount === 1 ? 'producto' : 'productos'}</CNum> : null}>{pendingSend ? 'Ronda por confirmar' : 'Para enviar a cocina'}</SectionLabel> : null}
         {cartItems.length ? cartItems.map(item => renderOrderItem(item, true)) : pedidoActual ? null : (
           <View style={{ paddingVertical: 28, borderRadius: 24, backgroundColor: colors.surfaceAlt, alignItems: 'center', gap: 12 }}>
             <CT size={15} color={colors.muted}>{catalog.editable ? 'Sin productos en esta ronda.' : 'Esta cuenta ya no admite rondas nuevas.'}</CT>
@@ -1857,7 +1858,7 @@ function App() {
 
         {renderTotals()}
 
-        {pedidoActual ? <View style={{ marginTop: 24 }}><OrderServicePanel key={pedidoActual?.id || 'draft'} order={pedidoActual} now={serviceNow} colors={colors} alerts={serviceAlerts} /></View> : null}
+
       </TearAway>
     );
   };

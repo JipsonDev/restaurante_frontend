@@ -46,12 +46,11 @@ export default function WaiterNavigation({ width, name, unread, notifications, c
 export function WaiterBottomBar({ step, navigate, cartCount = 0, expressCount = 0, bottomInset = 0, setMenuOpen }) {
   const items = [
     { key: 'mesas', label: 'Mesas', icon: Users },
-    { key: 'productos', label: 'Menú', icon: ChefHat },
-    { key: 'pedido', label: 'Comanda', icon: Receipt, badge: cartCount || null },
+    { key: 'productos', label: 'Menú', icon: ChefHat, badge: cartCount || null },
     { key: 'express', label: 'Express', icon: ShoppingBag, badge: expressCount || null, badgeTone: 'ink' },
     { key: 'mas', label: 'Más', icon: MoreHorizontal },
   ];
-  return <TabBar items={items} value={step === 'promociones' ? 'mas' : step} bottomInset={bottomInset} onChange={key => key === 'mas' ? setMenuOpen(true) : navigate(key)} />;
+  return <TabBar items={items} value={step === 'promociones' ? 'mas' : step === 'pedido' ? 'productos' : step} bottomInset={bottomInset} onChange={key => key === 'mas' ? setMenuOpen(true) : navigate(key)} />;
 }
 
 // Hoja «Más»: perfil, promociones, borradores y ajustes rápidos.
