@@ -478,7 +478,9 @@ export function ConnectionDot({ state = 'live', label }) {
     const loop = Animated.loop(Animated.sequence([Animated.timing(v, { toValue: 0, duration: state === 'live' ? 1400 : 700, useNativeDriver: ND }), Animated.timing(v, { toValue: 1, duration: 0, useNativeDriver: ND })]));
     loop.start(); return () => loop.stop();
   }, [state]);
-  const color = state === 'live' ? c.greenDot : state === 'offline' ? c.red : c.amber;
+  // Conectado es lo normal: no se muestra nada. Solo aparece cuando hay un problema de conexión.
+  if (state === 'live') return null;
+  const color = state === 'offline' ? c.red : c.amber;
   return <View accessibilityLabel={label} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
     <View style={{ width: 10, height: 10, alignItems: 'center', justifyContent: 'center' }}>
       <Animated.View style={{ position: 'absolute', width: 10, height: 10, borderRadius: 5, backgroundColor: color, opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0, 0.45] }), transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [2.4, 1] }) }] }} />

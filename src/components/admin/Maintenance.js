@@ -4,10 +4,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 import axios from 'axios';
-import { Archive, Database, RefreshCw } from 'lucide-react-native';
+import { Archive, Database, EyeOff, Pencil, RefreshCw, SearchCheck } from 'lucide-react-native';
 import { BASE_URL } from '../../context/AuthContext';
 import { useTheme } from '../../theme';
-import { MenuModal, MenuButton } from '../MenuUI';
+import { MenuModal, MenuButton, MenuField } from '../MenuUI';
 import { Badge, Banner, Button, Card, DataTable, EmptyState, Segmented, Skeleton, money, space, type, useToast } from './ui';
 
 const errorText = error => error.response?.data?.detail || error.response?.data?.message || error.message || 'No se pudo completar la operación.';
@@ -117,8 +117,93 @@ function AbandonedCard() {
   </Card>;
 }
 
+// Revisión de datos: productos repetidos, precios fuera de lo normal, nombres de prueba y datos del negocio.
+// Solo se corrige lo que el administrador elige (ocultar del menú o cambiar el precio); nada se borra.
+function ReviewSection({ c, title, count, children }) {
+  return <View style={{ borderTopWidth: 1, borderColor: c.line, paddingHorizontal: space.lg, paddingVertical: space.md, gap: space.sm }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+      <Text style={[type.body, { color: c.text, fontWeight: '700', flex: 1 }]}>{title}</Text>
+      <Badge tone={count ? 'warning' : 'success'}>{count ? String(count) : 'En orden'}</Badge>
+    </View>
+    {count ? children : null}
+  </View>;
+}
+function ProductLine({ c, p, note, onHide, onPrice, busy }) {
+  return <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: 6, flexWrap: 'wrap' }}>
+    <View style={{ flex: 1, minWidth: 180 }}>
+      <Text numberOfLines={1} style={[type.body, { color: c.text, fontWeight: '600' }]}>{p.nombre}{Number(p.disponible ?? 1) === 0 ? ' (oculto)' : ''}</Text>
+      <Text numberOfLines={2} style={[type.body, { color: c.muted }]}>{[p.categoria_nombre, note].filter(Boolean).join(' · ')}</Text>
+    </View>
+    <Text style={[type.body, type.num, { color: c.text, fontWeight: '700', width: 80, textAlign: 'right' }]}>{money(p.precio)}</Text>
+    <Button variant="plain" icon={Pencil} onPress={() => onPrice(p)} disabled={busy}>Precio</Button>
+    {Number(p.disponible ?? 1) !== 0 ? <Button variant="plain" icon={EyeOff} onPress={() => onHide(p)} disabled={busy}>Ocultar</Button> : null}
+  </View>;
+}
+function DataReviewCard() {
+  const { c } = useTheme();
+  const toast = useToast();
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [price, setPrice] = useState('');
+  const load = useCallback(async () => {
+    try { setError(''); const { data: next } = await axios.get(`${BASE_URL}/revision-datos`); setData(next); }
+    catch (e) { setError(e.response?.status === 404 ? 'El servidor todavía no tiene la revisión de datos (actualiza el backend).' : errorText(e)); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const update = async (p, body, message) => {
+    setBusy(true);
+    try { await axios.put(`${BASE_URL}/productos/${p.id}`, body); toast?.show?.(message, 'green'); setEditing(null); await load(); }
+    catch (e) { toast?.show?.(errorText(e), 'red'); }
+    finally { setBusy(false); }
+  };
+  const hide = p => update(p, { disponible: 0 }, `${p.nombre} oculto del menú`);
+  const editPrice = p => { setEditing(p); setPrice(String(Number(p.precio).toFixed(2))); };
+  const prod = data?.productos || { duplicados: [], precios: [], nombres: [] };
+  const priceValue = Number(String(price).replace(',', '.'));
+  return <Card padded={false} title="Revisión de datos" description="Busca lo que parece cargado por error o de prueba: productos repetidos, precios fuera de lo normal, nombres al azar y datos del negocio. Nada se borra."
+    actions={<Button variant="plain" icon={RefreshCw} onPress={load}>Revisar</Button>}>
+    {error ? <View style={{ padding: space.lg }}><Banner tone="critical" title="No se pudo revisar">{error}</Banner></View>
+      : !data ? <View style={{ padding: space.lg }}><Skeleton height={120} radius={8} /></View>
+      : <>
+        {!data.total ? <View style={{ paddingHorizontal: space.lg, paddingBottom: space.md }}><EmptyState compact icon={SearchCheck} title="Todo en orden" description="No se encontró nada sospechoso." /></View> : null}
+        <ReviewSection c={c} title="Datos del negocio (salen en los comprobantes)" count={data.negocio.length}>
+          {data.negocio.map(i => <Text key={i.campo} style={[type.body, { color: c.muted }]}>• {i.motivo}</Text>)}
+          <Text style={[type.body, { color: c.muted }]}>Corrígelos en la pestaña Negocio de Ajustes.</Text>
+        </ReviewSection>
+        <ReviewSection c={c} title="Productos repetidos" count={prod.duplicados.length}>
+          {prod.duplicados.map(g => <View key={g.nombre} style={{ paddingVertical: 4, gap: 2 }}>
+            {g.productos.map(p => <ProductLine key={p.id} c={c} p={p} note={`Hay ${g.productos.length} con este nombre`} onHide={hide} onPrice={editPrice} busy={busy} />)}
+          </View>)}
+        </ReviewSection>
+        <ReviewSection c={c} title="Precios fuera de lo normal" count={prod.precios.length}>
+          {prod.precios.map(p => <ProductLine key={p.id} c={c} p={p} note={p.motivo} onHide={hide} onPrice={editPrice} busy={busy} />)}
+        </ReviewSection>
+        <ReviewSection c={c} title="Nombres que parecen de prueba" count={prod.nombres.length + data.pedidos.length}>
+          {prod.nombres.map(p => <ProductLine key={`p${p.id}`} c={c} p={p} note="Producto" onHide={hide} onPrice={editPrice} busy={busy} />)}
+          {data.pedidos.map(o => <View key={`o${o.id}`} style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: 6 }}>
+            <View style={{ flex: 1 }}><Text numberOfLines={1} style={[type.body, { color: c.text, fontWeight: '600' }]}>{target(o)} · #{o.id}</Text>
+              <Text style={[type.body, { color: c.muted }]}>{when(o.created_at)} · {o.abierto ? 'cuenta abierta: ciérrala en «Cuentas abandonadas»' : 'ya cobrada (queda en los reportes)'}</Text></View>
+            <Badge tone={o.abierto ? 'warning' : 'neutral'}>{o.abierto ? 'Abierta' : 'Cobrada'}</Badge>
+            <Text style={[type.body, type.num, { color: c.text, width: 80, textAlign: 'right' }]}>{money(o.total)}</Text>
+          </View>)}
+        </ReviewSection>
+      </>}
+    <MenuModal visible={!!editing} close={() => !busy && setEditing(null)} busy={busy} maxWidth={420} title={`Precio de ${editing?.nombre || ''}`}
+      subtitle="Cambia solo el precio de venta. Los pedidos ya confirmados conservan su precio."
+      footer={<View style={{ flexDirection: 'row', gap: space.sm, justifyContent: 'flex-end' }}>
+        <MenuButton onPress={() => setEditing(null)} disabled={busy}>Cancelar</MenuButton>
+        <MenuButton primary busy={busy} disabled={!(priceValue > 0)} onPress={() => update(editing, { precio: priceValue }, `Precio de ${editing.nombre}: ${money(priceValue)}`)}>Guardar precio</MenuButton>
+      </View>}>
+      <MenuField label="Precio de venta" value={price} onChangeText={setPrice} keyboardType="decimal-pad" placeholder="0,00" editable={!busy} />
+    </MenuModal>
+  </Card>;
+}
+
 export default function Maintenance() {
   return <View style={{ gap: space.lg }}>
+    <DataReviewCard />
     <DatabaseCard />
     <AbandonedCard />
   </View>;
