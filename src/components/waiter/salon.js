@@ -50,6 +50,15 @@ export function readyRounds(pedidos = [], now = Date.now()) {
     .sort((a, b) => (b.minutes ?? -1) - (a.minutes ?? -1));
 }
 
+// Platos listos sueltos: rondas que siguen en preparación pero con algún plato ya listo («Listo» parcial de cocina).
+export function readyItems(pedidos = []) {
+  return pedidos
+    .filter(p => !['PAGADO', 'CANCELADO'].includes(String(p.estado || '').toUpperCase()))
+    .flatMap(p => serviceRounds(p).filter(r => String(r.estado).toUpperCase() === 'PREPARANDO')
+      .map(r => ({ round: r, pedido: p, items: (r.items || []).filter(i => i.listo_at && Number(i.cantidad || 0) > 0), total: (r.items || []).filter(i => Number(i.cantidad || 0) > 0).length })))
+    .filter(x => x.items.length);
+}
+
 // ── Casilla de mesa ────────────────────────────────────────────────────────
 export function TableTile({ mesa, state, order, width, now, selected, ready, alert, reservation, onPress, onLongPress }) {
   const { c } = useTheme();
@@ -186,7 +195,7 @@ export function TransferSheet({ open, from, mesas, stateFor, onPick, onClose, bu
 
 // ── Bandeja «Listo» ────────────────────────────────────────────────────────
 // Rondas listas con «Entregado» en un toque, demoras y actividad reciente.
-export function ReadyTray({ open, onClose, ready, alerts, activity, onDeliver, deliveringId, onOpen, clearActivity, now }) {
+export function ReadyTray({ open, onClose, ready, partial = [], alerts, activity, onDeliver, deliveringId, onOpen, clearActivity, now }) {
   const { c } = useTheme();
   const [tab, setTab] = useState('listo');
   const unread = activity.filter(a => !a.read).length;
@@ -195,7 +204,7 @@ export function ReadyTray({ open, onClose, ready, alerts, activity, onDeliver, d
   const itemsText = round => (round.items || []).slice(0, 4).map(i => `${i.cantidad}× ${i.nombre || i.producto_nombre || 'Producto'}`).join(' · ');
   return <BottomSheet visible={open} onClose={onClose} title="Bandeja" subtitle={ready.length ? `${ready.length} ${ready.length === 1 ? 'ronda lista' : 'rondas listas'} para llevar a la mesa` : 'Nada esperando en el pase'}>
     <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
-      <Chip selected={tab === 'listo'} onPress={() => setTab('listo')} count={ready.length}>Listo</Chip>
+      <Chip selected={tab === 'listo'} onPress={() => setTab('listo')} count={ready.length + partial.length}>Listo</Chip>
       <Chip selected={tab === 'demoras'} onPress={() => setTab('demoras')} count={late.length}>Demoras</Chip>
       <Chip selected={tab === 'actividad'} onPress={() => setTab('actividad')} count={unread}>Actividad</Chip>
     </View>
@@ -216,7 +225,21 @@ export function ReadyTray({ open, onClose, ready, alerts, activity, onDeliver, d
         </View>
         </SwipeRow>
       </Appear>)}
-    </View> : <EmptyState icon={CheckCheck} title="Pase vacío" description="Cuando cocina marque una ronda como lista aparecerá aquí, con vibración." />) : null}
+    </View> : partial.length ? null : <EmptyState icon={CheckCheck} title="Pase vacío" description="Cuando cocina marque una ronda como lista aparecerá aquí, con vibración." />) : null}
+    {tab === 'listo' && partial.length ? <View style={{ gap: space.sm }}>
+      <T size={15} weight="800">Platos listos de rondas en preparación</T>
+      <T size={13} color={c.muted}>Cocina ya sacó estos platos; el resto de la ronda sigue en preparación.</T>
+      {partial.map(({ round, pedido, items, total }, i) => <Appear key={round.id} delay={i * 40}>
+        <Press accessibilityRole="button" accessibilityLabel={`${placeOf(pedido)}: ${items.map(it => it.nombre).join(', ')} listos`} onPress={() => onOpen({ mesa_id: pedido.mesa_id, pedido_id: pedido.id, pedido })} hapticKind="tap"
+          style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.skySoft, gap: 4 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+            <T size={17} weight="800" style={{ flex: 1 }}>{placeOf(pedido)}</T>
+            <Num size={13} weight="800" color={c.sky}>{items.length} de {total} listos</Num>
+          </View>
+          {items.map(it => <T key={it.id} size={15} weight="700" color={c.text}>✓ {it.cantidad}× {it.nombre}</T>)}
+        </Press>
+      </Appear>)}
+    </View> : null}
     {tab === 'demoras' ? <View style={{ gap: space.sm }}>
       {alerts.error ? <View style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.amberSoft, gap: space.sm }}>
         <T size={15} weight="600" color={c.amber}>No se pudieron revisar las demoras.{alerts.items.length ? ' Se muestra la última consulta.' : ''}</T>

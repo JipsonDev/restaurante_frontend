@@ -64,7 +64,7 @@ import { useTheme, operationalColors as UI_COLORS, tableStatusMeta, WaiterAppear
 import { ComandaToastProvider, FONT as COMANDA_FONT, useComandaFonts, useComandaToast, useToastLift } from '../components/waiter/comanda';
 import Logo from '../components/Logo';
 import WaiterFloor from '../components/WaiterFloor';
-import { TableActionsSheet, TransferSheet, readyRounds, salonHaptic, useTodayReservations } from '../components/waiter/salon'; // Salón:
+import { TableActionsSheet, TransferSheet, readyItems, readyRounds, salonHaptic, useTodayReservations } from '../components/waiter/salon'; // Salón:
 import { addDraftProduct, changeDraftQuantity, addCustomizedProduct, addLines } from '../utils/waiterCart.mjs';
 import { topProducts, lastRoundItems, extrasForProduct } from '../utils/waiterFavorites.mjs'; // Menú:
 import CustomizeSheet from '../components/waiter/CustomizeSheet'; // Menú:
@@ -766,6 +766,19 @@ function App() {
     client.on('connect_error', onConnectError);
 
     const applyOrderPayload = (payload = {}) => {
+      // Cocina marcó platos sueltos como listos: avisar al mesero de esa cuenta qué puede llevar ya.
+      if (payload.action === 'platos_listos' && !payload.ronda_lista && payload.pedido && Array.isArray(payload.nombres) && payload.nombres.length) {
+        const pd = payload.pedido;
+        const mine = !pd.mesero_id || Number(pd.mesero_id) === Number(user?.id);
+        if (mine) {
+          const mesaId = pd.mesa_id || pd.mesa?.id || null;
+          const target = mesaId ? `Mesa ${pd.mesa_numero || pd.mesa?.numero || mesaId}` : `${pickupTypeLabel(pd.tipo)} #${pd.id}`;
+          const title = `${target}: ${payload.nombres.length === 1 ? 'plato listo' : 'platos listos'}`;
+          const body = `${payload.nombres.join(', ')} para llevar ya.`;
+          addNotification({ key: `items-${pd.id}-${payload.ronda_id}-${(payload.platos || []).join('.')}`, title, body, pedido_id: pd.id, pedido: pd, mesa_id: mesaId, mesa_numero: pd.mesa_numero || null, is_pickup: !mesaId, action: 'items_ready' });
+          notifyWaiterInApp({ title, body, data: { type: 'ITEMS_READY', pedido_id: pd.id, mesa_id: mesaId, action: 'items_ready' } }).catch(() => null);
+        }
+      }
       if (payload.action === 'delete' && payload.pedido_id) {
         setPedidos((prev) => prev.filter((pedido) => Number(pedido.id) !== Number(payload.pedido_id)));
         scheduleLiveSync();
@@ -851,6 +864,13 @@ function App() {
       subscribeRealtime(REALTIME_EVENTS.TABLE_OCCUPIED, applyTablePayload('Ocupada')),
       subscribeRealtime(REALTIME_EVENTS.TABLE_FREED, applyTablePayload('Libre')),
       subscribeRealtime(REALTIME_EVENTS.TABLE_UPDATED, applyTablePayload(null)),
+      // Cocina marcó un producto como agotado (o disponible otra vez): el menú se actualiza al instante.
+      subscribeRealtime(REALTIME_EVENTS.CATALOG_UPDATED, (payload = {}) => {
+        if (!payload.producto_id) return;
+        setProductos((prev) => prev.map((p) => Number(p.id) === Number(payload.producto_id) ? { ...p, agotado: payload.agotado ? 1 : 0 } : p));
+        toast.show(payload.agotado ? `${payload.nombre || 'Un producto'} se agotó` : `${payload.nombre || 'Un producto'} está disponible otra vez`,
+          { tone: payload.agotado ? 'warning' : 'success', detail: payload.agotado ? 'Avisó cocina. Ya aparece como «Agotado» en el menú.' : null });
+      }),
     ];
 
     return () => {
@@ -1548,6 +1568,7 @@ function App() {
   const [salonActionsMesa, setSalonActionsMesa] = useState(null);
   const [trayDelivering, setTrayDelivering] = useState(null);
   const salonReady = useMemo(() => readyRounds(pedidos, serviceNow), [pedidos, serviceNow]);
+  const salonPartial = useMemo(() => readyItems(pedidos), [pedidos]); // platos listos sueltos («Listo» parcial)
   const salonFocusMesa = (mesa) => { setOrderMode('mesa'); setSelectedExpressPedidoId(null); setMesaSel(mesa.id); setEditItemId(null); };
   const salonPedirCuenta = async (mesa) => {
     const order = activeOrderForMesa(mesa.id);
@@ -1600,7 +1621,7 @@ function App() {
       compact={compactTables} setCompact={setCompactTables} selected={mesaSel} selectTable={selectMesa}
       stateFor={mesaEstadoVisual} orderFor={activeOrderForMesa} zones={mesaZones} zone={mesaZone} setZone={setMesaZone}
       refresh={loadData} refreshing={loading} loadError={loadError}
-      reservations={salonReservations} onLongPressTable={setSalonActionsMesa} openTray={() => setNotiOpen(true)} readyCount={salonReady.length}
+      reservations={salonReservations} onLongPressTable={setSalonActionsMesa} openTray={() => setNotiOpen(true)} readyCount={salonReady.length + salonPartial.length}
     />)}
     <TableActionsSheet mesa={salonActionsMesa} state={salonActionsMesa ? mesaEstadoVisual(salonActionsMesa) : 'Libre'} order={salonActionsOrder} onClose={() => setSalonActionsMesa(null)}
       actions={{
@@ -1853,7 +1874,7 @@ function App() {
 
   // Salón: bandeja «Listo» (rondas listas con «Entregado», demoras y actividad).
   const renderNotifications = () => <WaiterNotifications colors={colors} alerts={serviceAlerts} activity={notificaciones} close={()=>setNotiOpen(false)} openOrder={openPedidoFromNotification} clearActivity={()=>setNotificaciones([])}
-    ready={salonReady} onDeliver={salonEntregar} deliveringId={trayDelivering} now={serviceNow}/>;
+    ready={salonReady} partial={salonPartial} onDeliver={salonEntregar} deliveringId={trayDelivering} now={serviceNow}/>;
 
   if ((loading && !dataLoaded.current) || !drafts.ready) {
     return (

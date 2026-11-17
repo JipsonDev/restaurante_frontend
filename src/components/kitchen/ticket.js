@@ -16,19 +16,8 @@ export const ticketTarget = r => isPickup(r)
   ? `${r?.tipo === 'Delivery' ? 'Delivery' : 'Llevar'}${r?.cliente_nombre ? ` · ${r.cliente_nombre}` : ` #${r?.pedido_id}`}`
   : `Mesa ${r?.mesa_numero || r?.mesa_id || '—'}`;
 
-// Platos tachados: se guardan en este equipo por ronda (sobreviven a recargas).
-const doneKey = id => `mm-kds-done-${id}`;
-function useDoneItems(roundId) {
-  const [done, setDone] = useState(() => { try { return new Set(JSON.parse(localStorage.getItem(doneKey(roundId)) || '[]')); } catch { return new Set(); } });
-  const toggle = itemKey => setDone(prev => {
-    const next = new Set(prev);
-    if (next.has(itemKey)) next.delete(itemKey); else next.add(itemKey);
-    try { if (next.size) localStorage.setItem(doneKey(roundId), JSON.stringify([...next])); else localStorage.removeItem(doneKey(roundId)); } catch {}
-    return next;
-  });
-  return [done, toggle];
-}
-export function clearDoneItems(roundId) { try { localStorage.removeItem(doneKey(roundId)); } catch {} }
+// Platos listos: vienen del servidor (listo_at), así se ven igual en todas las tablets.
+export const itemDone = (item, optimistic = {}) => optimistic[item.id] !== undefined ? optimistic[item.id] : !!item.listo_at;
 
 // Píldora del temporizador. En «tarde» late suavemente un halo (no parpadea toda la tarjeta).
 function TimerPill({ minutes, urgency, label }) {
@@ -51,12 +40,13 @@ function TimerPill({ minutes, urgency, label }) {
   </View>;
 }
 
-function ItemLine({ item, done, onToggle, big }) {
+function ItemLine({ item, done, onToggle, onLongPress, big, disabled }) {
   const { c } = useTheme();
   const critical = isCriticalNote(item.notas);
   const mods = item.modificadores || [];
   return <Press accessibilityRole="checkbox" accessibilityState={{ checked: done }} accessibilityLabel={`${item.cantidad} ${item.nombre}${item.notas ? `, nota: ${item.notas}` : ''}`}
-    onPress={onToggle} hapticKind="select" scaleTo={0.98}
+    onPress={onToggle} onLongPress={onLongPress} disabled={disabled} hapticKind="select" scaleTo={0.98}
+    accessibilityHint="Toca para marcar el plato como listo; mantén presionado para marcar el producto como agotado"
     style={{ flexDirection: 'row', alignItems: 'flex-start', gap: space.md, paddingVertical: 8, paddingHorizontal: 8, marginHorizontal: -8, borderRadius: radius.md, opacity: done ? 0.75 : 1 }}
     hoverStyle={{ backgroundColor: c.surfaceAlt }}>
     <View style={{ minWidth: big ? 46 : 40, height: big ? 46 : 40, paddingHorizontal: 6, borderRadius: 14, backgroundColor: done ? c.greenSoft : c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
@@ -75,15 +65,15 @@ function ItemLine({ item, done, onToggle, big }) {
 }
 
 // action: { label, icon, variant, onPress } · secondary: [{ icon, label, onPress }]
-export const KitchenTicket = memo(function KitchenTicket({ round, now, limit = 20, listoLimit = 5, action, secondary = [], swipe, busy, isNew, extraRound, compact }) {
+export const KitchenTicket = memo(function KitchenTicket({ round, items: itemsProp, now, limit = 20, listoLimit = 5, action, secondary = [], swipe, busy, isNew, extraRound, compact, optimistic = {}, onToggleItem, onLongPressItem, station }) {
   const { c } = useTheme();
-  const [done, toggle] = useDoneItems(round.id);
   const state = String(round.estado || '').toUpperCase();
-  const ready = state === 'LISTO';
-  const items = (round.items || []).filter(i => Number(i.cantidad || 0) > 0);
+  const items = (itemsProp || round.items || []).filter(i => Number(i.cantidad || 0) > 0);
+  const ready = state === 'LISTO' || (items.length > 0 && items.every(it => itemDone(it, optimistic)));
   const minutes = ready ? stageMinutes(round, now) : waitMinutes(round, now);
   const urgency = ready ? ticketUrgency(minutes, listoLimit) : ticketUrgency(minutes, limit);
-  const allDone = items.length > 0 && items.every((it, i) => done.has(`${it.id ?? i}`));
+  const doneCount = items.filter(it => itemDone(it, optimistic)).length;
+  const allDone = items.length > 0 && doneCount === items.length;
   const pickup = isPickup(round);
   const Target = pickup ? (round.tipo === 'Delivery' ? Truck : ShoppingBag) : null;
   // Llegada: aparece con un pequeño rebote y un halo rojo de marca.
@@ -107,13 +97,16 @@ export const KitchenTicket = memo(function KitchenTicket({ round, now, limit = 2
       </View>
       <TimerPill minutes={minutes} urgency={urgency} label={ready ? 'Lista hace' : 'En cocina'} />
     </View>
-    {extraRound || isNew ? <View style={{ flexDirection: 'row', gap: 6, paddingLeft: space.lg + 4, marginBottom: 4 }}>
+    {extraRound || isNew || (doneCount > 0 && !allDone) || station ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingLeft: space.lg + 4, marginBottom: 4 }}>
+      {doneCount > 0 && !allDone ? <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill, backgroundColor: c.greenSoft }}><T size={11} weight="800" color={c.green}>{`${doneCount} de ${items.length} listos`}</T></View> : null}
+      {station ? <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill, backgroundColor: c.skySoft }}><T size={11} weight="800" color={c.sky}>{station}</T></View> : null}
       {isNew ? <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill, backgroundColor: c.primary }}><T size={11} weight="800" color={c.onPrimary}>Nueva</T></View> : null}
       {extraRound ? <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill, backgroundColor: c.purpleSoft }}><T size={11} weight="800" color={c.purple}>Ronda adicional</T></View> : null}
     </View> : null}
     {/* Platos */}
     <View style={{ paddingLeft: space.lg + 4, paddingRight: space.lg, paddingBottom: space.sm }}>
-      {items.map((it, i) => <ItemLine key={it.id ?? i} item={it} big={!compact} done={done.has(`${it.id ?? i}`)} onToggle={() => toggle(`${it.id ?? i}`)} />)}
+      {items.map((it, i) => <ItemLine key={it.id ?? i} item={it} big={!compact} done={itemDone(it, optimistic)} disabled={busy || !onToggleItem}
+        onToggle={() => onToggleItem?.(round, it)} onLongPress={onLongPressItem ? () => onLongPressItem(it) : undefined} />)}
       {round.notas ? <View style={{ flexDirection: 'row', gap: 8, marginTop: 6, padding: 10, borderRadius: radius.md, backgroundColor: isCriticalNote(round.notas) ? c.redSoft : c.amberSoft }}>
         <StickyNote size={16} color={isCriticalNote(round.notas) ? c.red : c.amber} />
         <T size={14} weight="700" color={isCriticalNote(round.notas) ? c.red : c.text} style={{ flex: 1 }}>{round.notas}</T>

@@ -122,7 +122,7 @@ export function PastRound({ round, index, children, action }) {
       <Stamp color={tone === 'muted' ? c.muted : c[tone]} size={12}>{txt}</Stamp>
     </Press>
     {open ? <View style={{ paddingBottom: space.md, gap: 4 }}>
-      {items.map((it, i) => <LeaderLine key={`${it.id || i}`} dim left={<T size={15} color={c.muted}><Num size={15} color={c.muted}>{it.cantidad}× </Num>{it.nombre}</T>} right={<Num size={15} color={c.muted}>{money((Number(it.precio) || 0) * (Number(it.cantidad) || 0))}</Num>} />)}
+      {items.map((it, i) => <LeaderLine key={`${it.id || i}`} dim left={<T size={15} color={c.muted}><Num size={15} color={c.muted}>{it.cantidad}× </Num>{it.nombre}{it.listo_at && round.estado !== 'LISTO' && round.estado !== 'ENTREGADO' ? <T size={13} weight="800" color={c.green}>  ✓ listo</T> : null}</T>} right={<Num size={15} color={c.muted}>{money((Number(it.precio) || 0) * (Number(it.cantidad) || 0))}</Num>} />)}
       {children}
       {action}
     </View> : null}

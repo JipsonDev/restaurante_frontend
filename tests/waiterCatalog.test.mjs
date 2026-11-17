@@ -36,3 +36,11 @@ test('menu search finds a product by its number and by words in any order', asyn
   assert.deepEqual(filterMenuProducts(products, { query: 'cafe' }).map(p => p.id), [7]);
   assert.deepEqual(filterMenuProducts(products, { query: 'un batido de mora' }).map(p => p.id), [12]);
 });
+
+test('a product sold out by the kitchen stays in the menu, last, with no stock', async () => {
+  const { filterMenuProducts, menuStock } = await import('../src/utils/waiterCatalog.mjs');
+  const list = [{ id: 1, nombre: 'Agua', precio: 1, stock: 10, agotado: 1 }, { id: 2, nombre: 'Batido', precio: 2, stock: 10 }];
+  assert.equal(menuStock(list[0]), 0);
+  assert.deepEqual(filterMenuProducts(list).map(p => p.id), [2, 1]);
+  assert.deepEqual(filterMenuProducts(list, { availableOnly: true }).map(p => p.id), [2]);
+});

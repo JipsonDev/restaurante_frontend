@@ -3,6 +3,7 @@ export function isMenuPromotion(product) {
   return /\bpromo(?:cion(?:es)?|s)?\b/.test(normalize(`${product.nombre || ''} ${product.categoria_nombre || product.categoria || ''}`));
 }
 export const menuStock = product => {
+  if (Number(product?.agotado || 0) === 1) return 0; // agotado por cocina: no se puede pedir
   const stock = Number(product.stock_disponible ?? product.inventario_stock ?? product.stock ?? 9999);
   return Number.isFinite(stock) ? Math.max(0, stock) : 0;
 };
@@ -25,5 +26,5 @@ export function filterMenuProducts(products, { query = '', category = 'Todas', a
   return products.filter(product => (category === 'Todas' || normalize(product.categoria_nombre || product.categoria || 'General') === normalize(category))
     && matchesMenuQuery(product, query)
     && Number(product.disponible ?? 1) === 1 && (!availableOnly || menuStock(product) > 0) && !isMenuPromotion(product))
-    .sort((a, b) => (sort === 'price' ? Number(a.precio) - Number(b.precio) : 0) || String(a.nombre).localeCompare(String(b.nombre), 'es', { sensitivity: 'base', numeric: true }));
+    .sort((a, b) => (Number(a.agotado || 0) - Number(b.agotado || 0)) || (sort === 'price' ? Number(a.precio) - Number(b.precio) : 0) || String(a.nombre).localeCompare(String(b.nombre), 'es', { sensitivity: 'base', numeric: true }));
 }
