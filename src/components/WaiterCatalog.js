@@ -24,12 +24,10 @@ function useProductState(producto, qty, canAdd, locked, onAdd, onCustomize, choo
   return { stock, soldOut, off, low, add, custom, label };
 }
 
-// «+» sobre la foto; con cantidad, se convierte en − n +.
+// «+» dentro de la esquina de la foto; con cantidad, una barra − n + a lo ancho de la foto (sin salirse).
 function AddControl({ producto, qty, off, locked, add, onDecrement, onAdd, small }) {
   const { c } = useTheme();
-  if (qty > 0 && !locked) return <View style={{ borderRadius: radius.md, backgroundColor: c.bg, padding: 2 }}>
-    <Tally value={qty} size="sm" removable label={producto.nombre} onChange={next => next > qty ? onAdd(producto) : onDecrement(producto)} />
-  </View>;
+  if (qty > 0 && !locked) return <Tally value={qty} size="sm" removable stretch bg={c.bg} label={producto.nombre} onChange={next => next > qty ? onAdd(producto) : onDecrement(producto)} />;
   if (off) return null;
   return <Press accessibilityRole="button" accessibilityLabel={`Añadir ${producto.nombre}`} onPress={add} hapticKind="tap" scaleTo={0.88}
     style={{ width: small ? 34 : 38, height: small ? 34 : 38, borderRadius: radius.md, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' }}>
@@ -57,10 +55,10 @@ const ProductRow = memo(function ProductRow({ producto, qty, canAdd, locked, onA
       </View>
     </View>
     <View style={{ width: 96 }}>
-      <ProductArt product={producto} radius={14} dim={s.soldOut} iconScale={0.34} />
+      <ProductArt product={producto} radius={radius.lg} dim={s.soldOut} iconScale={0.34} />
     </View>
   </Press>
-  <View style={{ position: 'absolute', right: -4, top: space.md + 96 - 30 }}>
+  <View style={qty > 0 && !locked ? { position: 'absolute', right: 6, width: 84, top: space.md + 96 - 6 - 38 } : { position: 'absolute', right: 6, top: space.md + 96 - 6 - 34 }}>
     <AddControl producto={producto} qty={qty} off={s.off} locked={locked} add={s.add} onAdd={onAdd} onDecrement={onDecrement} small />
   </View>
   </View>;
@@ -75,7 +73,7 @@ const ProductCard = memo(function ProductCard({ producto, qty, canAdd, locked, o
     <Press accessibilityRole="button" accessibilityLabel={s.label} disabled={s.off} onPress={s.add} onLongPress={canAdd && !s.off ? s.custom : undefined} hapticKind={s.off ? undefined : 'tap'} scaleTo={0.98}
       style={{ gap: 8 }}>
       <View onLayout={e => setPhotoH(e.nativeEvent.layout.height)}>
-        <ProductArt product={producto} radius={16} dim={s.soldOut} aspect={4 / 3} iconScale={0.26} />
+        <ProductArt product={producto} radius={radius.lg} dim={s.soldOut} aspect={4 / 3} iconScale={0.26} />
       </View>
       <View style={{ gap: 2, paddingHorizontal: 2 }}>
         <T size={16} weight="600" numberOfLines={2}>{qty > 0 ? <T size={16} weight="700" color={c.primaryText}>{qty}× </T> : null}{producto.nombre}</T>
@@ -85,7 +83,7 @@ const ProductCard = memo(function ProductCard({ producto, qty, canAdd, locked, o
         </View>
       </View>
     </Press>
-    {photoH ? <View style={{ position: 'absolute', right: 8, top: photoH - 46 }}>
+    {photoH ? <View style={qty > 0 && !locked ? { position: 'absolute', left: 8, right: 8, top: photoH - 8 - 38 } : { position: 'absolute', right: 8, top: photoH - 8 - 38 }}>
       <AddControl producto={producto} qty={qty} off={s.off} locked={locked} add={s.add} onAdd={onAdd} onDecrement={onDecrement} />
     </View> : null}
   </View>;

@@ -294,19 +294,19 @@ export function RollingNumber({ value, format = v => String(v), size = 16, weigh
   </View>;
 }
 
-// Cantidad: píldora con borde, − n +. En 1, el «−» se vuelve papelera (quitar).
-export function Tally({ value, onChange, min = 0, max = 99, label = 'Cantidad', size = 'md', removable = false }) {
+// Cantidad: bloque gris − n +, sin bordes ni resaltes que se queden pegados al tocar. En 1, el «−» se vuelve papelera (quitar).
+export function Tally({ value, onChange, min = 0, max = 99, label = 'Cantidad', size = 'md', removable = false, stretch = false, bg }) {
   const { c } = useTheme();
   const s = size === 'sm' ? 34 : 40;
   const btn = (delta, disabled) => {
     const Icon = delta > 0 ? Plus : removable && value <= 1 ? Trash2 : Minus;
     return <Press accessibilityRole="button" accessibilityLabel={delta > 0 ? `Aumentar ${label.toLowerCase()}` : removable && value <= 1 ? `Quitar ${label.toLowerCase()}` : `Disminuir ${label.toLowerCase()}`} disabled={disabled}
       onPress={() => onChange(Math.max(removable ? 0 : min, Math.min(max, value + delta)))} hapticKind="select" scaleTo={0.88}
-      style={{ width: s, height: s, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.3 : 1 }} hoverStyle={{ backgroundColor: c.soft }}>
+      style={{ width: s, height: s, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.3 : 1 }}>
       <Icon size={size === 'sm' ? 16 : 18} color={delta < 0 && removable && value <= 1 ? c.red : c.text} strokeWidth={2.4} />
     </Press>;
   };
-  return <View accessibilityLabel={`${label}: ${value}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 2, padding: 2, borderRadius: radius.md, backgroundColor: c.surfaceAlt, alignSelf: 'flex-start' }}>
+  return <View accessibilityLabel={`${label}: ${value}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 2, padding: 2, borderRadius: radius.md, backgroundColor: bg || c.surfaceAlt, alignSelf: stretch ? 'stretch' : 'flex-start', justifyContent: 'space-between' }}>
     {btn(-1, !removable && value <= min)}
     <View style={{ minWidth: 26, alignItems: 'center' }}><RollingNumber value={value} size={size === 'sm' ? 15 : 17} weight="700" /></View>
     {btn(1, value >= max)}
