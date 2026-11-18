@@ -6,7 +6,7 @@ import { Check } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import { menuStock } from '../../utils/waiterCatalog.mjs';
 import { extrasForProduct, toModifier, unitPrice } from '../../utils/waiterFavorites.mjs';
-import { T, Num, Label, Press, Button, Tally, Field, BottomSheet, Perforation, money, TOUCH, radius, space } from './comanda';
+import { T, Num, Label, Press, Button, Tally, Field, BottomSheet, Perforation, money, TOUCH, radius, space } from './kit';
 
 const GROUPS = [
   ['EXTRA', 'Extras'], ['EXCLUSION', 'Quitar'], ['TERMINO', 'Término'], ['NOTA', 'Indicaciones'],

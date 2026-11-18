@@ -8,7 +8,7 @@ import ExpressDraftList from './ExpressDraftList';
 import { expressStage, filterExpressOrders } from '../utils/expressWorkspace.mjs';
 import { serviceSummaryLabel } from '../utils/serviceTiming.mjs';
 import { useTheme } from '../theme';
-import { Appear, Button, Chip, EmptyState, Field, Num, Press, T, elevate, money, radius, space } from './waiter/comanda';
+import { Appear, Button, Chip, EmptyState, Field, Num, Press, T, elevate, money, radius, space } from './waiter/kit';
 
 // Un solo estado por pedido, del más urgente al más tranquilo.
 function expressStatus(state, order, c) {
@@ -30,10 +30,10 @@ function ExpressRow({ order, onOpen, now, index }) {
   return <Appear delay={Math.min(index, 8) * 30}>
     <Press accessibilityRole="button" accessibilityLabel={`Abrir pedido ${order.id} de ${order.cliente_nombre || 'cliente'}, ${status.text}, ${money(order.total)}, ${serviceSummaryLabel(order, now)}`}
       onPress={() => onOpen(order)} hapticKind="tap"
-      style={[{ padding: space.md, gap: space.md, backgroundColor: c.surface, borderWidth: 2, borderColor: state.canDeliver ? c.greenDot : (c.isDark ? c.line : 'rgba(16,24,40,0.04)'), borderRadius: radius.xl }, elevate(c, 1)]} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
+      style={{ padding: space.md, gap: space.md, backgroundColor: c.surface, borderWidth: state.canDeliver ? 2 : 1, borderColor: state.canDeliver ? c.greenDot : c.line, borderRadius: radius.lg }} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-        <View style={{ width: 52, height: 52, borderRadius: 18, backgroundColor: delivery ? c.skySoft : c.primarySoft, alignItems: 'center', justifyContent: 'center' }}>
-          {delivery ? <Truck size={24} color={c.sky} /> : <ShoppingBag size={24} color={c.primaryText} />}
+        <View style={{ width: 48, height: 48, borderRadius: 12, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+          {delivery ? <Truck size={22} color={c.text} /> : <ShoppingBag size={22} color={c.text} />}
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <T size={17} weight="800" numberOfLines={1}>{order.cliente_nombre || 'Cliente sin nombre'}</T>
@@ -42,7 +42,7 @@ function ExpressRow({ order, onOpen, now, index }) {
         <Num size={18} weight="800">{money(order.total)}</Num>
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, height: 32, paddingHorizontal: 12, borderRadius: radius.pill, backgroundColor: status.soft }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, height: 28, paddingHorizontal: 10, borderRadius: 8, backgroundColor: status.soft }}>
           <StatusIcon size={15} color={status.color} strokeWidth={2.4} />
           <T size={14} weight="800" color={status.color}>{status.text}</T>
         </View>
@@ -64,20 +64,13 @@ export default function WaiterExpress({ width, orders, view, setView, drafts, op
   const stages = [['all', 'Todos', orders.length], ['ready', 'Para entregar', counts.ready], ['payment', 'Por cobrar', counts.payment], ['preparing', 'En cocina', counts.preparing]];
   return <View style={{ padding, paddingTop: space.md, gap: space.lg, maxWidth: 960, width: '100%', alignSelf: 'center' }}>
     <View>
-      <T size={width < 600 ? 22 : 28} weight="800" accessibilityRole="header">Express</T>
-      <T size={13} weight="600" color={c.muted}>Para llevar y delivery</T>
+      <T size={width < 600 ? 26 : 30} weight="700" accessibilityRole="header">Express</T>
+      <T size={14} color={c.muted}>Para llevar y delivery</T>
     </View>
-    {/* Empezar un pedido: dos botones grandes con icono. */}
-    <View style={{ flexDirection: 'row', gap: space.md }}>
-      {[['Para llevar', ShoppingBag, c.primarySoft, c.primaryText, 'Nuevo pedido para llevar'], ['Delivery', Truck, c.skySoft, c.sky, 'Nuevo pedido delivery']].map(([tipo, Icon, soft, tone, label]) =>
-        <Press key={tipo} accessibilityRole="button" accessibilityLabel={label} onPress={() => startOrder(tipo)} hapticKind="tap"
-          style={{ flex: 1, minHeight: 92, padding: space.md, borderRadius: radius.xl, backgroundColor: soft, justifyContent: 'space-between' }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <Icon size={26} color={tone} />
-            <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: c.isDark ? 'rgba(255,255,255,0.08)' : '#FFFFFF', alignItems: 'center', justifyContent: 'center' }}><Plus size={17} color={tone} strokeWidth={2.6} /></View>
-          </View>
-          <T size={17} weight="800">{tipo}</T>
-        </Press>)}
+    {/* Empezar un pedido: el botón principal (para llevar) y delivery al lado. */}
+    <View style={{ flexDirection: 'row', gap: space.sm }}>
+      <Button variant="primary" size="lg" icon={Plus} onPress={() => startOrder('Para llevar')} accessibilityLabel="Nuevo pedido para llevar" style={{ flex: 1 }}>Para llevar</Button>
+      <Button variant="outline" size="lg" icon={Truck} onPress={() => startOrder('Delivery')} accessibilityLabel="Nuevo pedido delivery" style={{ flex: 1 }}>Delivery</Button>
     </View>
     <View accessibilityRole="tablist" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
       {[['active', 'En curso', orders.length], ['drafts', 'Guardados', draftCount], ['history', 'Historial', null]].map(([key, label, count]) =>

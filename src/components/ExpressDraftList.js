@@ -3,7 +3,7 @@ import React, { useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { FileText, ShoppingBag, Trash2, Truck } from 'lucide-react-native';
 import { useTheme } from '../theme';
-import { Button, EmptyState, Field, IconButton, Num, Press, T, money, radius, space } from './waiter/comanda';
+import { Button, EmptyState, Field, IconButton, Num, Press, T, money, radius, space } from './waiter/kit';
 const normalize = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 export default function ExpressDraftList({ drafts, onOpen, onDiscard }) {
@@ -33,8 +33,8 @@ export default function ExpressDraftList({ drafts, onOpen, onDiscard }) {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingRight: space.sm }}>
           <Press accessibilityRole="button" accessibilityLabel={`Continuar el pedido de ${name}, ${delivery ? 'delivery' : 'para llevar'}`} onPress={() => onOpen(key)} hapticKind="tap"
             style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.md }}>
-            <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: delivery ? c.skySoft : c.primarySoft, alignItems: 'center', justifyContent: 'center' }}>
-              {delivery ? <Truck size={19} color={c.sky} /> : <ShoppingBag size={19} color={c.primaryText} />}
+            <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+              {delivery ? <Truck size={19} color={c.text} /> : <ShoppingBag size={19} color={c.text} />}
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
               <T size={16} weight="800" numberOfLines={1}>{name}</T>

@@ -60,8 +60,8 @@ import axios from 'axios';
 import { useFonts } from 'expo-font';
 import { runExclusive } from '../utils/waiterLogic.mjs';
 import { useAuth, BASE_URL, assetUrl } from '../context/AuthContext';
-import { useTheme, operationalColors as UI_COLORS, tableStatusMeta, WaiterAppearance } from '../theme';
-import { ComandaToastProvider, FONT as COMANDA_FONT, useComandaFonts, useComandaToast, useToastLift } from '../components/waiter/comanda';
+import { useTheme, operationalColors as UI_COLORS, tableStatusMeta, MeseroAppearance, setBrandColor } from '../theme';
+import { ComandaToastProvider, FONT as COMANDA_FONT, useComandaFonts, useComandaToast, useToastLift } from '../components/waiter/kit';
 import Logo from '../components/Logo';
 import WaiterFloor from '../components/WaiterFloor';
 import { ReservationHoldSheet, ReservationsTodaySheet, TableActionsSheet, TransferSheet, readyItems, readyRounds, salonHaptic, useTodayReservations } from '../components/waiter/salon'; // Salón:
@@ -77,7 +77,7 @@ import { validateDraft, emptyExpressInfo, isExpressDraftKey, savedDraftKeys } fr
 // Comanda: hoja de pedido y cola sin conexión.
 import { ComandaHeader, LineCustomizer, NoticeSheet, OfflineQueue, OrderLine, PastRound, PriceChangesSheet, SectionLabel, SendBar, TearAway, TotalsBlock } from '../components/waiter/order';
 import { classifyError, nextDelay, priceDiffs, queueSummary, reusableExpressDraft } from '../utils/sendQueue.mjs';
-import { BottomSheet as CBottomSheet, Button as CButton, Chip as CChip, LeaderLine as CLeaderLine, Tally as CTally, Field as CField, Label as CLabel, Num as CNum, Perforation as CPerforation, StampBurst as CStampBurst, T as CT, money as cMoney } from '../components/waiter/comanda';
+import { BottomSheet as CBottomSheet, Button as CButton, Chip as CChip, LeaderLine as CLeaderLine, Tally as CTally, Field as CField, Label as CLabel, Num as CNum, Perforation as CPerforation, StampBurst as CStampBurst, T as CT, money as cMoney } from '../components/waiter/kit';
 import ExpressDraftList from '../components/ExpressDraftList';
 import { catalogContext } from '../utils/waiterNavigation.mjs';
 import { BOTTOM_INSET, TOP_INSET } from '../utils/safeArea';
@@ -251,7 +251,7 @@ const SwipeableRow = ({ children, onDelete, enabled, colors }) => {
 
 // La app del mesero usa su propia identidad («Comanda»), independiente del panel de administración.
 export default function WaiterApp() {
-  return <WaiterAppearance><ComandaToastProvider bottomOffset={BOTTOM_INSET + 72}><App /></ComandaToastProvider></WaiterAppearance>;
+  return <MeseroAppearance><ComandaToastProvider bottomOffset={BOTTOM_INSET + 72}><App /></ComandaToastProvider></MeseroAppearance>;
 }
 
 function App() {
@@ -286,6 +286,8 @@ function App() {
   const [extras, setExtras] = useState([]);
   const [pedidos, setPedidos] = useState([]);
   const [businessConfig, setBusinessConfig] = useState(DEFAULT_BUSINESS_CONFIG);
+  // Marca blanca: el color del local pinta la acción principal, la pestaña activa y el carrito.
+  useEffect(() => { setBrandColor(businessConfig.color_marca || null); }, [businessConfig.color_marca]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState(null);
@@ -1533,6 +1535,8 @@ function App() {
   };
 
   const renderTopTabs = () => <WaiterNavigation
+    brand={{ name: businessConfig.nombre_restaurante, logo: businessConfig.logo_url ? assetUrl(businessConfig.logo_url) : null }}
+    alertsPending={alertPermission === 'default'}
     colors={colors} width={width} step={step} navigate={navigate}
     menuOpen={menuOpen} setMenuOpen={setMenuOpen} name={meseroNombre}
     dark={isDark} toggleTheme={toggleTheme} unread={unreadNotifications + serviceAlerts.items.length} delayCount={serviceAlerts.items.length}
@@ -1785,7 +1789,6 @@ function App() {
       compact={compactTables} setCompact={setCompactTables} selected={mesaSel} selectTable={selectMesa}
       stateFor={mesaEstadoVisual} orderFor={activeOrderForMesa} zones={mesaZones} zone={mesaZone} setZone={setMesaZone}
       refresh={loadData} refreshing={loading} loadError={loadError} offline={offline} queued={queuedTables}
-      alertsPrompt={{ visible: alertPermission === 'default' && !alertPromptDismissed, enable: enableAlerts, dismiss: dismissAlertsPrompt }}
       reservations={salonReservations} onLongPressTable={setSalonActionsMesa} openTray={() => setNotiOpen(true)} readyCount={salonReady.length + salonPartial.length}
     />)}
     <TableActionsSheet mesa={salonActionsMesa} state={salonActionsMesa ? mesaEstadoVisual(salonActionsMesa) : 'Libre'} order={salonActionsOrder} onClose={() => setSalonActionsMesa(null)}
@@ -1945,8 +1948,8 @@ function App() {
     const split = width >= 900;
 
     return (
-      <TearAway tearing={tearing} style={{ padding: split ? 20 : bodyPad, paddingTop: 20, maxWidth: split ? undefined : 760, alignSelf: 'center', width: '100%' }}>
-        <ComandaHeader number={null} meta={meta} title={title} subtitle={subtitle} stamp={stamp} stampColor={stampColor}>
+      <TearAway tearing={tearing} style={{ padding: split ? 20 : bodyPad, paddingTop: 12, maxWidth: split ? undefined : 760, alignSelf: 'center', width: '100%' }}>
+        <ComandaHeader number={null} meta={meta} title={title} subtitle={subtitle} stamp={stamp} stampColor={stampColor} onBack={!split && catalog.editable ? () => setStep('productos') : null}>
           {isExpressOrder && currentExpressDraft ? <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
             <CButton variant="ghost" onPress={() => setDraftListOpen(true)} accessibilityLabel="Cambiar borrador Express">Cambiar borrador</CButton>
           </View> : null}
@@ -1970,7 +1973,7 @@ function App() {
 
         {cartItems.length || !pedidoActual ? <SectionLabel right={cartCount ? <CNum size={14} color={colors.muted}>{cartCount} {cartCount === 1 ? 'producto' : 'productos'}</CNum> : null}>{pendingSend ? 'Ronda por confirmar' : 'Para enviar a cocina'}</SectionLabel> : null}
         {cartItems.length ? cartItems.map(item => renderOrderItem(item, true)) : pedidoActual ? null : (
-          <View style={{ paddingVertical: 28, borderRadius: 24, backgroundColor: colors.surfaceAlt, alignItems: 'center', gap: 12 }}>
+          <View style={{ paddingVertical: 28, borderRadius: 16, backgroundColor: colors.surfaceAlt, alignItems: 'center', gap: 12 }}>
             <CT size={15} color={colors.muted}>{catalog.editable ? 'Sin productos en esta ronda.' : 'Esta cuenta ya no admite rondas nuevas.'}</CT>
             {catalog.editable && !split ? <CButton variant="primary" icon={Plus} onPress={() => setStep('productos')} style={{ alignSelf: 'center' }}>Elegir productos</CButton> : null}
           </View>
@@ -2009,7 +2012,8 @@ function App() {
 
   // Salón: bandeja «Listo» (rondas listas con «Entregado», demoras y actividad).
   const renderNotifications = () => <WaiterNotifications colors={colors} alerts={serviceAlerts} activity={notificaciones} close={()=>setNotiOpen(false)} openOrder={openPedidoFromNotification} clearActivity={()=>setNotificaciones([])}
-    ready={salonReady} partial={salonPartial} onDeliver={salonEntregar} deliveringId={trayDelivering} now={serviceNow}/>;
+    ready={salonReady} partial={salonPartial} onDeliver={salonEntregar} deliveringId={trayDelivering} now={serviceNow}
+    alertsPrompt={{ visible: alertPermission === 'default', enable: enableAlerts }}/>;
 
   if ((loading && !dataLoaded.current) || !drafts.ready) {
     return (
@@ -2022,7 +2026,7 @@ function App() {
   }
 
   return (
-    <View onLayout={measureViewport} pointerEvents={orderSending ? 'none' : 'auto'} style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', backgroundColor: colors.pageBg, fontFamily: WAITER_FONT }}>
+    <View dataSet={{ mesero: "true" }} onLayout={measureViewport} pointerEvents={orderSending ? 'none' : 'auto'} style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', backgroundColor: colors.pageBg, fontFamily: WAITER_FONT }}>
       {renderTargetPicker()}
       {renderDraftList()}
       {step === 'mesas' ? renderMesas() : null}

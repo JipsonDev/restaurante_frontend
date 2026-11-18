@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Platform, Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import axios from 'axios';
-import { AlertTriangle, Building2, Calculator, Check, CheckCircle2, ChefHat, CircleDollarSign, Database, FileText, ImageIcon, Printer, ReceiptText, Save, Search, Server, Settings2, ShieldCheck, Upload, Wifi } from 'lucide-react-native';
+import { Palette, AlertTriangle, Building2, Calculator, Check, CheckCircle2, ChefHat, CircleDollarSign, Database, FileText, ImageIcon, Printer, ReceiptText, Save, Search, Server, Settings2, ShieldCheck, Upload, Wifi } from 'lucide-react-native';
 import { assetUrl, BASE_URL } from '../context/AuthContext';
 import { useAdmin } from '../context/AdminContext';
 import { useTheme } from '../theme';
@@ -11,16 +11,18 @@ import { Button, Card, PageHeader, Status, Switch as Toggle, Tabs, space, type, 
 import { Animated } from 'react-native';
 import { settingsPayload, ticketPreview } from '../utils/settingsLogic.mjs';
 import Maintenance from '../components/admin/Maintenance';
+import { BrandSettings } from '../components/admin/BrandSettings';
 
 const row = { flexDirection: 'row', alignItems: 'center' };
 const DEFAULTS = {
-  nombre_restaurante: '', razon_social: '', ruc: '', direccion: '', telefono: '', correo: '', logo_url: '',
+  nombre_restaurante: '', razon_social: '', ruc: '', direccion: '', telefono: '', correo: '', logo_url: '', color_marca: '',
   iva_porcentaje: '0', servicio_porcentaje: '0', moneda: 'USD', simbolo_moneda: '$', texto_ticket: '',
   impresora_caja: '', impresora_cocina: '',
   alertas_demora_activas: '1', alerta_espera_minutos: '20', alerta_lista_minutos: '5',
 };
 const SECTIONS = [
   { key: 'negocio', label: 'Negocio', hint: 'Identidad y contacto', icon: Building2 },
+  { key: 'marca', label: 'Marca', hint: 'Logo y color de la app', icon: Palette },
   { key: 'facturacion', label: 'Facturación', hint: 'Impuestos y moneda', icon: Calculator },
   { key: 'ticket', label: 'Comprobante', hint: 'Logo y contenido', icon: ReceiptText },
   { key: 'impresoras', label: 'Impresoras', hint: 'Caja y cocina', icon: Printer },
@@ -154,6 +156,9 @@ export default function SettingsScreen() {
         <View style={{ flexDirection: compact ? 'column' : 'row', gap: 13 }}><MenuField containerStyle={{ flex: 1 }} label="Nombre comercial" value={form.nombre_restaurante} onChangeText={value => change('nombre_restaurante', value)} placeholder="Morena Mia" maxLength={120} /><MenuField containerStyle={{ flex: 1 }} label="Razón social" value={form.razon_social} onChangeText={value => change('razon_social', value)} placeholder="Razón social registrada" maxLength={180} /></View>
         <View style={{ flexDirection: compact ? 'column' : 'row', gap: 13 }}><MenuField containerStyle={{ flex: 1 }} label="RUC / identificación fiscal" value={form.ruc} onChangeText={value => change('ruc', value.replace(/\D/g, '').slice(0, 13))} placeholder="13 dígitos" keyboardType="number-pad" maxLength={13} /><MenuField containerStyle={{ flex: 1 }} label="Teléfono" value={form.telefono} onChangeText={value => change('telefono', value)} placeholder="+593 99 000 0000" keyboardType="phone-pad" maxLength={40} /></View>
         <MenuField label="Dirección fiscal" value={form.direccion} onChangeText={value => change('direccion', value)} placeholder="Calle, número, ciudad" maxLength={240} /><MenuField label="Correo de facturación" value={form.correo} onChangeText={value => change('correo', value)} placeholder="facturacion@restaurante.com" autoCapitalize="none" keyboardType="email-address" maxLength={160} />
+      </SettingsSection>}
+      {section === 'marca' && <SettingsSection compact={compact} title="Marca del restaurante" description="El logo y el color que verán los meseros en su app y los clientes en el menú QR.">
+        <BrandSettings name={form.nombre_restaurante} logo={form.logo_url ? assetUrl(form.logo_url) : null} color={form.color_marca} onColor={value => change('color_marca', value)} onPickLogo={pickLogo} logoBusy={logoBusy} />
       </SettingsSection>}
       {section === 'facturacion' && <SettingsSection compact={compact} title="Facturación y cargos" description="Define cómo calcula el sistema los próximos cobros.">
         <MenuNotice>Los cambios se aplican a pedidos y cobros futuros. Los comprobantes ya emitidos conservan sus valores originales.</MenuNotice>

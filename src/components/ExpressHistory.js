@@ -8,7 +8,7 @@ import OrderTracking from './OrderTracking';
 import { BASE_URL } from '../context/AuthContext';
 import { historyDay, validHistoryDay } from '../utils/expressWorkspace.mjs';
 import { useTheme } from '../theme';
-import { Appear, BottomSheet, Button, Chip, EmptyState, Field, IconButton, Num, Press, Stamp, T, elevate, money, radius, space } from './waiter/comanda';
+import { Appear, BottomSheet, Button, Chip, EmptyState, Field, IconButton, Num, Press, Stamp, T, elevate, money, radius, space } from './waiter/kit';
 
 const parseDay = day => new Date(`${day}T12:00:00`);
 const shiftDay = (day, delta) => { const d = parseDay(day); d.setDate(d.getDate() + delta); return historyDay(d); };
@@ -49,8 +49,8 @@ function HistoryCard({ order, open, onToggle, colors, index }) {
     <View style={[{ borderRadius: radius.xl, backgroundColor: c.surface, borderWidth: 1, borderColor: c.isDark ? c.line : 'rgba(16,24,40,0.04)', overflow: 'hidden' }, elevate(c, 1)]}>
       <Press accessibilityRole="button" accessibilityLabel={`Ver historial Express ${order.id}`} accessibilityState={{ expanded: open }} onPress={onToggle} hapticKind="tap"
         style={{ padding: space.lg, flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-        <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: delivery ? c.skySoft : c.primarySoft, alignItems: 'center', justifyContent: 'center' }}>
-          {delivery ? <Truck size={19} color={c.sky} /> : <ShoppingBag size={19} color={c.primaryText} />}
+        <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+          {delivery ? <Truck size={19} color={c.text} /> : <ShoppingBag size={19} color={c.text} />}
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <T size={16} weight="800" numberOfLines={1}>{order.cliente_nombre || 'Cliente'}</T>

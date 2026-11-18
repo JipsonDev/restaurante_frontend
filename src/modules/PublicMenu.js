@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, TextInput, View, useWindowDimensions } from 'react-native';
 import { MapPin, Phone, Search, UtensilsCrossed, X } from 'lucide-react-native';
 import { BASE_URL } from '../context/AuthContext';
-import { WaiterAppearance, useTheme } from '../theme';
+import { MeseroAppearance, setBrandColor, useTheme } from '../theme';
 import Logo from '../components/Logo';
 import { ProductArt } from '../components/waiter/ProductArt';
 import { Appear, BottomSheet, Button, FONT, Num, Press, T, elevate, radius, space, useComandaFonts } from '../components/waiter/comanda';
@@ -54,6 +54,7 @@ function Menu({ code }) {
       .catch(e => { if (alive) setError(e.message === 'Failed to fetch' ? 'Parece que no hay internet. Revisa tu conexión e intenta de nuevo.' : e.message); });
     return () => { alive = false; };
   }, [code, attempt]);
+  useEffect(() => { if (menu?.negocio) setBrandColor(menu.negocio.color_marca || null); }, [menu?.negocio?.color_marca]);
   useEffect(() => { if (menu?.negocio?.nombre && typeof document !== 'undefined') document.title = `Menú · ${menu.negocio.nombre}`; }, [menu]);
 
   const columns = width >= 900 ? 4 : width >= 600 ? 3 : 2;
@@ -162,7 +163,7 @@ function Menu({ code }) {
 }
 
 export default function PublicMenu({ code }) {
-  return <WaiterAppearance><Menu code={code} /></WaiterAppearance>;
+  return <MeseroAppearance><Menu code={code} /></MeseroAppearance>;
 }
 
 /** Código de mesa si la página se abrió desde un QR («/?menu=5-a1b2c3d4e5»); si no, null. */

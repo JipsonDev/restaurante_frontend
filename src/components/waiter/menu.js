@@ -6,7 +6,7 @@ import { Search, SlidersHorizontal, X, RotateCcw, Flame, ShoppingBag, Bike, Lock
 import { comandaTableMeta, useTheme } from '../../theme';
 import { menuStock } from '../../utils/waiterCatalog.mjs';
 import { normalize } from '../../utils/waiterFavorites.mjs';
-import { T, Num, Label, Press, Button, Chip, LeaderLine, RollingNumber, BottomSheet, EmptyState, TOUCH, FONT, WEB, elevate, haptic, radius, space } from './comanda';
+import { T, Num, Label, Press, Button, Chip, LeaderLine, RollingNumber, BottomSheet, EmptyState, TOUCH, FONT, WEB, elevate, haptic, radius, space } from './kit';
 
 const amount = n => Number(n || 0).toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const price = n => `$${amount(n)}`; // mismo formato que la comanda: $1,80
@@ -96,10 +96,10 @@ export function MenuSearch({ value, onChangeText, placeholder = 'Buscar producto
   const listening = dictation.listening;
   const toggleNumeric = () => { haptic('select'); setNumeric(n => !n); setTimeout(() => input.current?.focus?.(), 30); };
   return <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'center' }}>
-    <View style={[{ flex: 1, minHeight: TOUCH, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 16, paddingRight: 4, borderWidth: 2, borderColor: listening ? c.primary : focus ? c.primary : 'transparent', borderRadius: radius.pill, backgroundColor: focus || listening ? c.surface : c.surfaceAlt },
-      WEB ? { transitionProperty: 'border-color, background-color, box-shadow', transitionDuration: '160ms', boxShadow: focus || listening ? `0 0 0 4px ${c.focus}` : 'none' } : null]}>
+    <View style={[{ flex: 1, minHeight: TOUCH, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 16, paddingRight: 4, borderWidth: 1.5, borderColor: listening ? c.primaryText : focus ? c.primaryText : c.surfaceAlt, borderRadius: radius.md, backgroundColor: focus || listening ? c.surface : c.surfaceAlt },
+      WEB ? { transitionProperty: 'border-color, background-color, box-shadow', transitionDuration: '160ms', boxShadow: 'none' } : null]}>
       <Search size={18} color={c.muted} />
-      <TextInput ref={input} accessibilityLabel={placeholder} value={value} onChangeText={onChangeText} placeholder={listening ? 'Escuchando…' : numeric ? 'N.º del producto' : placeholder} placeholderTextColor={listening ? c.primaryText : c.faint} returnKeyType="search"
+      <TextInput ref={input} accessibilityLabel={placeholder} value={value} onChangeText={onChangeText} placeholder={listening ? 'Escuchando…' : numeric ? 'N.º del producto' : placeholder} placeholderTextColor={listening ? c.primaryText : c.muted} returnKeyType="search"
         keyboardType={numeric ? 'number-pad' : 'default'} inputMode={numeric ? 'numeric' : 'search'}
         onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
         style={{ flex: 1, minWidth: 0, minHeight: TOUCH - 4, fontFamily: FONT, fontSize: 16, color: c.text, ...(WEB ? { outlineStyle: 'none' } : {}) }} />

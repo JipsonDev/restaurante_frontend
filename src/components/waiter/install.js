@@ -5,7 +5,7 @@ import { Image, Platform, View } from 'react-native';
 import { Download, PlusSquare, Share, X } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import { dismissInstall, getInstallState, installDismissed, onInstallChange, promptInstall } from '../../services/pwa';
-import { Appear, BottomSheet, Button, IconButton, Num, T, elevate, haptic, radius, space } from './comanda';
+import { Appear, BottomSheet, Button, IconButton, Num, T, elevate, haptic, radius, space } from './kit';
 
 export function useInstall() {
   const [state, setState] = useState(() => Platform.OS === 'web' ? getInstallState() : { standalone: true, canPrompt: false, ios: false });

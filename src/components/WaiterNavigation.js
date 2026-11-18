@@ -1,13 +1,12 @@
-// Navegación del mesero, dirección «Suave».
-// Arriba: cabecera limpia (logo, conexión, avisos, perfil). Abajo: barra flotante tipo píldora al alcance del pulgar.
-// «Más» abre una hoja con Promos, borradores, actualizar, tema y cerrar sesión.
+// Navegación del mesero (marca blanca).
+// Arriba: marca del local, conexión (solo si hay problema), avisos y perfil. Abajo: barra de pestañas fija.
+// «Más» abre una hoja con lo del día, avisos de cocina y ajustes.
 import React, { useEffect, useState } from 'react';
 import { View } from 'react-native';
-import { Bell, BellRing, BadgePercent, CalendarClock, ChefHat, CloudOff, Download, FileText, Lock, LogOut, Moon, MoreHorizontal, RefreshCw, ShoppingBag, Smartphone, Sun, Users, Vibrate, Volume2 } from 'lucide-react-native';
-import Logo from './Logo';
+import { Bell, BellRing, BadgePercent, CalendarClock, ChefHat, CloudOff, LayoutGrid, UtensilsCrossed, Download, FileText, Lock, LogOut, Moon, MoreHorizontal, RefreshCw, ShoppingBag, Smartphone, Sun, Users, Vibrate, Volume2 } from 'lucide-react-native';
 import { connectionState } from '../utils/waiterSync.mjs';
 import { useTheme } from '../theme';
-import { BottomSheet, ConnectionDot, IconButton, Label, Num, Press, T, TabBar, space } from './waiter/comanda';
+import { BottomSheet, BrandMark, ConnectionDot, IconButton, Label, Num, Press, T, TabBar, space } from './waiter/kit';
 import { useInstallAction } from './waiter/install';
 import { alertSettings, alertWaiter, keepAwakeSupported, saveAlertSettings, subscribeAlertSettings } from '../services/waiterAlerts';
 import { pushStatus, pushSupport, subscribePushStatus, testWebPush } from '../services/webPushClient';
@@ -23,21 +22,24 @@ export function connectionSummary({ connection, lastSyncAt, syncing, syncError }
   return { state: 'reconnecting', label: 'Reconectando…' };
 }
 
-export default function WaiterNavigation({ width, name, unread, notifications, connection, lastSyncAt, syncing, syncError, topInset = 0, setMenuOpen, delayCount }) {
+export default function WaiterNavigation({ width, name, unread, notifications, connection, lastSyncAt, syncing, syncError, topInset = 0, setMenuOpen, delayCount, brand = {}, alertsPending }) {
   const { c } = useTheme();
   const phone = width < 600;
   const conn = connectionSummary({ connection, lastSyncAt, syncing, syncError });
   return <View style={{ backgroundColor: c.bg, paddingTop: topInset }}>
-    <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 56, paddingLeft: phone ? 12 : 20, paddingRight: phone ? 4 : 12, gap: space.sm }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 56, paddingLeft: phone ? 16 : 20, paddingRight: phone ? 8 : 12, gap: space.sm }}>
       <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-        <Logo width={phone ? 92 : 112} dark={c.isDark} />
+        <BrandMark name={brand.name} logo={brand.logo} />
         <ConnectionDot state={conn.state} label={phone && conn.state === 'live' ? null : conn.label} />
       </View>
-      <IconButton icon={Bell} label={unread ? `Avisos, ${unread} pendientes` : 'Avisos'} onPress={notifications} badge={unread || null} />
+      <View>
+        <IconButton icon={Bell} label={unread ? `Avisos, ${unread} pendientes` : alertsPending ? 'Avisos (activa los avisos de plato listo)' : 'Avisos'} onPress={notifications} badge={unread || null} />
+        {!unread && alertsPending ? <View pointerEvents="none" style={{ position: 'absolute', top: 10, right: 10, width: 10, height: 10, borderRadius: 5, backgroundColor: c.red, borderWidth: 2, borderColor: c.bg }} /> : null}
+      </View>
       <Press accessibilityRole="button" accessibilityLabel={`Perfil y más opciones de ${name || 'mesero'}`} onPress={() => setMenuOpen(true)} hapticKind="tap" scaleTo={0.94} sink={0}
-        style={{ width: 48, height: 48, alignItems: 'center', justifyContent: 'center' }}>
-        <View style={{ width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: c.primarySoft }}>
-          <T size={14} weight="800" color={c.primaryText}>{initialsOf(name)}</T>
+        style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
+        <View style={{ width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surfaceAlt }}>
+          <T size={13} weight="700" color={c.text}>{initialsOf(name)}</T>
         </View>
       </Press>
     </View>
@@ -47,9 +49,9 @@ export default function WaiterNavigation({ width, name, unread, notifications, c
 // Pestañas inferiores.
 export function WaiterBottomBar({ step, navigate, cartCount = 0, expressCount = 0, bottomInset = 0, setMenuOpen }) {
   const items = [
-    { key: 'mesas', label: 'Mesas', icon: Users },
-    { key: 'productos', label: 'Menú', icon: ChefHat, badge: cartCount || null },
-    { key: 'express', label: 'Express', icon: ShoppingBag, badge: expressCount || null, badgeTone: 'ink' },
+    { key: 'mesas', label: 'Mesas', icon: LayoutGrid },
+    { key: 'productos', label: 'Menú', icon: UtensilsCrossed, badge: cartCount || null },
+    { key: 'express', label: 'Express', icon: ShoppingBag, badge: expressCount || null },
     { key: 'mas', label: 'Más', icon: MoreHorizontal },
   ];
   return <TabBar items={items} value={step === 'promociones' ? 'mas' : step === 'pedido' ? 'productos' : step} bottomInset={bottomInset} onChange={key => key === 'mas' ? setMenuOpen(true) : navigate(key)} />;

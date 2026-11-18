@@ -1,14 +1,13 @@
-// Salón del mesero (dirección «Suave»): «Atender ahora» primero, una sola fila de filtros de estado
-// (las zonas son títulos de sección, no pestañas) y tarjetas de mesa.
+// Salón del mesero (marca blanca): título, un filtro de una línea, «Atender ahora» y las mesas por zona.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { Search } from 'lucide-react-native';
 import { useTheme } from '../theme';
 import { serviceRounds } from '../utils/serviceTiming.mjs';
-import { Appear, Button, Chip, EmptyState, Num, T, haptic, radius, space, useComandaToast } from './waiter/comanda';
+import { Appear, Button, Chip, EmptyState, Num, T, haptic, radius, space, useComandaToast } from './waiter/kit';
 import { minutesUntil, timeOf } from '../utils/reservationLogic.mjs';
 import { CalendarClock } from 'lucide-react-native';
-import { AlertsBanner, AttentionStrip, SearchToggle, TableTile, minutesSince } from './waiter/salon';
+import { AttentionStrip, SearchToggle, TableTile, minutesSince } from './waiter/salon';
 import { InstallBanner } from './waiter/install';
 
 const FILTERS = [['Todas', 'Todas'], ['Disponibles', 'Libres'], ['Ocupadas', 'Ocupadas'], ['Cuenta', 'Por cobrar'], ['Reservadas', 'Reservadas']];
@@ -22,11 +21,11 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
   }, []);
   const layoutWidth = Math.min(width, measuredWidth ?? width);
   const phone = layoutWidth < 600;
-  const padding = phone ? 12 : layoutWidth >= 1024 ? 28 : 20;
-  const gap = layoutWidth < 600 ? 10 : 12;
+  const padding = phone ? 16 : layoutWidth >= 1024 ? 28 : 20;
+  const gap = layoutWidth < 600 ? 8 : 12;
   const available = Math.max(0, layoutWidth - padding * 2);
   // Celular: 3 columnas (2 si la pantalla es muy estrecha). Tableta y escritorio: tantas como quepan.
-  const minTile = layoutWidth < 600 ? 100 : 140;
+  const minTile = layoutWidth < 600 ? 96 : 140;
   const columns = Math.max(2, Math.min(10, Math.floor((available + gap) / (minTile + gap))));
   const tileWidth = Math.max(0, Math.floor((available - gap * (columns - 1) - 1) / columns));
   const clear = () => { setSearch(''); setFilter('Todas'); setZone('Todas'); };
@@ -80,12 +79,11 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
   }, [attention]);
 
   const summary = `${counts.Disponibles} ${counts.Disponibles === 1 ? 'libre' : 'libres'} de ${counts.Todas} mesas`;
-  return <View onLayout={measure} style={{ minWidth: 0, paddingHorizontal: padding, paddingTop: space.md, paddingBottom: space.x3 }}>
-    {/* Cabecera compacta: resumen + bandeja + búsqueda + densidad + actualizar */}
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, minHeight: 48, marginBottom: phone ? space.sm : space.lg }}>
+  return <View onLayout={measure} style={{ minWidth: 0, paddingHorizontal: padding, paddingTop: space.sm, paddingBottom: space.x3 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 52, marginBottom: space.sm }}>
       {!search ? <View style={{ flex: 1, minWidth: 0 }}>
-        <T size={phone ? 22 : 28} weight="800" accessibilityRole="header">Mesas</T>
-        <T size={13} weight="600" color={c.muted} numberOfLines={1}>{summary}</T>
+        <T size={phone ? 26 : 30} weight="700" accessibilityRole="header">Mesas</T>
+        <T size={14} color={c.muted} numberOfLines={1}>{summary}</T>
       </View> : null}
       <SearchToggle value={search} onChange={setSearch} />
     </View>
@@ -95,25 +93,22 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
       <Button size="sm" variant="primary" onPress={refresh}>Reintentar</Button>
     </View></Appear> : null}
 
-    <InstallBanner />
-    <AlertsBanner visible={!!alertsPrompt?.visible} onEnable={alertsPrompt?.enable} onDismiss={alertsPrompt?.dismiss} />
-
-    <AttentionStrip items={attention} onOpen={it => selectTable(it.mesa)} />
-
-    {/* Filtros de estado: todos a la vista. Si no caben en una línea bajan a la siguiente (nada queda escondido).
-        Los filtros sin mesas se ocultan (salvo el activo). */}
-    <View accessibilityRole="tablist" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginBottom: space.md }}>
+    {/* Filtros de estado en una línea que se desliza; llega al borde para que se note que hay más. */}
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} accessibilityRole="tablist" style={{ flexGrow: 0, marginHorizontal: -padding, marginBottom: space.lg }} contentContainerStyle={{ gap: space.sm, paddingHorizontal: padding }}>
       {FILTERS.filter(([key]) => key === 'Todas' || key === filter || counts[key] > 0).map(([key, label]) =>
         <Chip key={key} selected={filter === key} onPress={() => setFilter(key)} count={counts[key]} accessibilityLabel={`${label}: ${counts[key]}`}>{label}</Chip>)}
-    </View>
+    </ScrollView>
+
+    <InstallBanner />
+    <AttentionStrip items={attention} onOpen={it => selectTable(it.mesa)} />
 
     {!groups.length ? <EmptyState icon={Search} title={counts.Todas ? 'Ninguna mesa con estos filtros' : 'Todavía no hay mesas'}
       description={counts.Todas ? undefined : 'Configura las mesas desde administración.'}
       action={counts.Todas ? <Button onPress={clear}>Limpiar filtros</Button> : null} /> : null}
 
-    {groups.map(group => <View key={group.name} style={{ marginTop: phone ? space.md : space.lg }}>
+    {groups.map((group, gi) => <View key={group.name} style={{ marginTop: gi ? space.xl : 0 }}>
       {groups.length ? <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: space.sm, marginBottom: space.sm }}>
-        <T size={17} weight="800">{group.name}</T><Num size={14} weight="600" color={c.faint}>{group.mesas.length}</Num>
+        <T size={17} weight="700" accessibilityRole="header">{group.name}</T><Num size={15} weight="600" color={c.muted}>{group.mesas.length}</Num>
       </View> : null}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap }}>
         {group.mesas.map(mesa => {
