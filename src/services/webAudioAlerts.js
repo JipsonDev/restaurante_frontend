@@ -64,6 +64,8 @@ function getAudioContext() {
   return audioContext;
 }
 
+export const isWebAudioUnlocked = () => unlocked || Platform.OS !== 'web';
+
 export async function unlockWebAudio() {
   const context = getAudioContext();
   if (!context) return false;

@@ -143,6 +143,8 @@ export function Button({ children, icon: Icon, iconRight: IconRight, variant = '
   const v = {
     primary: { bg: c.primary, fg: c.onPrimary, hover: c.primaryHover, border: c.primary },
     ink: { bg: c.ink, fg: c.onInk, hover: c.isDark ? '#FFFFFF' : '#2C2C31', border: c.ink },
+    // Oscuro que no deslumbra en modo oscuro (cocina en penumbra): grafito con texto blanco.
+    graphite: { bg: c.isDark ? '#3A3A41' : c.ink, fg: '#FFFFFF', hover: c.isDark ? '#45454D' : '#2C2C31', border: 'transparent' },
     outline: { bg: c.surfaceAlt, fg: c.text, hover: c.soft, border: 'transparent' },
     tonal: { bg: c.surfaceAlt, fg: c.text, hover: c.soft, border: c.surfaceAlt },
     ghost: { bg: 'transparent', fg: c.text, hover: c.surfaceAlt, border: 'transparent' },
@@ -442,7 +444,7 @@ function ToastItem({ t, onDone }) {
   }, []);
   const Icon = t.icon;
   const tone = t.tone === 'error' ? '#FF8A80' : t.tone === 'warning' ? '#FBBF24' : t.tone === 'success' ? '#4ADE80' : null;
-  return <Animated.View accessibilityRole="alert" accessibilityLiveRegion="polite" style={[{ opacity: v, transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+  return <Animated.View accessibilityRole="alert" accessibilityLiveRegion="polite" style={[{ opacity: v, transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [RM ? 0 : 16, 0] }) }],
     alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: space.sm + 2, minHeight: 48, paddingLeft: 14, paddingRight: 4, borderRadius: 8,
     backgroundColor: '#1D1D21' }, WEB ? { boxShadow: '0 8px 28px rgba(0,0,0,0.25)' } : { elevation: 12 }]}>
     {Icon ? <Icon size={18} color={tone || '#FFFFFF'} /> : tone ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: tone }} /> : null}
@@ -535,8 +537,9 @@ export function SwipeRow({ children, direction = 'left', onSwipe, label, icon: I
         Animated.spring(x, { toValue: sign * (width.current + 40), velocity: g.vx, speed: 20, bounciness: 0, useNativeDriver: ND, restDisplacementThreshold: 2, restSpeedThreshold: 2 })
           .start(async () => {
             // Si la acción falla, la fila vuelve; si sale bien, desaparece cuando lleguen los datos (sin volver a asomarse).
-            try { await onSwipe?.(); } catch { Animated.timing(x, { toValue: 0, duration: 200, easing: EASE, useNativeDriver: ND }).start(); }
-            finally { busy.current = false; }
+            let ok; try { ok = await onSwipe?.(); } catch { ok = false; }
+            if (ok === false) Animated.timing(x, { toValue: 0, duration: 200, easing: EASE, useNativeDriver: ND }).start();
+            busy.current = false;
           });
       } else {
         Animated.spring(x, { toValue: 0, velocity: g.vx, speed: 26, bounciness: 0, useNativeDriver: ND }).start();
@@ -608,18 +611,19 @@ export function Appear({ children, trigger, delay = 0, style, offset = 8 }) {
 }
 
 // Marca del local en la cabecera: su logo; sin logo, iniciales en su color y el nombre.
-export function BrandMark({ name, logo, height = 28 }) {
+export function BrandMark({ name, logo, height = 28, compact = false }) {
   const { c } = useTheme();
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [logo]);
   const words = String(name || '').trim().split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w) && !/^(de|del|la|el|y|&)$/i.test(w));
   const initials = (words.length >= 2 ? words[0][0] + words[1][0] : (words[0] || '?').slice(0, 2)).toUpperCase();
   if (logo && !failed) return <Image source={{ uri: logo }} onError={() => setFailed(true)} accessibilityLabel={name || 'Logo'} resizeMode="contain" style={{ height, width: height * 4, maxWidth: 140 }} />;
+  if (!name) return null; // sin nombre y sin logo válido: no se inventa una marca
   return <View accessibilityLabel={name} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 0, flexShrink: 1 }}>
     <View style={{ width: height + 4, height: height + 4, borderRadius: 9, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' }}>
       <T size={13} weight="800" color={c.onPrimary}>{initials}</T>
     </View>
-    <T size={16} weight="700" numberOfLines={1} style={{ flexShrink: 1 }}>{name || 'Restaurante'}</T>
+    {compact ? null : <T size={16} weight="700" numberOfLines={1} style={{ flexShrink: 1 }}>{name || 'Restaurante'}</T>}
   </View>;
 }
 
