@@ -377,7 +377,8 @@ function Kitchen() {
   </ScrollView>;
 
   // ── Pantalla ─────────────────────────────────────────────────────────────
-  const conn = realtime === 'connected' && !loadError ? { state: 'live', label: 'En vivo' } : loadError || realtime === 'error' ? { state: 'offline', label: 'Sin conexión' } : { state: 'reconnecting', label: 'Reconectando…' };
+  // El encabezado refleja el socket; un fallo puntual al actualizar se muestra aparte (franja) y se reintenta solo.
+  const conn = realtime === 'connected' ? { state: 'live', label: 'En vivo' } : realtime === 'error' || realtime === 'disconnected' ? { state: 'offline', label: 'Sin conexión' } : { state: 'reconnecting', label: 'Reconectando…' };
   const header = <View style={{ paddingTop: TOP_INSET, backgroundColor: c.bg }}>
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 64, paddingHorizontal: pad }}>
       {/* En celular no hay espacio: solo el logo (si hay). En tablet, logo o iniciales + nombre. */}
