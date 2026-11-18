@@ -32,6 +32,14 @@ const WHITE = [255, 255, 255], BLACK = [0, 0, 0], INK = [20, 22, 26];
  *  primary: relleno de botones · onPrimary: texto sobre el relleno · primaryText: la marca como texto
  *  primarySoft: fondo suave · primaryPressed/Hover · focus.
  */
+function isAlarmHue([r, g, b]) {
+  const R = r / 255, G = g / 255, B = b / 255; const max = Math.max(R, G, B), min = Math.min(R, G, B), d = max - min;
+  if (!d) return false;
+  const l = (max + min) / 2; const sat = d / (1 - Math.abs(2 * l - 1));
+  let h = max === R ? ((G - B) / d) % 6 : max === G ? (B - R) / d + 2 : (R - G) / d + 4; h = (h * 60 + 360) % 360;
+  return sat > 0.45 && (h <= 45 || h >= 340);
+}
+
 export function brandTones(hex, { dark = false, bg = dark ? [14, 15, 18] : WHITE, surface = dark ? [25, 26, 31] : WHITE } = {}) {
   const base = parseHex(hex) || parseHex(PRODUCT_BRAND);
   // Relleno: en modo oscuro un color muy oscuro se perdería contra el fondo; se aclara lo justo.
@@ -52,6 +60,8 @@ export function brandTones(hex, { dark = false, bg = dark ? [14, 15, 18] : WHITE
     primaryPressed: toHex(mix(fill, pressedTowards, 0.16)),
     focus: `rgba(${fill.map(Math.round).join(',')},${dark ? 0.55 : 0.4})`,
     brandIsLight: onPrimary !== WHITE,
+    // Marca rojiza/naranja/ámbar: se confundiría con los colores de urgencia (demora, alergia).
+    brandIsAlarm: isAlarmHue(base),
   };
 }
 
