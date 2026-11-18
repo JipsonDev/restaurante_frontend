@@ -100,7 +100,6 @@ export default function WaiterFloor({ width, groups, counts, search, setSearch, 
     </ScrollView>
 
     <InstallBanner />
-    <AttentionStrip items={attention} onOpen={it => selectTable(it.mesa)} />
 
     {!groups.length ? <EmptyState icon={Search} title={counts.Todas ? 'Ninguna mesa con estos filtros' : 'Todavía no hay mesas'}
       description={counts.Todas ? undefined : 'Configura las mesas desde administración.'}

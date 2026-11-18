@@ -46,7 +46,7 @@ function HistoryCard({ order, open, onToggle, colors, index }) {
   const items = (order.items || []).reduce((n, it) => n + Number(it.cantidad || 0), 0);
   const closed = order.cerrado_at && !Number.isNaN(new Date(order.cerrado_at).getTime()) ? new Date(order.cerrado_at) : null;
   return <Appear delay={Math.min(index, 8) * 30}>
-    <View style={[{ borderRadius: radius.xl, backgroundColor: c.surface, borderWidth: 1, borderColor: c.isDark ? c.line : 'rgba(16,24,40,0.04)', overflow: 'hidden' }, elevate(c, 1)]}>
+    <View style={{ borderRadius: radius.lg, backgroundColor: c.surfaceAlt, overflow: 'hidden' }}>
       <Press accessibilityRole="button" accessibilityLabel={`Ver historial Express ${order.id}`} accessibilityState={{ expanded: open }} onPress={onToggle} hapticKind="tap"
         style={{ padding: space.lg, flexDirection: 'row', alignItems: 'center', gap: space.md }}>
         <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
@@ -99,10 +99,10 @@ export default function ExpressHistory({ colors }) {
   const total = data.items.reduce((s, o) => s + Number(o.total || 0), 0);
   return <View style={{ gap: space.md }}>
     {/* Selector de día: ‹ [Hoy · Lun 16 nov ▾] › */}
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, padding: 4, borderRadius: radius.pill, backgroundColor: c.surfaceAlt }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, padding: 4, borderRadius: radius.md, backgroundColor: c.surfaceAlt }}>
       <IconButton icon={ChevronLeft} label="Día anterior" onPress={() => go(shiftDay(date, -1))} size={44} />
       <Press accessibilityRole="button" accessibilityLabel={`Día: ${readableDay(date, today)}. Elegir otro día`} onPress={() => setPicker(true)} hapticKind="tap"
-        style={[{ flex: 1, minHeight: 44, borderRadius: radius.pill, backgroundColor: c.surface, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12 }, elevate(c, 1)]}>
+        style={[{ flex: 1, minHeight: 44, borderRadius: radius.md, backgroundColor: c.surface, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12 }, elevate(c, 1)]}>
         <CalendarDays size={17} color={c.primaryText} />
         <T size={15} weight="800" numberOfLines={1}>{readableDay(date, today)}</T>
         <ChevronDown size={16} color={c.muted} />

@@ -29,7 +29,7 @@ export const MenuRow = memo(function MenuRow({ producto, qty = 0, showCode = fal
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
         <T size={16} weight={qty ? '800' : '700'} numberOfLines={2}>{showCode ? <T size={13} weight="800" color={c.primaryText}>N.º {producto.id}  </T> : null}{producto.nombre}</T>
         {(isPromo || note || producto.descripcion) ? <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-          {isPromo ? <View style={{ paddingHorizontal: 8, borderRadius: radius.pill, backgroundColor: c.primary }}><T size={11} weight="800" color={c.onPrimary}>Promo</T></View> : null}
+          {isPromo ? <View style={{ paddingHorizontal: 8, borderRadius: radius.md, backgroundColor: c.primary }}><T size={11} weight="800" color={c.onPrimary}>Promo</T></View> : null}
           {note ? <T size={13} weight="700" color={!available || limit ? c.red : c.amber}>{note}</T> : null}
           {producto.descripcion && !note ? <T size={13} color={c.muted} numberOfLines={1} style={{ flex: 1 }}>{producto.descripcion}</T> : null}
         </View> : null}
@@ -38,15 +38,15 @@ export const MenuRow = memo(function MenuRow({ producto, qty = 0, showCode = fal
       {locked ? <LockKeyhole size={18} color={c.muted} /> : null}
     </Press>
     {onCustomize && canAdd && !off ? <Press accessibilityRole="button" accessibilityLabel={`Personalizar ${producto.nombre}`} onPress={custom} hapticKind="tap"
-      scaleTo={0.88} hoverStyle={{ backgroundColor: c.soft }} style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' }}><PencilLine size={18} color={c.muted} /></Press> : null}
-    {locked || off ? null : qty > 0 && canAdd ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, padding: 3, borderRadius: radius.pill, backgroundColor: c.surface }}>
+      scaleTo={0.88} hoverStyle={{ backgroundColor: c.soft }} style={{ width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><PencilLine size={18} color={c.muted} /></Press> : null}
+    {locked || off ? null : qty > 0 && canAdd ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, padding: 3, borderRadius: radius.md, backgroundColor: c.surface }}>
       <Press accessibilityRole="button" accessibilityLabel={`Quitar uno de ${producto.nombre}`} onPress={() => onDecrement(producto, isPromo)} hapticKind="select" scaleTo={0.85}
-        style={[{ width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surface }, elevate(c, 1)]}><Minus size={18} strokeWidth={2.6} color={c.text} /></Press>
+        style={[{ width: 38, height: 38, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surface }, elevate(c, 1)]}><Minus size={18} strokeWidth={2.6} color={c.text} /></Press>
       <View style={{ minWidth: 26, alignItems: 'center' }}><RollingNumber value={qty} size={16} weight="800" /></View>
       <Press accessibilityRole="button" accessibilityLabel={`Añadir otro ${producto.nombre}`} onPress={add} hapticKind="tap" scaleTo={0.85}
-        style={{ width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary }}><Plus size={18} strokeWidth={2.6} color={c.onPrimary} /></Press>
+        style={{ width: 38, height: 38, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary }}><Plus size={18} strokeWidth={2.6} color={c.onPrimary} /></Press>
     </View> : <Press accessibilityRole="button" accessibilityLabel={`Añadir ${producto.nombre}`} onPress={add} hapticKind="tap" scaleTo={0.85}
-      style={[{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary }, WEB && !c.isDark ? { boxShadow: `0 4px 12px ${c.primary}45` } : null]}>
+      style={[{ width: 44, height: 44, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary }, WEB && !c.isDark ? { boxShadow: `0 4px 12px ${c.primary}45` } : null]}>
       <Plus size={22} strokeWidth={2.6} color={c.onPrimary} />
     </Press>}
   </View>;
@@ -103,19 +103,19 @@ export function MenuSearch({ value, onChangeText, placeholder = 'Buscar producto
         keyboardType={numeric ? 'number-pad' : 'default'} inputMode={numeric ? 'numeric' : 'search'}
         onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
         style={{ flex: 1, minWidth: 0, minHeight: TOUCH - 4, fontFamily: FONT, fontSize: 16, color: c.text, ...(WEB ? { outlineStyle: 'none' } : {}) }} />
-      {value ? <Press accessibilityRole="button" accessibilityLabel="Borrar búsqueda" onPress={() => onChangeText('')} scaleTo={0.85} style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' }}><X size={18} color={c.muted} /></Press> : null}
+      {value ? <Press accessibilityRole="button" accessibilityLabel="Borrar búsqueda" onPress={() => onChangeText('')} scaleTo={0.85} style={{ width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><X size={18} color={c.muted} /></Press> : null}
       {numbers ? <Press accessibilityRole="button" accessibilityLabel={numeric ? 'Buscar con letras' : 'Buscar por número'} accessibilityState={{ selected: numeric }} onPress={toggleNumeric} scaleTo={0.85}
-        style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: numeric ? c.ink : 'transparent' }}>
+        style={{ width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: numeric ? c.ink : 'transparent' }}>
         {numeric ? <Type size={17} color={c.onInk} /> : <Hash size={17} color={c.muted} />}
       </Press> : null}
       {voice && dictation.supported ? <Press accessibilityRole="button" accessibilityLabel={listening ? 'Detener dictado' : 'Buscar por voz'} accessibilityState={{ selected: listening }} onPress={dictation.toggle} scaleTo={0.85}
-        style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: listening ? c.primary : 'transparent' }}>
+        style={{ width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: listening ? c.primary : 'transparent' }}>
         <ListeningRing active={listening} color={c.primary} />
         <Mic size={18} color={listening ? c.onPrimary : c.muted} />
       </Press> : null}
     </View>
     {onFilters ? <Press accessibilityRole="button" accessibilityLabel={filtersActive ? 'Filtros, activos' : 'Filtros'} onPress={onFilters} hapticKind="tap" scaleTo={0.94}
-      style={{ width: TOUCH, height: TOUCH, borderRadius: radius.pill, backgroundColor: filtersActive ? c.ink : c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+      style={{ width: TOUCH, height: TOUCH, borderRadius: radius.md, backgroundColor: filtersActive ? c.ink : c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
       <SlidersHorizontal size={19} color={filtersActive ? c.onInk : c.text} />
     </Press> : null}
   </View>;
@@ -152,8 +152,8 @@ export function QuickStrip({ favorites = [], counts = {}, canAdd, locked, onAdd,
   // Una sola tira: «↻ Repetir ronda · $110» y después lo más pedido hoy (🔥).
   return <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ marginHorizontal: -space.lg, flexGrow: 0 }} contentContainerStyle={{ gap: 8, paddingHorizontal: space.lg, paddingVertical: 2, alignItems: 'center' }}>
     {repeat ? <Press accessibilityRole="button" accessibilityLabel={`Repetir ronda anterior: ${repeat.summary}, ${price(repeat.total)}`} onPress={repeat.onPress} disabled={locked} hapticKind="medium" scaleTo={0.95}
-      style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 6, paddingRight: 14, borderRadius: radius.pill, backgroundColor: c.ink, opacity: locked ? 0.5 : 1 }}>
-      <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.16)', alignItems: 'center', justifyContent: 'center' }}><RotateCcw size={16} color={c.onInk} /></View>
+      style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 6, paddingRight: 14, borderRadius: radius.md, backgroundColor: c.ink, opacity: locked ? 0.5 : 1 }}>
+      <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.16)', alignItems: 'center', justifyContent: 'center' }}><RotateCcw size={16} color={c.onInk} /></View>
       <T size={14} weight="800" color={c.onInk}>Repetir ronda</T>
       <Num size={13} weight="700" color={c.onInk} style={{ opacity: 0.75 }}>{price(repeat.total)}</Num>
     </Press> : null}
@@ -163,7 +163,7 @@ export function QuickStrip({ favorites = [], counts = {}, canAdd, locked, onAdd,
       const out = menuStock(p) <= 0 || locked;
       return <Press key={p.id} accessibilityRole="button" accessibilityLabel={`Lo más pedido: añadir ${p.nombre}${qty ? `, ${qty} en la ronda` : ''}`} disabled={out}
         onPress={() => canAdd ? onAdd(p, false) : chooseTarget()} hapticKind="tap" scaleTo={0.95}
-        style={{ minHeight: 44, maxWidth: 220, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, borderRadius: radius.pill,
+        style={{ minHeight: 44, maxWidth: 220, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, borderRadius: radius.md,
           backgroundColor: qty ? c.primarySoft : c.surfaceAlt, opacity: out ? 0.45 : 1 }}>
         <T size={14} weight="700" numberOfLines={1} style={{ flexShrink: 1 }}>{p.nombre}</T>
         {qty ? <View style={{ minWidth: 22, height: 22, borderRadius: 11, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 }}><RollingNumber value={qty} size={12} color={c.onPrimary} /></View>

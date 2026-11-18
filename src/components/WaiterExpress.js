@@ -30,24 +30,19 @@ function ExpressRow({ order, onOpen, now, index }) {
   return <Appear delay={Math.min(index, 8) * 30}>
     <Press accessibilityRole="button" accessibilityLabel={`Abrir pedido ${order.id} de ${order.cliente_nombre || 'cliente'}, ${status.text}, ${money(order.total)}, ${serviceSummaryLabel(order, now)}`}
       onPress={() => onOpen(order)} hapticKind="tap"
-      style={{ padding: space.md, gap: space.md, backgroundColor: c.surface, borderWidth: state.canDeliver ? 2 : 1, borderColor: state.canDeliver ? c.greenDot : c.line, borderRadius: radius.lg }} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
+      style={{ padding: space.md, gap: space.md, backgroundColor: state.canDeliver ? c.greenSoft : c.surfaceAlt, borderRadius: radius.lg }} hoverStyle={{ backgroundColor: c.soft }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-        <View style={{ width: 48, height: 48, borderRadius: 12, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+        <View style={{ width: 48, height: 48, borderRadius: radius.md, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center' }}>
           {delivery ? <Truck size={22} color={c.text} /> : <ShoppingBag size={22} color={c.text} />}
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <T size={17} weight="800" numberOfLines={1}>{order.cliente_nombre || 'Cliente sin nombre'}</T>
-          <T size={14} color={c.muted} numberOfLines={1}>{delivery ? 'Delivery' : 'Para llevar'} · {items} {items === 1 ? 'producto' : 'productos'}{detail ? ` · ${detail}` : ''}</T>
+          <T size={16} weight="700" numberOfLines={1}>{order.cliente_nombre || 'Cliente sin nombre'}</T>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+            <StatusIcon size={14} color={status.color} strokeWidth={2.4} />
+            <T size={14} weight="600" color={status.color} numberOfLines={1}>{status.text}</T>
+          </View>
         </View>
-        <Num size={18} weight="800">{money(order.total)}</Num>
-      </View>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, height: 28, paddingHorizontal: 10, borderRadius: 8, backgroundColor: status.soft }}>
-          <StatusIcon size={15} color={status.color} strokeWidth={2.4} />
-          <T size={14} weight="800" color={status.color}>{status.text}</T>
-        </View>
-        <View style={{ flex: 1 }} />
-        <T size={13} weight="600" color={c.muted}>{serviceSummaryLabel(order, now)}</T>
+        <Num size={17} weight="700">{money(order.total)}</Num>
       </View>
     </Press>
   </Appear>;

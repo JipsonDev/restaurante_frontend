@@ -38,7 +38,7 @@ export default function WaiterNavigation({ width, name, unread, notifications, c
       </View>
       <Press accessibilityRole="button" accessibilityLabel={`Perfil y más opciones de ${name || 'mesero'}`} onPress={() => setMenuOpen(true)} hapticKind="tap" scaleTo={0.94} sink={0}
         style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
-        <View style={{ width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surfaceAlt }}>
+        <View style={{ width: 34, height: 34, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surfaceAlt }}>
           <T size={13} weight="700" color={c.text}>{initialsOf(name)}</T>
         </View>
       </Press>
@@ -95,16 +95,16 @@ export function WaiterMoreSheet({ open, onClose, name, navigate, dark, toggleThe
     : support === 'unsupported' ? { icon: Lock, tone: c.muted, title: 'Con el teléfono bloqueado: no disponible', detail: 'Este navegador no lo permite. Usa Chrome en Android o instala la app en iPhone.' }
     : null;
   const row = (Icon, label, detail, onPress, tone, right) => <Press key={label} accessibilityRole="button" accessibilityLabel={label} onPress={() => { onClose(); onPress(); }} hapticKind="tap"
-    style={{ minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.sm, borderRadius: 18 }} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
-    <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: tone === c.red ? c.redSoft : tone === c.amber ? c.amberSoft : c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><Icon size={20} color={tone || c.text} /></View>
+    style={{ minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.sm, borderRadius: 8 }} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
+    <View style={{ width: 42, height: 42, borderRadius: 8, backgroundColor: tone === c.red ? c.redSoft : tone === c.amber ? c.amberSoft : c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><Icon size={20} color={tone || c.text} /></View>
     <View style={{ flex: 1, minWidth: 0 }}>
       <T size={17} weight="600" color={tone === c.red ? c.red : c.text}>{label}</T>
       {detail ? <T size={14} color={c.muted} numberOfLines={2}>{detail}</T> : null}
     </View>
-    {right != null ? <View style={{ minWidth: 28, height: 28, paddingHorizontal: 8, borderRadius: 14, backgroundColor: tone === c.amber ? c.amber : c.ink, alignItems: 'center', justifyContent: 'center' }}><Num size={13} weight="800" color={tone === c.amber ? '#FFFFFF' : c.onInk}>{right}</Num></View> : null}
+    {right != null ? <View style={{ minWidth: 28, height: 28, paddingHorizontal: 8, borderRadius: 8, backgroundColor: tone === c.amber ? c.amber : c.ink, alignItems: 'center', justifyContent: 'center' }}><Num size={13} weight="800" color={tone === c.amber ? '#FFFFFF' : c.onInk}>{right}</Num></View> : null}
   </Press>;
   const setting = (Icon, label, detail, key) => <View key={key} style={{ minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.sm }}>
-    <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><Icon size={20} color={c.text} /></View>
+    <View style={{ width: 42, height: 42, borderRadius: 8, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><Icon size={20} color={c.text} /></View>
     <View style={{ flex: 1, minWidth: 0 }}>
       <T size={17} weight="600">{label}</T>
       {detail ? <T size={14} color={c.muted}>{detail}</T> : null}
@@ -126,14 +126,14 @@ export function WaiterMoreSheet({ open, onClose, name, navigate, dark, toggleThe
       {keepAwakeSupported() ? setting(Smartphone, 'Pantalla siempre encendida', 'El teléfono no se duerme: no te pierdes avisos', 'keepAwake') : null}
       {lockState ? <Press accessibilityRole={lockState.retry ? 'button' : 'text'} disabled={!lockState.retry} onPress={() => { onClose(); enableAlerts(); }} scaleTo={1}
         style={{ minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.sm }}>
-        <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: lockState.tone === c.green ? c.greenSoft : lockState.tone === c.amber ? c.amberSoft : c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><lockState.icon size={20} color={lockState.tone} /></View>
+        <View style={{ width: 42, height: 42, borderRadius: 8, backgroundColor: lockState.tone === c.green ? c.greenSoft : lockState.tone === c.amber ? c.amberSoft : c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><lockState.icon size={20} color={lockState.tone} /></View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <T size={16} weight="600">{lockState.title}</T>
           <T size={14} color={c.muted}>{lockState.detail}</T>
         </View>
       </Press> : null}
       <Press accessibilityRole="button" accessibilityLabel="Probar el aviso" disabled={testing} onPress={runTest} hapticKind={null}
-        style={{ alignSelf: 'flex-start', minHeight: 44, paddingHorizontal: space.lg, marginLeft: 62, borderRadius: 22, backgroundColor: c.surfaceAlt, justifyContent: 'center' }}>
+        style={{ alignSelf: 'flex-start', minHeight: 44, paddingHorizontal: space.lg, marginLeft: 62, borderRadius: 8, backgroundColor: c.surfaceAlt, justifyContent: 'center' }}>
         <T size={15} weight="700">{testing ? 'Enviando…' : 'Probar el aviso'}</T>
       </Press>
       {testNote ? <T size={14} weight="700" color={c.green} accessibilityLiveRegion="polite" style={{ marginLeft: 62, marginTop: 6 }}>{testNote}</T> : null}

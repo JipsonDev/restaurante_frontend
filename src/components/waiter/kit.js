@@ -44,7 +44,8 @@ export function useComandaFonts() {
 }
 
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, x3: 32 };
-export const radius = { sm: 8, md: 12, lg: 16, xl: 20, sheet: 24, pill: 999 };
+// Esquinas discretas: nada de píldoras ni tarjetas muy redondeadas (se ven genéricas).
+export const radius = { sm: 6, md: 8, lg: 10, xl: 12, sheet: 16, pill: 999 };
 export const TOUCH = 48;
 export const TOUCH_MAIN = 56;
 
@@ -52,7 +53,7 @@ export const TOUCH_MAIN = 56;
 export function elevate(c, level = 1) {
   if (c.isDark) return WEB ? { boxShadow: level > 1 ? '0 8px 28px rgba(0,0,0,0.5)' : 'none' } : { elevation: level * 2 };
   if (WEB) {
-    const s = { 1: '0 1px 2px rgba(15,15,18,0.06)', 2: '0 2px 6px rgba(15,15,18,0.06), 0 8px 24px rgba(15,15,18,0.10)', 3: '0 -4px 12px rgba(15,15,18,0.06), 0 -12px 40px rgba(15,15,18,0.12)' };
+    const s = { 1: 'none', 2: '0 2px 6px rgba(15,15,18,0.06), 0 8px 24px rgba(15,15,18,0.10)', 3: '0 -4px 12px rgba(15,15,18,0.06), 0 -12px 40px rgba(15,15,18,0.12)' };
     return { boxShadow: s[level] || s[1] };
   }
   return { shadowColor: '#0F0F12', shadowOffset: { width: 0, height: level }, shadowOpacity: 0.06 + 0.02 * level, shadowRadius: 4 * level, elevation: 2 * level };
@@ -130,14 +131,14 @@ export function Button({ children, icon: Icon, iconRight: IconRight, variant = '
   const v = {
     primary: { bg: c.primary, fg: c.onPrimary, hover: c.primaryHover, border: c.primary },
     ink: { bg: c.ink, fg: c.onInk, hover: c.isDark ? '#FFFFFF' : '#2C2C31', border: c.ink },
-    outline: { bg: c.surface, fg: c.text, hover: c.surfaceAlt, border: c.lineStrong },
+    outline: { bg: c.surfaceAlt, fg: c.text, hover: c.soft, border: 'transparent' },
     tonal: { bg: c.surfaceAlt, fg: c.text, hover: c.soft, border: c.surfaceAlt },
     ghost: { bg: 'transparent', fg: c.text, hover: c.surfaceAlt, border: 'transparent' },
     danger: { bg: c.redSoft, fg: c.red, hover: c.redSoft, border: c.redSoft },
   }[variant] || { bg: c.surface, fg: c.text, hover: c.surfaceAlt, border: c.lineStrong };
   const off = disabled || loading;
   return <Press accessibilityRole="button" accessibilityLabel={accessibilityLabel} accessibilityState={{ disabled: off, busy: !!loading }} disabled={off} onPress={onPress} hapticKind={hapticKind}
-    style={[{ minHeight: h, paddingHorizontal: size === 'sm' ? 14 : size === 'lg' ? 20 : 16, borderRadius: size === 'sm' ? 10 : radius.md, backgroundColor: v.bg, borderWidth: 1, borderColor: v.border,
+    style={[{ minHeight: h, paddingHorizontal: size === 'sm' ? 14 : size === 'lg' ? 20 : 16, borderRadius: radius.md, backgroundColor: v.bg, borderWidth: 0, borderColor: v.border,
       flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: off && !loading ? 0.4 : 1 },
       full ? { alignSelf: 'stretch' } : { alignSelf: 'flex-start' }, style]}
     hoverStyle={{ backgroundColor: v.hover }}>
@@ -160,7 +161,7 @@ export function CountBadge({ value, style, border }) {
 export function IconButton({ icon: Icon, label, onPress, size = 44, badge, tone, disabled, color, filled }) {
   const { c } = useTheme();
   return <Press accessibilityRole="button" accessibilityLabel={badge ? `${label}, ${badge}` : label} disabled={disabled} onPress={onPress} hapticKind="tap" scaleTo={0.92}
-    style={{ width: size, height: size, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.4 : 1, backgroundColor: filled ? c.surfaceAlt : 'transparent' }} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
+    style={{ width: size, height: size, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.4 : 1, backgroundColor: filled ? c.surfaceAlt : 'transparent' }} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
     <Icon size={22} color={color || (tone === 'danger' ? c.red : c.text)} strokeWidth={2} />
     {badge ? <CountBadge value={badge} border={c.bg} style={{ position: 'absolute', top: 4, right: 2 }} /> : null}
   </Press>;
@@ -170,7 +171,7 @@ export function IconButton({ icon: Icon, label, onPress, size = 44, badge, tone,
 export function Chip({ children, selected, onPress, count, icon: Icon, accessibilityLabel }) {
   const { c } = useTheme();
   return <Press accessibilityRole="button" accessibilityLabel={accessibilityLabel} accessibilityState={{ selected }} onPress={onPress} hapticKind="select" scaleTo={0.95}
-    style={{ minHeight: 40, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: selected ? c.ink : c.surfaceAlt,
+    style={{ minHeight: 40, paddingHorizontal: 14, borderRadius: radius.md, backgroundColor: selected ? c.ink : c.surfaceAlt,
       flexDirection: 'row', alignItems: 'center', gap: 6 }} hoverStyle={selected ? null : { backgroundColor: c.soft }}>
     {Icon ? <Icon size={16} color={selected ? c.onInk : c.text} strokeWidth={2.2} /> : null}
     <T size={15} weight={selected ? '700' : '500'} color={selected ? c.onInk : c.text} numberOfLines={1}>{children}</T>
@@ -211,7 +212,7 @@ export function UnderlineTabs({ items, value, onChange, renderIcon }) {
 // ── Superficies ────────────────────────────────────────────────────────────
 export function Sheet({ children, style, level = 1, ...props }) {
   const { c } = useTheme();
-  return <View {...props} style={[{ backgroundColor: c.surface, borderRadius: radius.lg, borderWidth: 1, borderColor: c.line }, level > 1 ? elevate(c, level) : null, style]}>{children}</View>;
+  return <View {...props} style={[{ backgroundColor: c.surfaceAlt, borderRadius: radius.lg }, level > 1 ? elevate(c, level) : null, style]}>{children}</View>;
 }
 export function Perforation({ style }) {
   const { c } = useTheme();
@@ -301,11 +302,11 @@ export function Tally({ value, onChange, min = 0, max = 99, label = 'Cantidad', 
     const Icon = delta > 0 ? Plus : removable && value <= 1 ? Trash2 : Minus;
     return <Press accessibilityRole="button" accessibilityLabel={delta > 0 ? `Aumentar ${label.toLowerCase()}` : removable && value <= 1 ? `Quitar ${label.toLowerCase()}` : `Disminuir ${label.toLowerCase()}`} disabled={disabled}
       onPress={() => onChange(Math.max(removable ? 0 : min, Math.min(max, value + delta)))} hapticKind="select" scaleTo={0.88}
-      style={{ width: s, height: s, borderRadius: s / 2, alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.3 : 1 }} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
+      style={{ width: s, height: s, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.3 : 1 }} hoverStyle={{ backgroundColor: c.soft }}>
       <Icon size={size === 'sm' ? 16 : 18} color={delta < 0 && removable && value <= 1 ? c.red : c.text} strokeWidth={2.4} />
     </Press>;
   };
-  return <View accessibilityLabel={`${label}: ${value}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 2, padding: 2, borderRadius: radius.pill, borderWidth: 1, borderColor: c.lineStrong, backgroundColor: c.surface, alignSelf: 'flex-start' }}>
+  return <View accessibilityLabel={`${label}: ${value}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 2, padding: 2, borderRadius: radius.md, backgroundColor: c.surfaceAlt, alignSelf: 'flex-start' }}>
     {btn(-1, !removable && value <= min)}
     <View style={{ minWidth: 26, alignItems: 'center' }}><RollingNumber value={value} size={size === 'sm' ? 15 : 17} weight="700" /></View>
     {btn(1, value >= max)}
@@ -387,7 +388,7 @@ function ToastItem({ t, onDone }) {
   const Icon = t.icon;
   const tone = t.tone === 'error' ? '#FF8A80' : t.tone === 'warning' ? '#FBBF24' : t.tone === 'success' ? '#4ADE80' : null;
   return <Animated.View accessibilityRole="alert" accessibilityLiveRegion="polite" style={[{ opacity: v, transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
-    alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: space.sm + 2, minHeight: 48, paddingLeft: 14, paddingRight: 4, borderRadius: 14,
+    alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: space.sm + 2, minHeight: 48, paddingLeft: 14, paddingRight: 4, borderRadius: 8,
     backgroundColor: '#1D1D21' }, WEB ? { boxShadow: '0 8px 28px rgba(0,0,0,0.25)' } : { elevation: 12 }]}>
     {Icon ? <Icon size={18} color={tone || '#FFFFFF'} /> : tone ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: tone }} /> : null}
     <View style={{ flex: 1, minWidth: 0, paddingVertical: 8 }}>

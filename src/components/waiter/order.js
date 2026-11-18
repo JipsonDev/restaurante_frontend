@@ -62,7 +62,7 @@ export function OrderLine({ item, total, detail, image, product, expanded, onTog
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: 6 }}>
             <Tally value={qty} size="sm" removable onChange={n => n <= 0 ? remove() : onQty(n - qty)} label={`Cantidad de ${item.nombre}`} />
             <Press accessibilityRole="button" accessibilityState={{ expanded: !!expanded }} accessibilityLabel={`Notas y extras de ${item.nombre}`} onPress={onToggle} hapticKind="tap"
-              style={{ minHeight: 38, paddingHorizontal: 12, borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: expanded ? c.ink : c.surfaceAlt }}>
+              style={{ minHeight: 38, paddingHorizontal: 12, borderRadius: radius.md, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: expanded ? c.ink : c.surfaceAlt }}>
               <PencilLine size={15} color={expanded ? c.onInk : c.text} />
               <T size={14} weight="600" color={expanded ? c.onInk : c.text}>{expanded ? 'Listo' : 'Notas'}</T>
             </Press>
@@ -81,7 +81,7 @@ export function LineCustomizer({ item, exclusions = [], paid = [], custom = {}, 
   const { c } = useTheme();
   const active = extra => (item.modificadores || []).some(m => m.nombre === extra.nombre);
   const priceOf = extra => Number(extra.precio_extra ?? extra.precio ?? 0);
-  const input = { minHeight: TOUCH, borderWidth: 0, borderRadius: radius.md, backgroundColor: c.surface, color: c.text, paddingHorizontal: space.md, fontSize: 16 };
+  const input = { minHeight: TOUCH, borderRadius: radius.md, backgroundColor: c.surface, color: c.text, paddingHorizontal: space.md, fontSize: 16 };
   return <View style={{ gap: space.md, padding: space.md, backgroundColor: c.surfaceAlt, borderRadius: radius.lg }}>
     <View><Label style={{ marginBottom: 6 }}>Nota para cocina</Label>
       <TextInput value={item.notas || ''} onChangeText={onNote} placeholder="Ej. sin cebolla, poco picante" placeholderTextColor={c.muted} multiline accessibilityLabel={`Notas para ${item.nombre}`} style={[input, { paddingVertical: 10 }]} /></View>
@@ -115,23 +115,31 @@ export function RoundTracker({ estado }) {
   </View>;
 }
 
+// Estado de la ronda en una palabra; solo «Lista» lleva color (es lo único que pide acción).
+export function RoundStatus({ estado }) {
+  const { c } = useTheme();
+  const step = ROUND_STEP[estado] ?? 0;
+  const [text, color] = estado === 'CANCELADO' ? ['Anulada', c.red] : step === 2 ? ['Lista', c.green] : step === 3 ? ['Entregada', c.muted] : step === 1 ? ['En cocina', c.muted] : ['Enviada', c.muted];
+  return <T size={14} weight={step === 2 ? '700' : '500'} color={color}>{text}</T>;
+}
+
 const clockOf = value => { const d = value ? new Date(String(value).replace(' ', 'T')) : null; return d && !Number.isNaN(d.getTime()) ? d.toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : ''; };
 // Ronda ya pedida: hora, seguimiento de cocina y sus platos (se pliega al tocar el encabezado).
 export function PastRound({ round, index, children, action }) {
   const { c } = useTheme();
-  const [open, setOpen] = useState(round.estado !== 'ENTREGADO');
+  const [open, setOpen] = useState(false);
   const items = round.items || [];
   const sum = items.reduce((s, it) => s + (Number(it.subtotal) || (Number(it.precio) || 0) * (Number(it.cantidad) || 0)), 0);
   const time = clockOf(round.created_at);
-  return <View style={{ borderRadius: radius.lg, borderWidth: 1, borderColor: c.line, backgroundColor: c.surface, paddingHorizontal: space.lg, marginBottom: space.sm }}>
+  return <View style={{ borderTopWidth: index > 1 ? 1 : 0, borderTopColor: c.line, marginBottom: space.xs }}>
     <Press accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={`Ronda ${index}${time ? `, ${time}` : ''}`} onPress={() => setOpen(!open)} scaleTo={0.99}
       style={{ paddingTop: space.md, paddingBottom: open ? space.sm : space.md, gap: space.sm }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-        <T size={16} weight="700" style={{ flex: 1 }} numberOfLines={1}>Ronda {index}{time ? <T size={14} color={c.muted}>{`  ·  ${time}`}</T> : null}{round.estado_cobro === 'PAGADO' ? <T size={14} color={c.green} weight="600">{'  ·  pagada'}</T> : null}</T>
+        <T size={16} weight="600" style={{ flex: 1 }} numberOfLines={1}>Ronda {index}{time ? <T size={14} color={c.muted}>{`  ·  ${time}`}</T> : null}</T>
+        <RoundStatus estado={round.estado} />
         {sum ? <Num size={15} weight="600">{money(sum)}</Num> : null}
         <ChevronDown size={18} color={c.muted} style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }} />
       </View>
-      <RoundTracker estado={round.estado} />
     </Press>
     {open ? <View style={{ paddingBottom: space.md, gap: 2 }}>
       {items.map((it, i) => <View key={`${it.id || i}`} style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: 5 }}>

@@ -279,6 +279,7 @@ function App() {
   }), [palette]);
 
   const [step, setStep] = useState('mesas');
+  const stepRef = useRef(step); stepRef.current = step;
   const [noteOpen, setNoteOpen] = useState(false); // nota general plegada hasta que se necesite
   const serviceNow = useServiceClock(['mesas', 'express', 'pedido'].includes(step));
   const [mesas, setMesas] = useState([]);
@@ -1513,7 +1514,7 @@ function App() {
                   return <TouchableOpacity key={item.splitKey} accessibilityRole="button" accessibilityState={{ selected: mine }} accessibilityLabel={`${item.nombre}, comensal ${assignedTo}`}
                     onPress={() => setItemAssignments(prev => ({ ...prev, [item.splitKey]: activeGuest }))}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52, borderBottomWidth: 1, borderColor: colors.line }}>
-                    <View style={{ minWidth: 38, height: 30, paddingHorizontal: 6, borderRadius: 15, backgroundColor: mine ? colors.primary : colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+                    <View style={{ minWidth: 38, height: 30, paddingHorizontal: 6, borderRadius: 8, backgroundColor: mine ? colors.primary : colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
                       <CNum size={13} weight="800" color={mine ? colors.onPrimary : colors.text}>C{assignedTo}</CNum>
                     </View>
                     <View style={{ flex: 1 }}><CLeaderLine left={<CT size={16} weight={mine ? '600' : '400'} numberOfLines={1}>{item.nombre}</CT>} right={<CNum size={15}>{cMoney(item.unitPrice)}</CNum>} /></View>
@@ -1570,7 +1571,7 @@ function App() {
     <View style={{ gap: 8, marginBottom: 12 }}>
       {loadError ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Reintentar carga del catálogo" onPress={loadData} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: colors.danger, fontSize: 14, fontWeight: '600' }}>No se pudo cargar el catálogo. Toca para reintentar.</Text></TouchableOpacity> : null}
       <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Destino: ${catalog.label}. ${catalog.editable ? 'Cambiar' : 'Elegir destino'}`} onPress={() => setTargetOpen(true)}
-        style={{ minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, borderRadius: 24, backgroundColor: catalog.editable ? colors.primarySoft : colors.surfaceAlt }}>
+        style={{ minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, borderRadius: 8, backgroundColor: catalog.editable ? colors.primarySoft : colors.surfaceAlt }}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '600' }}>{catalog.editable ? 'Pidiendo para' : 'Sin destino'}</Text>
           <Text numberOfLines={1} style={{ color: colors.ink, fontSize: 18, fontWeight: '800' }}>{isExpressOrder && !selectedExpressPedidoId ? `${pickupTypeLabel(pickupType)} · borrador` : catalog.label}</Text>
@@ -1625,7 +1626,7 @@ function App() {
         const waiting = !!drafts.pending[key];
         const count = (carritos[key] || []).reduce((n, it) => n + Number(it.cantidad || 0), 0);
         return <TouchableOpacity key={key} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={`Continuar ${draftLabel(key)}`} onPress={() => resumeDraft(key)}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 20, backgroundColor: colors.surfaceAlt || colors.elevated, borderWidth: waiting ? 2 : 0, borderColor: colors.warning }}>
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 8, backgroundColor: colors.surfaceAlt || colors.elevated, borderWidth: waiting ? 2 : 0, borderColor: colors.warning }}>
           <View style={{ flex: 1, minWidth: 0 }}>
             <CT size={17} weight="800" numberOfLines={1}>{draftLabel(key)}</CT>
             <CT size={14} color={colors.muted}>{waiting ? 'Sin enviar a cocina · se reintenta sola' : `${count} ${count === 1 ? 'producto' : 'productos'} sin enviar`}</CT>
@@ -1743,7 +1744,8 @@ function App() {
     const where = first.pedido.mesa_id ? `Mesa ${first.pedido.mesa_numero || first.pedido.mesa_id}` : `Pedido #${first.pedido.id}`;
     const title = due.length === 1 ? `${where}: lista hace ${first.minutes} min` : `${due.length} rondas listas esperando`;
     alertWaiter('ready', { title, body: 'Sigue en cocina. Llévala a la mesa.', tag: 'recordatorio-listo' });
-    toast.show(title, { tone: 'warning', detail: 'Sigue en cocina sin entregar.', haptic: false, duration: 6000, action: { label: 'Ver', onPress: () => setNotiOpen(true) } });
+    // En Mesas la tarjeta verde ya lo dice: solo suena. En otras pantallas, un aviso breve.
+    if (stepRef.current !== 'mesas') toast.show(title, { tone: 'warning', haptic: false, duration: 5000, action: { label: 'Ver', onPress: () => setNotiOpen(true) } });
   }, [salonReady]);
 
   // Reservas: aviso cuando faltan 15 minutos o menos para que lleguen.
@@ -1973,7 +1975,7 @@ function App() {
 
         {cartItems.length || !pedidoActual ? <SectionLabel right={cartCount ? <CNum size={14} color={colors.muted}>{cartCount} {cartCount === 1 ? 'producto' : 'productos'}</CNum> : null}>{pendingSend ? 'Ronda por confirmar' : 'Para enviar a cocina'}</SectionLabel> : null}
         {cartItems.length ? cartItems.map(item => renderOrderItem(item, true)) : pedidoActual ? null : (
-          <View style={{ paddingVertical: 28, borderRadius: 16, backgroundColor: colors.surfaceAlt, alignItems: 'center', gap: 12 }}>
+          <View style={{ paddingVertical: 28, borderRadius: 8, backgroundColor: colors.surfaceAlt, alignItems: 'center', gap: 12 }}>
             <CT size={15} color={colors.muted}>{catalog.editable ? 'Sin productos en esta ronda.' : 'Esta cuenta ya no admite rondas nuevas.'}</CT>
             {catalog.editable && !split ? <CButton variant="primary" icon={Plus} onPress={() => setStep('productos')} style={{ alignSelf: 'center' }}>Elegir productos</CButton> : null}
           </View>
@@ -1987,9 +1989,7 @@ function App() {
 
         <TotalsBlock
           rows={[
-            ...(showingCart ? [[`Ronda nueva`, subtotal]] : []),
             ...(service > 0 ? [[showingCart ? `Servicio ${servicePercent}%` : 'Servicio incluido', service]] : []),
-            ...(showingCart && pedidoActual ? [['Ya en la cuenta', storedTotal]] : []),
           ]}
           grand={mesaDisplayTotal} grandLabel={isExpressOrder ? 'Total del pedido' : 'Total de la mesa'} />
 

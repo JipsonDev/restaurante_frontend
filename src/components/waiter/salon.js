@@ -2,7 +2,8 @@
 // Casillas de mesa con un solo estado en colores fijos: Lista (verde lleno) y Por cobrar (ámbar lleno) resaltan;
 // el resto es neutro con el estado en texto e icono. Bandeja «Listo», acciones rápidas y transferir.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, ScrollView, TextInput, View } from 'react-native';
+import { Animated, Platform, ScrollView, TextInput, View } from 'react-native';
+const WEB_RING = Platform.OS === 'web';
 import axios from 'axios';
 import { ArrowRightLeft, BellRing, CalendarClock, ChefHat, CheckCheck, Clock3, CloudOff, Lock, Phone, Receipt, Search, Users, UserCheck, Utensils, X } from 'lucide-react-native';
 import { comandaTableMeta, meseroTableTone, useTheme } from '../../theme';
@@ -84,7 +85,7 @@ export function TableTile({ mesa, state, order, width, now, selected, ready, ale
   const cooking = rounds.some(r => ['PENDIENTE', 'PREPARANDO'].includes(r.estado));
   // Un solo estado por mesa, del más urgente al más tranquilo. Sin enviar manda sobre todo: cocina aún no la ve.
   const [kind, Icon, text] = queued ? ['queued', CloudOff, 'Sin enviar']
-    : ready ? ['ready', CheckCheck, ready > 1 ? `${ready} rondas listas` : 'Lista para llevar']
+    : ready ? ['ready', CheckCheck, ready > 1 ? `${ready} listas` : 'Lista']
     : state === 'Cuenta' ? ['bill', Receipt, 'Por cobrar']
     : alert ? ['late', Clock3, `Espera ${alert.minutos} min`]
     : cooking ? ['kitchen', ChefHat, 'En cocina']
@@ -92,20 +93,20 @@ export function TableTile({ mesa, state, order, width, now, selected, ready, ale
     : held ? ['reserved', Lock, `Reservada ${timeOf(held.fecha_hora)}`]
     : state === 'Reservada' || (reservation && resMinutes != null && resMinutes <= 90) ? ['reserved', CalendarClock, `Reserva ${timeOf(reservation?.fecha_hora) || ''}`.trim()]
     : ['free', Users, mesa.capacidad ? `Libre · ${mesa.capacidad}` : 'Libre'];
-  const tone = kind === 'queued' ? { bg: c.surface, fg: c.amber } : meseroTableTone(kind, c);
-  const filled = kind === 'ready' || kind === 'bill';
+  // Todas las mesas son bloques de color sólido, sin bordes: libre gris claro, ocupada oscura, estados con su color.
+  const tone = meseroTableTone(kind, c);
   const free = kind === 'free';
+  const calm = free || kind === 'kitchen' || kind === 'eating';
+  const filled = !calm;
   const fg = filled ? tone.fg : c.text;
   const label = `Mesa ${mesa.numero}, ${text}${order ? `, ${money(balance)}` : ''}`;
   return <Press accessibilityRole="button" accessibilityLabel={label} accessibilityHint="Toca para pedir; mantén presionado para más acciones" accessibilityState={{ selected }}
     onPress={() => onPress(mesa)} onLongPress={onLongPress ? () => onLongPress(mesa) : undefined} hapticKind="tap" scaleTo={0.96}
-    style={[{ width, minHeight: 104, padding: 12, borderRadius: radius.lg, justifyContent: 'space-between', gap: 10, borderWidth: selected ? 2 : 1,
-      backgroundColor: filled ? tone.bg : free ? c.surfaceAlt : c.surface,
-      borderColor: selected ? c.ink : kind === 'queued' ? c.amber : filled ? tone.bg : free ? c.surfaceAlt : c.line }]}>
-    <Ping trigger={`${state}-${ready}`} color={filled ? tone.bg : tone.fg} radius={radius.lg} />
+    style={[{ width, minHeight: 92, padding: 12, borderRadius: radius.lg, justifyContent: 'space-between', gap: 10, backgroundColor: tone.bg },
+      selected ? (WEB_RING ? { boxShadow: `0 0 0 2px ${c.bg}, 0 0 0 4px ${c.text}` } : { opacity: 0.85 }) : null]}>
+    <Ping trigger={`${state}-${ready}`} color={tone.bg} radius={radius.lg} />
     <View>
       <Num size={28} weight="700" color={free ? c.muted : fg} style={{ lineHeight: 32 }}>{mesa.numero}</Num>
-      {order ? <Num size={14} weight="600" color={filled ? fg : c.muted} numberOfLines={1}>{money(balance)}</Num> : null}
     </View>
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
       <Icon size={15} color={filled ? fg : tone.fg} strokeWidth={2.4} />
@@ -124,7 +125,7 @@ export function ReservationHoldSheet({ hold, onClose, onSeat, onUseAnyway }) {
   return <BottomSheet visible={!!hold} onClose={onClose} title={hold ? `Mesa ${hold.mesa.numero} está reservada` : ''} subtitle={r ? `A las ${timeOf(r.fecha_hora)} · ${when}` : ''}>
     {r ? <View style={{ gap: space.lg }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.lg, borderRadius: radius.lg, backgroundColor: c.purpleSoft }}>
-        <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: c.isDark ? 'rgba(255,255,255,0.08)' : '#FFFFFF', alignItems: 'center', justifyContent: 'center' }}><CalendarClock size={22} color={c.purple} /></View>
+        <View style={{ width: 48, height: 48, borderRadius: 8, backgroundColor: c.isDark ? 'rgba(255,255,255,0.08)' : '#FFFFFF', alignItems: 'center', justifyContent: 'center' }}><CalendarClock size={22} color={c.purple} /></View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <T size={18} weight="800" numberOfLines={1}>{r.cliente_nombre}</T>
           <T size={14} color={c.muted}>{r.personas} {Number(r.personas) === 1 ? 'persona' : 'personas'}{r.notas ? ` · ${r.notas}` : ''}</T>
@@ -198,7 +199,7 @@ export function AttentionStrip({ items, onOpen }) {
         const filled = kind === 'ready' || kind === 'bill';
         const Icon = kind === 'ready' ? CheckCheck : kind === 'late' ? Clock3 : kind === 'reserved' ? CalendarClock : Receipt;
         return <Press key={it.key} accessibilityRole="button" accessibilityLabel={`${it.title}, ${it.detail}`} onPress={() => onOpen(it)} hapticKind="tap" scaleTo={0.96}
-          style={{ width: 172, minHeight: 64, padding: 12, borderRadius: radius.md, backgroundColor: filled ? tone.bg : c.surface, borderWidth: 1, borderColor: filled ? tone.bg : c.line, gap: 2 }}>
+          style={{ width: 172, minHeight: 64, padding: 12, borderRadius: radius.md, backgroundColor: filled ? tone.bg : c.surfaceAlt, gap: 2 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Icon size={16} color={filled ? tone.fg : tone.fg} strokeWidth={2.4} />
             <T size={15} weight="700" color={filled ? tone.fg : c.text} numberOfLines={1}>{it.title}</T>
@@ -224,13 +225,13 @@ export function ZoneTabs({ zones, value, onChange, counts = {} }) {
   };
   useEffect(() => { move(value); }, [value]);
   return <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>
-    <View accessibilityRole="tablist" style={{ flexDirection: 'row', gap: 2, padding: 4, borderRadius: radius.pill, backgroundColor: c.surfaceAlt }}>
-      {ready ? <Animated.View pointerEvents="none" style={[{ position: 'absolute', top: 4, bottom: 4, borderRadius: radius.pill, backgroundColor: c.surface, left: x, width: w }, elevate(c, 1)]} /> : null}
+    <View accessibilityRole="tablist" style={{ flexDirection: 'row', gap: 2, padding: 4, borderRadius: radius.md, backgroundColor: c.surfaceAlt }}>
+      {ready ? <Animated.View pointerEvents="none" style={[{ position: 'absolute', top: 4, bottom: 4, borderRadius: radius.md, backgroundColor: c.surface, left: x, width: w }, elevate(c, 1)]} /> : null}
       {zones.map(z => {
         const active = z === value;
         return <Press key={z} accessibilityRole="tab" accessibilityState={{ selected: active }} onPress={() => onChange(z)} hapticKind="select" scaleTo={0.96} sink={0}
           onLayout={e => { layouts.current[z] = e.nativeEvent.layout; if (active) { move(z, true); setReady(true); } }}
-          style={{ minHeight: 40, paddingHorizontal: 14, borderRadius: radius.pill, justifyContent: 'center', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          style={{ minHeight: 40, paddingHorizontal: 14, borderRadius: radius.md, justifyContent: 'center', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <T size={14} weight={active ? '800' : '600'} color={active ? c.text : c.muted}>{z === 'Todas' ? 'Todo' : z}</T>
           {counts[z] != null ? <Num size={12} weight="700" color={c.faint}>{counts[z]}</Num> : null}
         </Press>;
@@ -246,7 +247,7 @@ export function TableActionsSheet({ mesa, state, order, onClose, actions }) {
   const balance = order ? Number(order.saldo_pendiente ?? Math.max(0, Number(order.total || 0) - Number(order.abonado || 0))) : 0;
   const row = (Icon, label, detail, onPress, disabled) => <Press key={label} accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={() => { onClose(); onPress(); }} hapticKind="tap"
     style={{ minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.sm, borderRadius: radius.md, opacity: disabled ? 0.4 : 1 }} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
-    <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><Icon size={20} color={c.text} /></View>
+    <View style={{ width: 42, height: 42, borderRadius: 8, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><Icon size={20} color={c.text} /></View>
     <View style={{ flex: 1 }}><T size={17} weight="600">{label}</T>{detail ? <T size={14} color={c.muted}>{detail}</T> : null}</View>
   </Press>;
   return <BottomSheet visible={!!mesa} onClose={onClose} title={mesa ? `Mesa ${mesa.numero}` : ''} subtitle={mesa ? `${meta.label}${order ? ` · saldo ${money(balance)}` : ''}${mesa.capacidad ? ` · ${mesa.capacidad} puestos` : ''}` : ''}>
@@ -306,7 +307,7 @@ export function ReadyTray({ open, onClose, ready, partial = [], alerts, activity
       <T size={13} color={c.muted}>Desliza una ronda hacia la derecha para marcarla como entregada.</T>
       {ready.map(({ round, pedido, minutes }, i) => <Appear key={round.id} delay={i * 40}>
         <SwipeRow direction="right" label="Entregado" icon={CheckCheck} disabled={deliveringId === round.id} onSwipe={() => onDeliver(round, pedido)}>
-        <View style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.greenSoft, borderWidth: 1, borderColor: c.greenSoft, gap: 6 }}>
+        <View style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.greenSoft, gap: 6 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
             <T size={18} weight="700" style={{ flex: 1 }}>{placeOf(pedido)}</T>
             <Num size={14} weight="700" color={minutes != null && minutes >= (alerts.limits?.lista || 5) ? c.red : c.green}>{minutes ? `lista hace ${shortMinutes(minutes)}` : 'recién lista'}</Num>

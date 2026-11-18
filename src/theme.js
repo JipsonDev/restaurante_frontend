@@ -226,7 +226,7 @@ export const meseroPalette = {
     ink: '#17171A', onInk: '#FFFFFF',
     green: '#15803D', greenDot: '#16A34A', greenSoft: '#E8F6EE', greenFill: '#15803D', onGreen: '#FFFFFF',
     amber: '#9A5B00', amberSoft: '#FEF3DC', amberFill: '#FBBF24', onAmber: '#2B1A00',
-    red: '#D02B2B', redSoft: '#FDECEC', sky: '#1D5FD6', skySoft: '#E9F0FD', purple: '#6D3FD9', purpleSoft: '#F1ECFD',
+    red: '#D02B2B', redSoft: '#FDECEC', redFill: '#D02B2B', onRed: '#FFFFFF', sky: '#1D5FD6', skySoft: '#E9F0FD', purple: '#6D3FD9', purpleSoft: '#F1ECFD',
     pink: '#B33A73', pinkSoft: '#FCEAF2',
     overlay: 'rgba(15,15,18,0.45)', shadow: 'rgba(15,15,18,0.08)', glass: '#FFFFFF',
   },
@@ -236,7 +236,7 @@ export const meseroPalette = {
     ink: '#F4F4F5', onInk: '#17171A',
     green: '#4ADE80', greenDot: '#22C55E', greenSoft: '#16261C', greenFill: '#22A355', onGreen: '#06210F',
     amber: '#FBBF24', amberSoft: '#2A2213', amberFill: '#FBBF24', onAmber: '#2B1A00',
-    red: '#F87171', redSoft: '#2C1A1C', sky: '#7EA8F8', skySoft: '#18213A', purple: '#B79CFA', purpleSoft: '#231D38',
+    red: '#F87171', redSoft: '#2C1A1C', redFill: '#EF4444', onRed: '#1A0606', sky: '#7EA8F8', skySoft: '#18213A', purple: '#B79CFA', purpleSoft: '#231D38',
     pink: '#F38BB7', pinkSoft: '#2C1F29',
     overlay: 'rgba(0,0,0,0.62)', shadow: 'rgba(0,0,0,0.5)', glass: '#18181B',
   },
@@ -276,12 +276,13 @@ export function meseroTableTone(kind, c) {
   return {
     ready: { bg: c.greenFill, fg: c.onGreen, label: 'Lista' },
     bill: { bg: c.amberFill, fg: c.onAmber, label: 'Por cobrar' },
-    late: { bg: c.surface, fg: c.red, soft: c.redSoft, label: 'Retraso' },
-    kitchen: { bg: c.surface, fg: c.sky, soft: c.skySoft, label: 'En cocina' },
-    eating: { bg: c.surface, fg: c.muted, soft: c.surfaceAlt, label: 'Comiendo' },
-    reserved: { bg: c.surface, fg: c.purple, soft: c.purpleSoft, label: 'Reservada' },
-    free: { bg: c.surfaceAlt, fg: c.green, soft: c.greenSoft, label: 'Libre' },
-  }[kind] || { bg: c.surface, fg: c.muted, soft: c.surfaceAlt, label: '' };
+    late: { bg: c.redFill, fg: c.onRed, label: 'Retraso' },
+    kitchen: { bg: c.surfaceAlt, fg: c.muted, label: 'En cocina' },
+    eating: { bg: c.surfaceAlt, fg: c.muted, label: 'Comiendo' },
+    reserved: { bg: c.purpleSoft, fg: c.purple, label: 'Reservada' },
+    queued: { bg: c.amberSoft, fg: c.amber, label: 'Sin enviar' },
+    free: { bg: c.surfaceAlt, fg: c.green, label: 'Libre' },
+  }[kind] || { bg: c.surfaceAlt, fg: c.muted, label: '' };
 }
 
 // Estado de mesa: etiqueta, punto de color y tinte de la tarjeta.

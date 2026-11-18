@@ -27,13 +27,13 @@ function useProductState(producto, qty, canAdd, locked, onAdd, onCustomize, choo
 // «+» sobre la foto; con cantidad, se convierte en − n +.
 function AddControl({ producto, qty, off, locked, add, onDecrement, onAdd, small }) {
   const { c } = useTheme();
-  if (qty > 0 && !locked) return <View style={[{ borderRadius: radius.pill }, elevate(c, 2)]}>
+  if (qty > 0 && !locked) return <View style={{ borderRadius: radius.md, backgroundColor: c.bg, padding: 2 }}>
     <Tally value={qty} size="sm" removable label={producto.nombre} onChange={next => next > qty ? onAdd(producto) : onDecrement(producto)} />
   </View>;
   if (off) return null;
   return <Press accessibilityRole="button" accessibilityLabel={`Añadir ${producto.nombre}`} onPress={add} hapticKind="tap" scaleTo={0.88}
-    style={[{ width: small ? 34 : 38, height: small ? 34 : 38, borderRadius: 19, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.line }, elevate(c, 2)]}>
-    <Plus size={20} color={c.text} strokeWidth={2.4} />
+    style={{ width: small ? 34 : 38, height: small ? 34 : 38, borderRadius: radius.md, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' }}>
+    <Plus size={20} color={c.onPrimary} strokeWidth={2.6} />
   </Press>;
 }
 
@@ -50,7 +50,7 @@ const ProductRow = memo(function ProductRow({ producto, qty, canAdd, locked, onA
       <T size={16} weight="600" numberOfLines={2}>
         {qty > 0 ? <T size={16} weight="700" color={c.primaryText}>{qty}× </T> : null}{producto.nombre}
       </T>
-      {producto.descripcion ? <T size={14} color={c.muted} numberOfLines={2}>{producto.descripcion}</T> : null}
+      {producto.descripcion ? <T size={14} color={c.muted} numberOfLines={1}>{producto.descripcion}</T> : null}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
         <Num size={16} weight="700" color={s.soldOut ? c.muted : c.text}>{price(producto.precio)}</Num>
         {s.soldOut ? <T size={13} weight="700" color={c.red}>Agotado</T> : s.low ? <T size={13} weight="700" color={c.amber}>Quedan {s.stock}</T> : null}
@@ -114,7 +114,7 @@ export default function WaiterCatalog({ width, products, categories, category, s
         </View>
       </Press>
       {account ? <Press accessibilityRole="button" accessibilityLabel={`Ver la cuenta: ${money(account.total)}`} onPress={account.open} hapticKind="tap" scaleTo={0.96}
-        style={{ minHeight: 44, paddingHorizontal: 12, borderRadius: radius.md, borderWidth: 1, borderColor: c.lineStrong, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        style={{ minHeight: 44, paddingHorizontal: 12, borderRadius: radius.md, backgroundColor: c.surfaceAlt, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Receipt size={17} color={c.text} />
         <Num size={15} weight="700">{money(account.total)}</Num>
       </Press> : null}
