@@ -291,8 +291,15 @@ export function ReadyTray({ open, onClose, ready, partial = [], alerts, activity
   const unread = activity.filter(a => !a.read).length;
   const late = alerts.items.filter(a => a.tipo !== 'lista');
   const placeOf = (pedido, item) => (pedido?.mesa_id || item?.mesa_id) ? `Mesa ${pedido?.mesa_numero || item?.mesa_numero || pedido?.mesa_id || item?.mesa_id}` : `${(pedido?.tipo || item?.origen) === 'Delivery' ? 'Delivery' : 'Para llevar'} #${pedido?.id || item?.pedido_id}`;
+  // Una tarjeta por mesa o pedido (aunque tenga varias rondas listas): se entrega todo de una vez.
+  const groupedReady = Object.values(ready.reduce((acc, it) => {
+    const id = it.pedido?.id ?? it.round.pedido_id;
+    (acc[id] ||= { pedido: it.pedido, rounds: [], minutes: it.minutes }).rounds.push({ ...it.round, round: it.round });
+    if (it.minutes != null && (acc[id].minutes == null || it.minutes > acc[id].minutes)) acc[id].minutes = it.minutes;
+    return acc;
+  }, {}));
   const itemsText = round => (round.items || []).slice(0, 4).map(i => `${i.cantidad}× ${i.nombre || i.producto_nombre || 'Producto'}`).join(' · ');
-  return <BottomSheet visible={open} onClose={onClose} title="Bandeja" subtitle={ready.length ? `${ready.length} ${ready.length === 1 ? 'ronda lista' : 'rondas listas'} para llevar a la mesa` : 'Nada esperando en el pase'}>
+  return <BottomSheet visible={open} onClose={onClose} title="Bandeja" subtitle={ready.length ? `${groupedReady.length === 1 ? 'Hay algo listo' : `${groupedReady.length} mesas o pedidos listos`} para llevar` : 'Nada esperando en el pase'}>
     {alertsPrompt?.visible ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.md, borderRadius: radius.md, backgroundColor: c.surfaceAlt }}>
       <BellRing size={20} color={c.text} />
       <View style={{ flex: 1, minWidth: 0 }}>
@@ -302,27 +309,32 @@ export function ReadyTray({ open, onClose, ready, partial = [], alerts, activity
       <Button size="sm" variant="ink" onPress={alertsPrompt.enable} accessibilityLabel="Activar los avisos de plato listo">Activar</Button>
     </View> : null}
     <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
-      <Chip selected={tab === 'listo'} onPress={() => setTab('listo')} count={ready.length + partial.length}>Listo</Chip>
+      <Chip selected={tab === 'listo'} onPress={() => setTab('listo')} count={groupedReady.length + partial.length}>Listo</Chip>
       <Chip selected={tab === 'demoras'} onPress={() => setTab('demoras')} count={late.length}>Demoras</Chip>
       <Chip selected={tab === 'actividad'} onPress={() => setTab('actividad')} count={unread}>Actividad</Chip>
     </View>
     {tab === 'listo' ? (ready.length ? <View style={{ gap: space.sm }}>
-      {ready.map(({ round, pedido, minutes }) => <View key={round.id}>
-        <SwipeRow direction="right" label="Entregado" icon={CheckCheck} disabled={deliveringId === round.id} onSwipe={() => onDeliver(round, pedido)}>
+      {groupedReady.map(({ pedido, rounds, minutes }) => {
+        const key = `p${pedido.id}`;
+        const items = rounds.flatMap(r => r.items || []);
+        const text = items.slice(0, 6).map(i => `${i.cantidad}× ${i.nombre || i.producto_nombre || 'Producto'}`).join(' · ') + (items.length > 6 ? ` · +${items.length - 6}` : '');
+        return <View key={key}>
+        <SwipeRow direction="right" label="Entregado" icon={CheckCheck} disabled={deliveringId === key} onSwipe={() => onDeliver(rounds.map(r => r.round), pedido)}>
         <View style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.surfaceAlt, gap: 6 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
             <T size={18} weight="700" style={{ flex: 1 }}>{placeOf(pedido)}</T>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><CheckCheck size={15} color={c.green} strokeWidth={2.4} /><T size={14} weight="700" color={c.green}>Lista</T></View>
           </View>
           <Num size={13} color={minutes != null && minutes >= (alerts.limits?.lista || 5) ? c.red : c.muted}>{minutes ? `hace ${shortMinutes(minutes)}` : 'recién salida'}</Num>
-          {itemsText(round) ? <T size={15} color={c.muted} numberOfLines={2}>{itemsText(round)}</T> : null}
+          {text ? <T size={15} color={c.muted} numberOfLines={3}>{text}</T> : null}
           <View style={{ flexDirection: 'row', gap: space.sm, marginTop: 4 }}>
-            <Button variant="ink" icon={CheckCheck} loading={deliveringId === round.id} onPress={() => onDeliver(round, pedido)} hapticKind="tap">Entregado</Button>
+            <Button variant="ink" icon={CheckCheck} loading={deliveringId === key} onPress={() => onDeliver(rounds.map(r => r.round), pedido)} hapticKind="tap">Entregado</Button>
             <Button variant="ghost" onPress={() => onOpen({ mesa_id: pedido.mesa_id, pedido_id: pedido.id, pedido })}>Ver</Button>
           </View>
         </View>
         </SwipeRow>
-      </View>)}
+      </View>;
+      })}
     </View> : partial.length ? null : <EmptyState icon={CheckCheck} title="Pase vacío" description="Cuando cocina marque una ronda como lista aparecerá aquí, con vibración." />) : null}
     {tab === 'listo' && partial.length ? <View style={{ gap: space.sm }}>
       <T size={15} weight="700" style={{ marginTop: space.sm }}>Platos sueltos ya listos</T>

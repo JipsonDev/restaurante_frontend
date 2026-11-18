@@ -13,7 +13,7 @@ import axios from 'axios';
 import { BASE_URL, assetUrl, useAuth } from '../context/AuthContext';
 import { MeseroAppearance, setBrandColor, useTheme } from '../theme';
 import { BOTTOM_INSET, TOP_INSET } from '../utils/safeArea';
-import { REALTIME_EVENTS, getRealtimeSocket, subscribeRealtime } from '../services/realtime';
+import { REALTIME_EVENTS, getRealtimeSocket, subscribeRealtime, watchConnection } from '../services/realtime';
 import { ALERT_TONES, installWebAudioUnlock, isWebAudioUnlocked, playWebAlertTone, unlockWebAudio } from '../services/webAudioAlerts';
 import { allDayItems, createRefreshQueue, isCriticalNote, kitchenBoard, kitchenRounds, pendingSignature, shortDuration, waitMinutes } from '../utils/kitchenLogic.mjs';
 import { KitchenTicket, itemDone, ticketTarget } from '../components/kitchen/ticket';
@@ -122,11 +122,7 @@ function Kitchen() {
     const poll = setInterval(() => { load(); loadPrint(); }, 20000);
     const clock = setInterval(() => setNow(Date.now()), 15000);
     const client = getRealtimeSocket();
-    const onConnect = () => { setRealtime('connected'); load(); };
-    const onDisconnect = () => setRealtime('disconnected');
-    const onError = () => setRealtime('error');
-    setRealtime(client.connected ? 'connected' : 'connecting');
-    client.on('connect', onConnect); client.on('disconnect', onDisconnect); client.on('connect_error', onError);
+    const stopWatching = watchConnection(setRealtime, { onReconnect: () => load() });
     const loadProducts = () => axios.get(`${BASE_URL}/productos`).then(({ data }) => Array.isArray(data) && setProducts(data)).catch(() => {});
     loadProducts();
     const unsub = [REALTIME_EVENTS.ORDER_CREATED, REALTIME_EVENTS.ORDER_UPDATED, REALTIME_EVENTS.PRINT_COMANDA].map(ev => subscribeRealtime(ev, () => load()));
@@ -141,7 +137,7 @@ function Kitchen() {
     }));
     return () => {
       clearInterval(poll); clearInterval(clock); refreshQueue.current?.stop();
-      client.off('connect', onConnect); client.off('disconnect', onDisconnect); client.off('connect_error', onError);
+      stopWatching();
       unsub.forEach(u => u && u());
     };
   }, []);

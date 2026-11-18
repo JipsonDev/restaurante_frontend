@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { savedPaymentText } from '../utils/paymentReceipt.mjs';
+import { savedPaymentMarkup } from '../utils/paymentReceipt.mjs';
+import { build as buildTicket, businessHeader as ticketHeader, dateTime as ticketDateTime, docTitle, footer as ticketFooter, itemTable, money as ticketMoney, t, toHtml as ticketHtml, toPlain as ticketPlain, TICKET_CSS } from '../utils/ticketLayout.mjs';
 import CashierWorkspace from './CashierWorkspace';
 import CajaDialogs from '../components/cashier/dialogs';
 import { tokens as cajaTokens } from '../components/cashier/kit';
@@ -165,55 +166,80 @@ function escapeHtml(text) {
     .replace(/"/g, '&quot;');
 }
 
-function businessHeader(settings = {}, width = 42) {
-  const businessName = settings.nombre_restaurante || 'Morena Mia';
-  return [
-    centerText(businessName.toUpperCase(), width),
-    settings.razon_social ? centerText(settings.razon_social, width) : '',
-    settings.ruc ? centerText(`RUC: ${settings.ruc}`, width) : '',
-    settings.direccion ? centerText(settings.direccion, width) : '',
-    settings.telefono ? centerText(`Tel: ${settings.telefono}`, width) : '',
-    settings.correo ? centerText(settings.correo, width) : '',
-  ].filter(Boolean);
-}
 
-function saleItemLines(order, settings = {}) {
-  const moneyFmt = (value) => moneyWithSettings(value, settings);
-  return (order.items || []).flatMap((item) => {
-    const lineName = `${item.cantidad} x ${item.nombre}`;
-    return [
-      receiptRow(lineName.slice(0, 28), moneyFmt(itemLineTotal(item))),
-      item.notas ? `  Nota: ${item.notas}` : '',
-      ...(item.modificadores || []).map((mod) => `  + ${modifierLabel(mod)}`),
-    ].filter(Boolean);
-  });
-}
 
 function saleTotals(order, settings = {}) {
   return order?.totales_cobro || receiptTotals(order || {}, settings.iva_porcentaje);
 }
 
-function buildCustomerTicket(order, method, cashReceived, reference, billing = {}, settings = {}) {
-  const {
-    subtotal,
-    tax,
-    service,
-    total
-  } = saleTotals(order, settings);
+// Ticket del cliente y factura con el diseño común de tickets (nombre del local en grande, columnas, total destacado).
+function paymentRows(method, cashReceived, reference, total, m) {
   const change = Math.max(0, Number(cashReceived || 0) - total);
-  const moneyFmt = value => moneyWithSettings(value, settings);
-  return [...businessHeader(settings), separator(), centerText(billing.number ? 'TICKET CLIENTE' : 'PRECUENTA - SIN COBRAR'), billing.number ? receiptRow('No.', billing.number) : '', centerText('CONSUMIDOR FINAL'), separator(), receiptRow('Pedido', `#${order.id}`), receiptRow('Fecha', new Date().toLocaleString('es-EC')), receiptRow('Orden', orderLabel(order)), isPickupOrder(order) ? pickupDetail(order) : '', separator(), ...saleItemLines(order, settings), separator(), receiptRow('Subtotal', moneyFmt(subtotal)), receiptRow(`IVA ${Number(order?.totales_cobro?.taxPercent ?? settings.iva_porcentaje ?? 0)}%`, moneyFmt(tax)), service > 0 ? receiptRow('Servicio incluido', moneyFmt(service)) : '', receiptRow('TOTAL', moneyFmt(total)), Number(order.abonado)>0 ? receiptRow('Abonos', moneyFmt(order.abonado)) : '', receiptRow('Saldo pendiente', moneyFmt(order.saldo_pendiente ?? total)), separator(), receiptRow('Metodo', method), reference ? receiptRow('Referencia', reference) : '', method === 'Efectivo' ? receiptRow('Recibido', moneyFmt(cashReceived)) : '', method === 'Efectivo' ? receiptRow('Cambio', moneyFmt(change)) : '', separator(), centerText('Ticket no fiscal'), centerText(settings.texto_ticket || 'Gracias por su compra')].filter(Boolean).join('\n');
+  return [
+    t.row('Forma de pago', method),
+    reference ? t.row('Referencia', reference) : null,
+    method === 'Efectivo' ? [t.row('Recibido', m(cashReceived)), t.row('Cambio', m(change))] : null,
+  ];
+}
+function receiptTotalsRows(order, settings, m, { invoice = false } = {}) {
+  const { subtotal, tax, service, total } = saleTotals(order, settings);
+  const taxPct = Number(order?.totales_cobro?.taxPercent ?? settings.iva_porcentaje ?? 0);
+  return {
+    total,
+    rows: [
+      t.row(invoice ? 'Subtotal sin IVA' : 'Subtotal', m(subtotal)),
+      t.row(`IVA ${taxPct}%`, m(tax)),
+      service > 0 ? t.row('Servicio', m(service)) : null,
+      t.row(invoice ? 'TOTAL FACTURA' : 'TOTAL', m(total), 'H'),
+      Number(order.abonado) > 0 ? t.row('Abonos', m(order.abonado)) : null,
+      Number(order.abonado) > 0 || (order.saldo_pendiente != null && Number(order.saldo_pendiente) !== Number(total)) ? t.row('Saldo pendiente', m(order.saldo_pendiente ?? total), 'B') : null,
+    ],
+  };
+}
+function orderRows(order) {
+  const { fecha, hora } = ticketDateTime();
+  return [
+    t.row('Fecha', `${fecha} ${hora}`),
+    t.row('Pedido', `#${order.id}`),
+    t.row(isPickupOrder(order) ? (order.tipo === 'Delivery' ? 'Delivery' : 'Para llevar') : 'Mesa', isPickupOrder(order) ? (order.cliente_nombre || 'Cliente') : String(order.mesa_numero || order.mesa_id || '-')),
+    isPickupOrder(order) && pickupDetail(order) ? t.text(pickupDetail(order)) : null,
+    order.mesero_nombre ? t.row('Atendió', order.mesero_nombre) : null,
+  ];
+}
+function buildCustomerTicket(order, method, cashReceived, reference, billing = {}, settings = {}) {
+  const sym = settings.simbolo_moneda || '$'; const m = v => ticketMoney(v, sym);
+  const { total, rows } = receiptTotalsRows(order, settings, m);
+  return buildTicket(
+    ticketHeader(settings),
+    docTitle(billing.number ? 'TICKET DE VENTA' : 'PRE-CUENTA · SIN COBRAR', billing.number),
+    orderRows(order),
+    t.row('Cliente', 'Consumidor final'),
+    t.blank(),
+    itemTable(order.items || [], sym),
+    rows,
+    billing.number ? [t.rule('-'), paymentRows(method, cashReceived, reference, total, m)] : null,
+    ticketFooter(settings),
+  );
 }
 function buildFormalInvoice(order, method, cashReceived, reference, billing = {}, settings = {}) {
-  const {
-    subtotal,
-    tax,
-    service,
-    total
-  } = saleTotals(order, settings);
-  const change = Math.max(0, Number(cashReceived || 0) - total);
-  const moneyFmt = value => moneyWithSettings(value, settings);
-  return [...businessHeader(settings), separator(), centerText(billing.number ? 'FACTURA FORMAL' : 'PRECUENTA - SIN COBRAR'), billing.number ? receiptRow('No.', billing.number) : '', receiptRow('Fecha emision', new Date().toLocaleString('es-EC')), receiptRow('Pedido', `#${order.id}`), receiptRow('Orden', orderLabel(order)), isPickupOrder(order) ? pickupDetail(order) : '', separator(), centerText('DATOS DEL CLIENTE'), receiptRow('Cliente', billing.name || 'Consumidor Final'), receiptRow('Documento', billing.id || '-'), billing.phone ? receiptRow('Telefono', billing.phone) : '', billing.email ? receiptRow('Correo', billing.email) : '', separator(), centerText('DETALLE'), ...saleItemLines(order, settings), separator(), receiptRow('Subtotal sin IVA', moneyFmt(subtotal)), receiptRow(`IVA declarado ${Number(order?.totales_cobro?.taxPercent ?? settings.iva_porcentaje ?? 0)}%`, moneyFmt(tax)), service > 0 ? receiptRow('Servicio incluido', moneyFmt(service)) : '', receiptRow('TOTAL FACTURA', moneyFmt(total)), Number(order.abonado)>0 ? receiptRow('Abonos', moneyFmt(order.abonado)) : '', receiptRow('Saldo pendiente', moneyFmt(order.saldo_pendiente ?? total)), separator(), receiptRow('Forma de pago', method), reference ? receiptRow('Referencia', reference) : '', method === 'Efectivo' ? receiptRow('Recibido', moneyFmt(cashReceived)) : '', method === 'Efectivo' ? receiptRow('Cambio', moneyFmt(change)) : '', separator(), centerText(settings.texto_ticket || 'Gracias por su compra')].filter(Boolean).join('\n');
+  const sym = settings.simbolo_moneda || '$'; const m = v => ticketMoney(v, sym);
+  const { total, rows } = receiptTotalsRows(order, settings, m, { invoice: true });
+  return buildTicket(
+    ticketHeader(settings),
+    docTitle(billing.number ? 'FACTURA' : 'PRE-CUENTA · SIN COBRAR', billing.number),
+    orderRows(order),
+    t.rule('-'),
+    t.bold('DATOS DEL CLIENTE'),
+    t.row('Cliente', billing.name || 'Consumidor final'),
+    t.row('Cédula / RUC', billing.id || '-'),
+    billing.phone ? t.row('Teléfono', billing.phone) : null,
+    billing.email ? t.row('Correo', billing.email) : null,
+    t.blank(),
+    itemTable(order.items || [], sym),
+    rows,
+    billing.number ? [t.rule('-'), paymentRows(method, cashReceived, reference, total, m)] : null,
+    ticketFooter(settings, { fiscal: !!billing.number }),
+  );
 }
 function buildReceipt(order, method, cashReceived, reference, billing = {}, settings = {}) {
   return billing.mode === 'ID' ? buildFormalInvoice(order, method, cashReceived, reference, billing, settings) : buildCustomerTicket(order, method, cashReceived, reference, billing, settings);
@@ -749,7 +775,7 @@ function CashierShell() {
   // Envía a la térmica por el agente. Devuelve false si el agente no está (la caja usa la ventana del navegador).
   const directPrint = async (texto, titulo, extra = {}) => {
     try {
-      await axios.post(`${BASE_URL}/caja/imprimir`, { texto, titulo, logo_url: businessConfig.logo_url || null, ...extra });
+      await axios.post(`${BASE_URL}/caja/imprimir`, { texto: ticketPlain(texto), texto_marcado: texto || null, titulo, logo_url: businessConfig.logo_url || null, ...extra });
       return true;
     } catch (error) {
       if (error.response?.status === 409 && error.response?.data?.sin_agente) { printAgentRef.current = false; setPrintAgent((p) => ({ ...p, online: false })); return false; }
@@ -776,11 +802,11 @@ function CashierShell() {
             body { margin: 0; background: #fff; color: #111827; }
             .ticket { max-width: 310px; margin: auto; padding: 12px 8px 18px; }
             .logo { display: block; max-width: 190px; max-height: 74px; object-fit: contain; margin: 0 auto 10px; }
-            pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; white-space: pre-wrap; line-height: 1.35; margin: 0; }
+            ${TICKET_CSS}
           </style>
           <div class="ticket">
             ${logoSrc ? `<img class="logo" src="${escapeHtml(logoSrc)}" />` : ''}
-            <pre>${escapeHtml(text)}</pre>
+            ${ticketHtml(text)}
           </div>
         `);
         win.document.close();
@@ -796,7 +822,7 @@ function CashierShell() {
       }
     }
     if (options.strict) throw new Error('No se pudo abrir la impresion. Permite ventanas emergentes y reintenta desde Comprobantes.');
-    Alert.alert(title, text);
+    Alert.alert(title, ticketPlain(text));
   };
 
   const printReceipt = (settlement = {}) => {
@@ -907,7 +933,7 @@ function CashierShell() {
 
   const printSavedPayment = async (data, printWindow, { direct = false, drawer = false } = {}) => {
     const paymentId = data.pago?.id || data.pago_id;
-    const texto = savedPaymentText(data.snapshot, data.pago || { id: paymentId, estado: 'ACTIVO' });
+    const texto = savedPaymentMarkup(data.snapshot, data.pago || { id: paymentId, estado: 'ACTIVO' });
     if (direct) {
       // El agente imprime y registra el resultado en el pago. El cajón se abre si entró efectivo.
       const cash = data.snapshot?.metodo === 'Efectivo' || (data.snapshot?.desglose || []).some((part) => part.metodo === 'Efectivo') || data.snapshot?.propina_metodo === 'Efectivo';
@@ -918,7 +944,7 @@ function CashierShell() {
     }
     try {
       if (Platform.OS === 'web' && !printWindow) throw new Error('La ventana de impresion fue bloqueada. Permite ventanas emergentes.');
-      await printText(savedPaymentText(data.snapshot, data.pago || { id: paymentId, estado: 'ACTIVO' }), data.snapshot.comprobante_numero || 'Comprobante',
+      await printText(savedPaymentMarkup(data.snapshot, data.pago || { id: paymentId, estado: 'ACTIVO' }), data.snapshot.comprobante_numero || 'Comprobante',
         { ...data.snapshot.negocio, printWindow, strict: true });
       await axios.post(`${BASE_URL}/caja/pagos/${paymentId}/impresion`, { estado: 'ENVIADO' });
     } catch (error) {
@@ -979,6 +1005,40 @@ function CashierShell() {
       Alert.alert(registered ? 'Cobro guardado' : 'No se pudo confirmar el cobro', error.response?.data?.message || 'Reintenta el cobro pendiente. Se usará el mismo identificador para evitar duplicados.');
     } finally { setBusy(false); }
   });
+
+  // Cobro sin confirmar: se pregunta al servidor si llegó (al abrir la caja y cuando vuelve la conexión).
+  const clearPending = async () => { await AsyncStorage.removeItem(pendingKey).catch(() => {}); pendingPaymentRef.current = null; setPendingPayment(null); };
+  const checkPendingPayment = useCallback(async () => {
+    const pending = pendingPaymentRef.current;
+    if (!pending?.idempotency_key || cashActionLock.current) return;
+    try {
+      const { data } = await axios.get(`${BASE_URL}/caja/cobro-pendiente/${pending.idempotency_key}`, { params: { pedido_id: pending.pedido_id } });
+      if (data.registrado) {
+        await clearPending();
+        showCashNotice({ type: 'success', title: `El cobro del pedido #${pending.pedido_id} sí se registró`, detail: data.comprobante_numero ? `Comprobante ${data.comprobante_numero}. Puedes reimprimirlo desde Comprobantes.` : 'Puedes reimprimirlo desde Comprobantes.' });
+        setHistoryVersion(v => v + 1); refreshAll().catch(() => {});
+      } else if (!data.pedido_estado || ['PAGADO', 'CANCELADO'].includes(String(data.pedido_estado).toUpperCase())) {
+        await clearPending();
+        showCashNotice({ type: 'info', title: `El pedido #${pending.pedido_id} ya no tiene saldo por cobrar`, detail: 'Se quitó el cobro pendiente.' });
+        refreshAll().catch(() => {});
+      }
+    } catch { /* sin conexión: el aviso sigue y se vuelve a revisar al reconectar */ }
+  }, [pendingKey, showCashNotice]);
+  useEffect(() => { if (pendingReady && pendingPayment) checkPendingPayment(); }, [pendingReady, !!pendingPayment]);
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
+    const online = () => checkPendingPayment();
+    window.addEventListener('online', online);
+    const timer = setInterval(() => { if (pendingPaymentRef.current) checkPendingPayment(); }, 30000);
+    return () => { window.removeEventListener('online', online); clearInterval(timer); };
+  }, [checkPendingPayment]);
+  const discardPendingPayment = () => {
+    const pending = pendingPaymentRef.current;
+    if (!pending) return;
+    const doIt = async () => { await clearPending(); showCashNotice({ type: 'info', title: 'Cobro pendiente descartado', detail: `Revisa el pedido #${pending.pedido_id} antes de volver a cobrarlo.` }); };
+    if (Platform.OS === 'web' && typeof window !== 'undefined') { if (window.confirm(`¿Descartar el cobro sin confirmar del pedido #${pending.pedido_id}? Hazlo solo si estás seguro de que no se cobró.`)) doIt(); return; }
+    Alert.alert('Descartar cobro', `¿Descartar el cobro sin confirmar del pedido #${pending.pedido_id}?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Descartar', style: 'destructive', onPress: doIt }]);
+  };
 
   const openOrder = (order) => {
     setSelectedId(order.id);
@@ -1093,45 +1153,35 @@ function CashierShell() {
     await refreshAll();
   };
 
+  // Corte Z con el mismo diseño de tickets (nombre del local en grande, secciones en negrita, diferencia destacada).
   const closureText = (item) => {
-    const moneyFmt = (value) => moneyWithSettings(value, businessConfig);
-    return [
-      ...businessHeader(businessConfig),
-      separator(),
-      centerText('CIERRE DE CAJA - CORTE Z'),
-      receiptRow('Caja', `#${item.id}`),
-      receiptRow('Cajera', item.trabajador_nombre || item.trabajador_id || '-'),
-      receiptRow('Apertura', item.fecha_apertura ? new Date(item.fecha_apertura).toLocaleString('es-EC') : '-'),
-      receiptRow('Cierre', item.fecha_cierre ? new Date(item.fecha_cierre).toLocaleString('es-EC') : '-'),
-      separator(),
-      centerText('VENTAS POR METODO'),
-      receiptRow('Total ventas', moneyFmt(item.total_ventas)),
-      receiptRow('Efectivo', moneyFmt(item.total_efectivo)),
-      receiptRow('Tarjeta', moneyFmt(item.total_tarjeta)),
-      receiptRow('Transferencia', moneyFmt(item.total_transferencia)),
-      receiptRow('QR', moneyFmt(item.total_qr)),
-      separator(),
-      centerText('MOVIMIENTOS'),
-      receiptRow('Monto inicial', moneyFmt(item.monto_inicial)),
-      receiptRow('Ingresos', moneyFmt(item.total_ingresos)),
-      receiptRow('Retiros', moneyFmt(item.total_retiros)),
-      receiptRow('Gastos', moneyFmt(item.total_gastos)),
-      receiptRow('Devoluciones', moneyFmt(item.total_devoluciones)),
-      receiptRow('Anulaciones', moneyFmt(item.total_anulaciones)),
-      Number(item.total_descuentos) ? receiptRow('Descuentos', moneyFmt(item.total_descuentos)) : '',
-      Number(item.total_cortesias) ? receiptRow('Cortesias', moneyFmt(item.total_cortesias)) : '',
-      Number(item.total_propinas) ? receiptRow('Propinas', moneyFmt(item.total_propinas)) : '',
-      Number(item.total_propinas_efectivo) ? receiptRow('  en efectivo (en caja)', moneyFmt(item.total_propinas_efectivo)) : '',
-      ...(item.propinas_por_mesero || []).map((row) => receiptRow(`  ${String(row.mesero).slice(0, 24)}`, moneyFmt(row.propina))),
-      separator(),
-      centerText('CUADRE'),
-      receiptRow('Efectivo esperado', moneyFmt(item.efectivo_esperado)),
-      receiptRow('Efectivo contado', moneyFmt(item.monto_final)),
-      receiptRow('Diferencia', moneyFmt(item.diferencia_cierre)),
-      item.observacion_cierre ? `Observacion: ${item.observacion_cierre}` : '',
-      separator(),
-      centerText('Documento interno'),
-    ].filter(Boolean).join('\n');
+    const m = (value) => moneyWithSettings(value, businessConfig);
+    const when = v => (v ? new Date(v).toLocaleString('es-EC') : '-');
+    return buildTicket(
+      ticketHeader(businessConfig),
+      docTitle('CIERRE DE CAJA · CORTE Z', `Caja #${item.id}`),
+      t.row('Cajera', item.trabajador_nombre || item.trabajador_id || '-'),
+      t.row('Apertura', when(item.fecha_apertura)),
+      t.row('Cierre', when(item.fecha_cierre)),
+      t.blank(), t.bold('VENTAS POR MÉTODO'), t.rule('-'),
+      t.row('Efectivo', m(item.total_efectivo)), t.row('Tarjeta', m(item.total_tarjeta)),
+      t.row('Transferencia', m(item.total_transferencia)), t.row('QR', m(item.total_qr)),
+      t.row('Total ventas', m(item.total_ventas), 'B'),
+      t.blank(), t.bold('MOVIMIENTOS'), t.rule('-'),
+      t.row('Monto inicial', m(item.monto_inicial)), t.row('Ingresos', m(item.total_ingresos)), t.row('Retiros', m(item.total_retiros)),
+      t.row('Gastos', m(item.total_gastos)), t.row('Devoluciones', m(item.total_devoluciones)), t.row('Anulaciones', m(item.total_anulaciones)),
+      Number(item.total_descuentos) ? t.row('Descuentos', m(item.total_descuentos)) : null,
+      Number(item.total_cortesias) ? t.row('Cortesías', m(item.total_cortesias)) : null,
+      Number(item.total_propinas) ? t.row('Propinas', m(item.total_propinas)) : null,
+      Number(item.total_propinas_efectivo) ? t.row('  en efectivo (en caja)', m(item.total_propinas_efectivo)) : null,
+      ...(item.propinas_por_mesero || []).map((row) => t.row(`  ${row.mesero}`, m(row.propina))),
+      t.blank(), t.bold('CUADRE'), t.rule('-'),
+      t.row('Efectivo esperado', m(item.efectivo_esperado)),
+      t.row('Efectivo contado', m(item.monto_final)),
+      t.row('Diferencia', m(item.diferencia_cierre), 'H'),
+      item.observacion_cierre ? t.text(`Observación: ${item.observacion_cierre}`) : null,
+      t.rule('='), t.center('Documento interno'),
+    );
   };
 
   const exportClosures = () => {
@@ -1204,17 +1254,17 @@ function CashierShell() {
     if (!caja?.caja) return;
     const moneyFmt = (value) => moneyWithSettings(value, businessConfig);
     printText([
-      ...businessHeader(businessConfig), separator(), centerText('CORTE X - TURNO ABIERTO'),
+      ...[ticketHeader(businessConfig), docTitle('CORTE X · TURNO ABIERTO')].flat(Infinity).filter(Boolean),
       receiptRow('Caja', `#${caja.caja.id}`), receiptRow('Cajera', user?.nombre || '-'),
       receiptRow('Apertura', caja.caja.fecha_apertura ? new Date(String(caja.caja.fecha_apertura).replace(' ', 'T')).toLocaleString('es-EC') : '-'),
       receiptRow('Impreso', new Date().toLocaleString('es-EC')), separator(), centerText('COBROS POR METODO'),
       ...Object.entries(stats.byMethod).map(([label, value]) => receiptRow(label, moneyFmt(value))),
-      receiptRow('TOTAL COBRADO', moneyFmt(turnTotals.total)), receiptRow('Comprobantes', String(turnTotals.pagos || 0)), separator(), centerText('EFECTIVO'),
+      ...t.row('TOTAL COBRADO', moneyFmt(turnTotals.total), 'B'), receiptRow('Comprobantes', String(turnTotals.pagos || 0)), separator(), centerText('EFECTIVO'),
       receiptRow('Fondo de apertura', moneyFmt(caja.caja.monto_inicial)), receiptRow('Cobros en efectivo', moneyFmt(stats.byMethod.Efectivo)),
       receiptRow('Ingresos', moneyFmt(movementStats.INGRESO)), receiptRow('Retiros', moneyFmt(movementStats.RETIRO)), receiptRow('Gastos', moneyFmt(movementStats.GASTO)),
       receiptRow('Devoluciones', moneyFmt(movementStats.DEVOLUCION)),
       Number(turnTotals.propinas_efectivo) ? receiptRow('Propinas en efectivo', moneyFmt(turnTotals.propinas_efectivo)) : '',
-      receiptRow('DEBE HABER', moneyFmt(caja.efectivo_esperado)), separator(),
+      ...t.row('DEBE HABER', moneyFmt(caja.efectivo_esperado), 'H'), separator(),
       Number(turnTotals.descuentos) || Number(turnTotals.cortesias) ? centerText('DESCUENTOS Y CORTESIAS') : '',
       Number(turnTotals.descuentos) ? receiptRow('Descuentos', moneyFmt(turnTotals.descuentos)) : '',
       Number(turnTotals.cortesias) ? receiptRow('Cortesias', moneyFmt(turnTotals.cortesias)) : '',
@@ -1260,7 +1310,7 @@ function CashierShell() {
         setSaleType, setCustomerName: (value) => { if (!orderActionLock.current) { setCustomer({ nombre: value }); setCustomerError(''); } },
         setSaleNote: (value) => { if (!orderActionLock.current) setSaleNote(value); },
         setMenuSearch, setMenuCategory, setOrderSearch, setOrderFilter, addToCart, changeCartQty,
-        clearCart: () => { if (!orderActionLock.current) setCart([]); }, createPickupOrder, handleCharge,
+        clearCart: () => { if (!orderActionLock.current) setCart([]); }, createPickupOrder, handleCharge, discardPendingPayment,
         printReceipt, reprintPayment, printShiftReport, setTipAmount, openDrawer, applyAdjustment, removeAdjustment, splitByItems, setChargeMode, setPartialAmount, setDivisionId, setMixedAmounts, handleOpenCaja, handleCloseCaja, openMovement, openPaymentAuthorization,
         showHistory: () => setHistoryModal(true), dismissNotice: () => setCashNotice(null) }}
       helpers={{ money, orderLabel, itemLineTotal, itemExtras, activePayment, assetUrl }}

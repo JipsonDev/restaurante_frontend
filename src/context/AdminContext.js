@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { BASE_URL, useAuth } from './AuthContext';
-import { REALTIME_EVENTS, getRealtimeSocket, subscribeRealtime } from '../services/realtime';
+import { REALTIME_EVENTS, getRealtimeSocket, subscribeRealtime, watchConnection } from '../services/realtime';
 import { addDays, dayOf, localStamp } from '../utils/reservationLogic.mjs';
 
 const AdminContext = createContext(null);
@@ -238,14 +238,7 @@ export function AdminProvider({ children }) {
 
   useEffect(() => {
     const socket = getRealtimeSocket();
-    const handleConnect = () => { setSyncStatus('connected'); refreshAll(); };
-    const handleDisconnect = () => setSyncStatus('disconnected');
-    const handleError = () => setSyncStatus('error');
-
-    socket.on('connect', handleConnect);
-    socket.on('disconnect', handleDisconnect);
-    socket.on('connect_error', handleError);
-    setSyncStatus(socket.connected ? 'connected' : 'connecting');
+    const stopWatching = watchConnection(setSyncStatus, { onReconnect: () => refreshAll() });
 
     const applyOrder = (payload = {}) => {
       fetchInventario();
@@ -304,9 +297,7 @@ export function AdminProvider({ children }) {
     ];
 
     return () => {
-      socket.off('connect', handleConnect);
-      socket.off('disconnect', handleDisconnect);
-      socket.off('connect_error', handleError);
+      stopWatching();
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
   }, [fetchCaja, fetchMesas, fetchPedidos, fetchInventario, fetchProductos, fetchReservas, putReserva, refreshAll]);

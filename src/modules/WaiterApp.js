@@ -56,6 +56,7 @@ import {
   ArrowRightLeft,
   StickyNote,
   MoreHorizontal,
+  CheckCheck,
   ChevronRight
 } from 'lucide-react-native';
 import axios from 'axios';
@@ -84,7 +85,7 @@ import { haptic, IconButton as CIconButton, Press as CPress, BottomSheet as CBot
 import ExpressDraftList from '../components/ExpressDraftList';
 import { catalogContext } from '../utils/waiterNavigation.mjs';
 import { BOTTOM_INSET, TOP_INSET } from '../utils/safeArea';
-import { REALTIME_EVENTS, getRealtimeSocket, subscribeRealtime } from '../services/realtime';
+import { REALTIME_EVENTS, getRealtimeSocket, subscribeRealtime, watchConnection } from '../services/realtime';
 import {
   addWaiterNotificationResponseListener,
   configureWaiterNotifications,
@@ -750,17 +751,7 @@ function App() {
   useEffect(() => {
     const client = getRealtimeSocket();
 
-    const onConnect = () => {
-      setRealtimeStatus('connected');
-      scheduleLiveSync();
-    };
-    const onDisconnect = () => setRealtimeStatus('disconnected');
-    const onConnectError = () => setRealtimeStatus('error');
-
-    setRealtimeStatus(client.connected ? 'connected' : 'connecting');
-    client.on('connect', onConnect);
-    client.on('disconnect', onDisconnect);
-    client.on('connect_error', onConnectError);
+    const stopWatching = watchConnection(setRealtimeStatus, { onReconnect: () => scheduleLiveSync() });
 
     const applyOrderPayload = (payload = {}) => {
       // Cocina marcó platos sueltos como listos: avisar al mesero de esa cuenta qué puede llevar ya.
@@ -890,9 +881,7 @@ function App() {
     ];
 
     return () => {
-      client.off('connect', onConnect);
-      client.off('disconnect', onDisconnect);
-      client.off('connect_error', onConnectError);
+      stopWatching();
       unsubs.forEach((fn) => fn?.());
     };
   }, [addNotification, scheduleLiveSync, user?.id]);
@@ -1303,16 +1292,24 @@ function App() {
 
   const deliveryLock = useRef(false);
   const [deliveringRound, setDeliveringRound] = useState(null);
-  const marcarEntregado = async (round) => runExclusive(deliveryLock, async () => {
-    if (isExpressOrder && round.estado_cobro !== 'PAGADO') { setCustomAlert({ title: 'Primero cobrar', message: 'Registra el pago completo en caja antes de entregar este pedido.' }); return; }
-    setDeliveringRound(round.id);
+  // Entregar de una vez todo lo que está listo en la cuenta (no ronda por ronda).
+  const entregarListos = async (rounds) => runExclusive(deliveryLock, async () => {
+    if (!rounds.length) return;
+    if (isExpressOrder && rounds.some(r => r.estado_cobro !== 'PAGADO')) { setCustomAlert({ title: 'Primero cobrar', message: 'Registra el pago completo en caja antes de entregar este pedido.' }); return; }
+    setDeliveringRound('all');
     try {
-      const { data } = await axios.put(`${BASE_URL}/pedidos/${round.pedido_id}/rondas/${round.id}`, { estado: 'ENTREGADO' });
-      if (data.pedido) setPedidos((prev) => upsertById(prev, data.pedido));
+      let last = null;
+      for (const round of rounds) {
+        const { data } = await axios.put(`${BASE_URL}/pedidos/${round.pedido_id}/rondas/${round.id}`, { estado: 'ENTREGADO' });
+        if (data.pedido) last = data.pedido;
+      }
+      if (last) setPedidos((prev) => upsertById(prev, last));
       haptic('success');
+      toast.show(isExpressOrder ? 'Pedido entregado' : 'Entregado en la mesa', { tone: 'success', haptic: false });
       scheduleLiveSync();
     } catch (error) {
       setCustomAlert({ title: 'Error al entregar', message: error.response?.data?.message || error.message });
+      scheduleLiveSync();
     } finally { setDeliveringRound(null); }
   });
 
@@ -1648,15 +1645,21 @@ function App() {
       toast.show('No se pudo pedir la cuenta', { detail: error.response?.data?.message || error.message, tone: 'error', haptic: 'warning' });
     }
   };
-  const salonEntregar = (round, pedido) => runExclusive(deliveryLock, async () => {
+  // Bandeja: entrega de una vez todas las rondas listas de esa mesa o pedido.
+  const salonEntregar = (roundOrList, pedido) => runExclusive(deliveryLock, async () => {
+    const list = Array.isArray(roundOrList) ? roundOrList : [roundOrList];
     if (!pedido.mesa_id && String(pedido.estado_cobro || '').toUpperCase() !== 'PAGADO') {
       toast.show('Primero cobrar en caja', { detail: `Pedido #${pedido.id} aún no está pagado.`, tone: 'warning', haptic: 'warning' });
       return;
     }
-    setTrayDelivering(round.id);
+    setTrayDelivering(`p${pedido.id}`);
     try {
-      const { data } = await axios.put(`${BASE_URL}/pedidos/${round.pedido_id || pedido.id}/rondas/${round.id}`, { estado: 'ENTREGADO' });
-      if (data.pedido) setPedidos((prev) => upsertById(prev, data.pedido));
+      let last = null;
+      for (const round of list) {
+        const { data } = await axios.put(`${BASE_URL}/pedidos/${round.pedido_id || pedido.id}/rondas/${round.id}`, { estado: 'ENTREGADO' });
+        if (data.pedido) last = data.pedido;
+      }
+      if (last) setPedidos((prev) => upsertById(prev, last));
       toast.show(pedido.mesa_id ? `Mesa ${pedido.mesa_numero || pedido.mesa_id}: entregado` : `#${pedido.id}: entregado`, { tone: 'success', haptic: 'success' });
       scheduleLiveSync();
     } catch (error) {
@@ -1843,13 +1846,12 @@ function App() {
     if (!pedidoActual) return null;
     const rounds = accountRounds(pedidoActual).filter((round) => round.estado !== 'CANCELADO');
     const paid = pedidoActual?.estado_cobro === 'PAGADO';
+    const { deliverable, deliverLabel } = deliveryInfo();
     return (
       <View>
-        {rounds.length ? <SectionLabel>Ya pedido</SectionLabel> : null}
+        {rounds.length ? <SectionLabel right={deliverable.length && (showingCart || pendingSend) ? <CButton size="sm" variant="ink" icon={CheckCheck} onPress={() => entregarListos(deliverable)} loading={deliveringRound === 'all'}>{deliverLabel}</CButton> : null}>Ya pedido</SectionLabel> : null}
         {rounds.map((round, index) => {
-          const canDeliver = round.estado === 'LISTO' && (!isExpressOrder || round.estado_cobro === 'PAGADO');
-          return <PastRound key={round.id} round={round} index={index + 1}
-            action={canDeliver ? <CButton variant="ink" full onPress={() => marcarEntregado(round)} loading={deliveringRound === round.id} disabled={deliveringRound !== null} accessibilityLabel={`Entregar ronda ${round.id}`}>Entregar esta ronda</CButton> : null}>
+          return <PastRound key={round.id} round={round} index={index + 1} title={rounds.length === 1 || isExpressOrder ? 'Pedido' : null}>
             {round.estado === 'LISTO' && isExpressOrder && round.estado_cobro !== 'PAGADO' ? <CT size={14} color={colors.warning}>Listo en cocina. La entrega se habilita al completar el cobro.</CT> : null}
           </PastRound>;
         })}
@@ -1942,14 +1944,26 @@ function App() {
     );
   };
 
+  // Lo listo para llevar en la cuenta abierta, y cómo se llama la acción (sin hablar de «rondas» si no hace falta).
+  const deliveryInfo = () => {
+    const rounds = pedidoActual ? accountRounds(pedidoActual).filter((round) => round.estado !== 'CANCELADO') : [];
+    const deliverable = rounds.filter(r => r.estado === 'LISTO' && (!isExpressOrder || r.estado_cobro === 'PAGADO'));
+    const waitingPay = isExpressOrder && rounds.some(r => r.estado === 'LISTO' && r.estado_cobro !== 'PAGADO');
+    const deliverLabel = isExpressOrder || rounds.length === 1 ? 'Entregar pedido' : deliverable.length > 1 ? 'Entregar todo' : 'Entregar';
+    return { deliverable, deliverLabel, waitingPay };
+  };
+
   const renderSendBar = () => {
     if (showingCart || pendingSend) return <SendBar count={cartCount} amount={total} onPress={enviarCocina} sending={orderSending}
       pending={!!pendingSend} offline={realtimeStatus !== 'connected'} disabled={!drafts.ready} />;
     if (!pedidoActual) return null;
     // Sin ronda nueva: las dos cosas que se hacen con una cuenta abierta.
     const paid = pedidoActual.estado_cobro === 'PAGADO';
+    const { deliverable, deliverLabel } = deliveryInfo();
     return <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 6, borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.bg }}>
-      {catalog.editable ? <CButton variant="primary" size="lg" icon={Plus} onPress={() => setStep('productos')} style={{ flex: 1 }}>Pedir más</CButton> : null}
+      {/* Si hay algo listo, lo principal es llevarlo: un toque entrega todo. */}
+      {deliverable.length ? <CButton variant="primary" size="lg" icon={CheckCheck} onPress={() => entregarListos(deliverable)} loading={deliveringRound === 'all'} style={{ flex: 1.4 }}>{deliverLabel}</CButton>
+        : catalog.editable ? <CButton variant="primary" size="lg" icon={Plus} onPress={() => setStep('productos')} style={{ flex: 1 }}>Pedir más</CButton> : null}
       <CButton variant="outline" size="lg" icon={Printer} disabled={paid} onPress={solicitarCobroCaja} style={{ flex: 1 }} accessibilityLabel="Solicitar cobro en caja">{paid ? 'Pagado' : 'Cobrar'}</CButton>
     </View>;
   };

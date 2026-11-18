@@ -132,8 +132,11 @@ export default function CashierWorkspace({ model: m, actions: a, helpers: h }) {
   // ── Avisos (cobro pendiente, caja cerrada, eventos) ────────────────────────
   const notices = <>
     {m.pendingPayment ? <View accessibilityRole="alert" style={{ flexDirection: phone ? 'column' : 'row', alignItems: phone ? 'stretch' : 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: c.amberSoft, borderBottomWidth: 1, borderColor: c.line }}>
-      <T c={c} size={14} weight="600" color={c.amber} style={{ flex: 1 }}>Hay un cobro sin confirmar del pedido #{m.pendingPayment.pedido_id} por {money(m.pendingPayment.monto)}. Reintenta: se usa el mismo identificador y no se duplica.</T>
-      <Btn c={c} size="sm" variant="ink" icon={RefreshCw} onPress={a.handleCharge} loading={m.busy} kbd="F8">Reintentar cobro</Btn>
+      <T c={c} size={14} weight="600" color={c.amber} style={{ flex: 1 }}>No se confirmó el cobro del pedido #{m.pendingPayment.pedido_id} por {money(m.pendingPayment.monto)} (se cortó la conexión). Reintentar no cobra dos veces: si ya entró, solo lo confirma.</T>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <Btn c={c} size="sm" variant="ink" icon={RefreshCw} onPress={a.handleCharge} loading={m.busy} kbd="F8">Reintentar cobro</Btn>
+        <Btn c={c} size="sm" onPress={a.discardPendingPayment} disabled={m.busy}>Descartar</Btn>
+      </View>
     </View> : null}
     {m.cashNotice ? <View accessibilityRole="alert" style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderColor: c.line,
       backgroundColor: m.cashNotice.type === 'error' ? c.redSoft : m.cashNotice.type === 'warning' ? c.amberSoft : m.cashNotice.type === 'success' ? c.greenSoft : c.blueSoft }}>
