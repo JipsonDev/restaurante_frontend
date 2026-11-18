@@ -1,9 +1,9 @@
 // Menú del mesero, como una app de delivery: lista con la foto a la derecha y el «+» sobre la foto.
 // Tocar la fila suma uno; mantener presionado abre notas y extras. En tablet, cuadrícula.
 // Arriba: para quién se pide y su cuenta, búsqueda y categorías. Abajo: la barra del carrito en el color del local.
-import React, { memo, useEffect, useMemo, useState } from 'react';
+import React, { memo, useEffect, useMemo, useState, useRef } from 'react';
 import { FlatList, Platform, View } from 'react-native';
-import { ChevronDown, Plus, Receipt, RotateCcw, Search } from 'lucide-react-native';
+import { ChevronDown, Minus, Plus, Trash2, Receipt, RotateCcw, Search } from 'lucide-react-native';
 import { useTheme } from '../theme';
 import { filterMenuProducts, menuStock } from '../utils/waiterCatalog.mjs';
 import { draftDeliveryStatus } from '../utils/waiterSync.mjs';
@@ -24,13 +24,35 @@ function useProductState(producto, qty, canAdd, locked, onAdd, onCustomize, choo
   return { stock, soldOut, off, low, add, custom, label };
 }
 
-// «+» en la esquina de la foto. Con cantidad, el − n + va debajo de la foto, a su mismo ancho.
+// Control sobre la esquina de la foto, como en las apps de delivery:
+// sin pedir → «+»; pedido → un cuadro con la cantidad; al tocarlo se abre «− n +» y se cierra solo a los 3 s.
 function AddControl({ producto, qty, off, locked, add, onDecrement, onAdd, small }) {
   const { c } = useTheme();
-  if (qty > 0 && !locked) return <Tally value={qty} size="sm" removable stretch bg={c.bg} label={producto.nombre} onChange={next => next > qty ? onAdd(producto) : onDecrement(producto)} />;
+  const [open, setOpen] = useState(false);
+  const timer = useRef(null);
+  const keepOpen = () => { clearTimeout(timer.current); setOpen(true); timer.current = setTimeout(() => setOpen(false), 3000); };
+  useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(() => { if (!qty) setOpen(false); }, [qty]);
+  const size = small ? 34 : 38;
+  const box = { height: size, borderRadius: radius.md, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' };
+  if (qty > 0 && !locked) {
+    if (!open) return <Press accessibilityRole="button" accessibilityLabel={`${qty} de ${producto.nombre} en la ronda. Cambiar cantidad`} onPress={keepOpen} hapticKind="tap" scaleTo={0.9}
+      style={[box, { minWidth: size, paddingHorizontal: 6 }]}>
+      <Num size={16} weight="800" color={c.onPrimary}>{qty}</Num>
+    </Press>;
+    const step = (delta, Icon, label) => <Press accessibilityRole="button" accessibilityLabel={label} hapticKind="select" scaleTo={0.85}
+      onPress={() => { keepOpen(); delta > 0 ? onAdd(producto) : onDecrement(producto); }} style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      <Icon size={17} color={c.onPrimary} strokeWidth={2.6} />
+    </Press>;
+    return <View accessibilityLabel={`Cantidad de ${producto.nombre}: ${qty}`} style={[box, { flexDirection: 'row' }]}>
+      {step(-1, qty <= 1 ? Trash2 : Minus, qty <= 1 ? `Quitar ${producto.nombre}` : `Quitar uno de ${producto.nombre}`)}
+      <Num size={16} weight="800" color={c.onPrimary} style={{ minWidth: 20, textAlign: 'center' }}>{qty}</Num>
+      {step(1, Plus, `Añadir otro ${producto.nombre}`)}
+    </View>;
+  }
   if (off) return null;
   return <Press accessibilityRole="button" accessibilityLabel={`Añadir ${producto.nombre}`} onPress={add} hapticKind="tap" scaleTo={0.88}
-    style={{ width: small ? 34 : 38, height: small ? 34 : 38, borderRadius: radius.md, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' }}>
+    style={[box, { width: size }]}>
     <Plus size={20} color={c.onPrimary} strokeWidth={2.6} />
   </Press>;
 }
@@ -40,11 +62,10 @@ const ProductRow = memo(function ProductRow({ producto, qty, canAdd, locked, onA
   const { c } = useTheme();
   const s = useProductState(producto, qty, canAdd, locked, onAdd, onCustomize, chooseTarget);
   // El «+» va fuera del botón de la fila (un botón no puede contener otro), encima de la foto.
-  const counting = qty > 0 && !locked;
   return <View>
   <Press accessibilityRole="button" accessibilityLabel={s.label} accessibilityHint={s.soldOut ? undefined : canAdd ? 'Toca para añadir; mantén presionado para notas o extras' : 'Elige primero la mesa'}
     disabled={s.off} onPress={s.add} onLongPress={canAdd && !s.off ? s.custom : undefined} hapticKind={s.off ? undefined : 'tap'} scaleTo={0.985}
-    style={{ flexDirection: 'row', gap: space.md, paddingTop: space.md, paddingBottom: counting ? space.md + 8 + 34 : space.md, minHeight: 112 }}>
+    style={{ flexDirection: 'row', gap: space.md, paddingVertical: space.md, minHeight: 112 }}>
     <View style={{ flex: 1, minWidth: 0, gap: 4, justifyContent: 'center' }}>
       <T size={16} weight="600" numberOfLines={2}>{producto.nombre}</T>
       {producto.descripcion ? <T size={14} color={c.muted} numberOfLines={1}>{producto.descripcion}</T> : null}
@@ -57,11 +78,9 @@ const ProductRow = memo(function ProductRow({ producto, qty, canAdd, locked, onA
       <ProductArt product={producto} radius={radius.lg} dim={s.soldOut} iconScale={0.34} />
     </View>
   </Press>
-  {counting ? <View style={{ position: 'absolute', right: 0, width: 96, top: space.md + 96 + 8 }}>
-    <Tally value={qty} size="sm" removable stretch label={producto.nombre} onChange={next => next > qty ? onAdd(producto) : onDecrement(producto)} />
-  </View> : <View style={{ position: 'absolute', right: 6, top: space.md + 96 - 6 - 34 }}>
+  <View style={{ position: 'absolute', right: 6, top: space.md + 96 - 6 - 34 }}>
     <AddControl producto={producto} qty={qty} off={s.off} locked={locked} add={s.add} onAdd={onAdd} onDecrement={onDecrement} small />
-  </View>}
+  </View>
   </View>;
 });
 
@@ -76,7 +95,6 @@ const ProductCard = memo(function ProductCard({ producto, qty, canAdd, locked, o
       <View onLayout={e => setPhotoH(e.nativeEvent.layout.height)}>
         <ProductArt product={producto} radius={radius.lg} dim={s.soldOut} aspect={4 / 3} iconScale={0.26} />
       </View>
-      {qty > 0 && !locked ? <View style={{ height: 34 }} /> : null}
       <View style={{ gap: 2, paddingHorizontal: 2 }}>
         <T size={16} weight="600" numberOfLines={2}>{producto.nombre}</T>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -85,9 +103,7 @@ const ProductCard = memo(function ProductCard({ producto, qty, canAdd, locked, o
         </View>
       </View>
     </Press>
-    {qty > 0 && !locked ? <View style={{ position: 'absolute', left: 0, right: 0, top: photoH + 8 }}>
-      <Tally value={qty} size="sm" removable stretch label={producto.nombre} onChange={next => next > qty ? onAdd(producto) : onDecrement(producto)} />
-    </View> : photoH ? <View style={{ position: 'absolute', right: 8, top: photoH - 8 - 38 }}>
+    {photoH ? <View style={{ position: 'absolute', right: 8, top: photoH - 8 - 38 }}>
       <AddControl producto={producto} qty={qty} off={s.off} locked={locked} add={s.add} onAdd={onAdd} onDecrement={onDecrement} />
     </View> : null}
   </View>;
