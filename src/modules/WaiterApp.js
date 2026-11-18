@@ -89,6 +89,7 @@ import {
   registerWaiterPushToken,
 } from '../services/waiterNotifications';
 import { alertWaiter, loadAlertSettings, notificationPermission, requestNotificationPermission } from '../services/waiterAlerts';
+import { enableWebPush } from '../services/webPushClient';
 import * as safeStorage from '../services/storage';
 import { packSnapshot, parseSnapshot, queuedByTable, snapshotAge } from '../utils/offlineSnapshot.mjs';
 import { dueReminders } from '../utils/waiterAlertLogic.mjs';
@@ -915,6 +916,25 @@ function App() {
       subscribeRealtime(REALTIME_EVENTS.TABLE_UPDATED, applyTablePayload(null)),
       // Cocina marcó un producto como agotado (o disponible otra vez): el menú se actualiza al instante.
       subscribeRealtime(REALTIME_EVENTS.CATALOG_UPDATED, (payload = {}) => {
+        // Cambió el stock (venta, preparación, reposición): unidades al día y aviso si algo se acabó o volvió.
+        if (payload.action === 'stock' && Array.isArray(payload.productos)) {
+          const byId = new Map(payload.productos.map((p) => [Number(p.producto_id), Number(p.stock_disponible)]));
+          let soldOut = [], back = [];
+          setProductos((prev) => prev.map((p) => {
+            if (!byId.has(Number(p.id))) return p;
+            const units = byId.get(Number(p.id)), before = Number(p.stock_disponible ?? 1);
+            if (units <= 0 && before > 0 && Number(p.agotado) !== 1) soldOut.push(p.nombre);
+            if (units > 0 && before <= 0 && Number(p.agotado) !== 1) back.push(p.nombre);
+            return { ...p, stock_disponible: units };
+          }));
+          // (las listas se llenan dentro de setProductos; se avisa en el siguiente ciclo)
+          setTimeout(() => {
+            const list = (names) => names.length > 2 ? `${names.slice(0, 2).join(', ')} y ${names.length - 2} más` : names.join(' y ');
+            if (soldOut.length) toast.show(`${list(soldOut)}: se ${soldOut.length === 1 ? 'agotó' : 'agotaron'}`, { tone: 'warning', detail: 'No queda stock. Ya aparece como «Agotado» en el menú.' });
+            else if (back.length) toast.show(`${list(back)}: otra vez disponible`, { tone: 'success', detail: 'Se repuso el stock.' });
+          }, 0);
+          return;
+        }
         if (!payload.producto_id) return;
         setProductos((prev) => prev.map((p) => Number(p.id) === Number(payload.producto_id) ? { ...p, agotado: payload.agotado ? 1 : 0 } : p));
         toast.show(payload.agotado ? `${payload.nombre || 'Un producto'} se agotó` : `${payload.nombre || 'Un producto'} está disponible otra vez`,
@@ -1744,7 +1764,14 @@ function App() {
     const result = await requestNotificationPermission();
     setAlertPermission(result);
     setAlertPromptDismissed(true); safeStorage.setItem('mm:waiter-alerts-prompt', 'no').catch(() => {});
-    if (result === 'granted') { alertWaiter('ready', { title: 'Avisos activados' }); toast.show('Avisos activados', { tone: 'success', detail: 'Así sonará cuando un plato esté listo.' }); }
+    if (result === 'granted') {
+      alertWaiter('ready', { title: 'Avisos activados' });
+      const push = await enableWebPush({ ask: false });
+      toast.show('Avisos activados', { tone: 'success', duration: 7000,
+        detail: push === 'active' ? 'Te llegarán aunque el teléfono esté bloqueado.'
+          : push === 'ios-install' ? 'Con la app abierta. En iPhone, instala la app en la pantalla de inicio para recibirlos con el teléfono bloqueado.'
+          : 'Así sonará cuando un plato esté listo.' });
+    }
     else if (result === 'denied') toast.show('El navegador bloqueó los avisos', { tone: 'warning', detail: 'Igual sonará con la app abierta. Para el aviso del sistema, permite las notificaciones en los ajustes del sitio.', duration: 8000 });
   };
   const dismissAlertsPrompt = () => { setAlertPromptDismissed(true); safeStorage.setItem('mm:waiter-alerts-prompt', 'no').catch(() => {}); };

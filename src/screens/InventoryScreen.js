@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { ArrowDownLeft, ArrowRight, ArrowUpRight, ArrowDownUp, Check, CircleAlert, Edit3, Package, PackageCheck, PackageX, Plus, Search, SlidersHorizontal, Trash2, X } from 'lucide-react-native';
 import { useAdmin } from '../context/AdminContext';
@@ -6,6 +6,7 @@ import { useTheme } from '../theme';
 import { MenuButton, MenuChip, MenuField, MenuModal, MenuNotice } from '../components/MenuUI';
 import { ActionMenu, Banner, Button, Card, DataTable, EmptyState, FadeIn, IconButton, PageHeader, SearchField, Segmented, Skeleton, Status, Tabs, space, type, useToast } from '../components/admin/ui';
 import { inventoryMovement, inventoryPayload, inventoryStock } from '../utils/inventoryLogic.mjs';
+import { enableWebPush, pushStatus, pushSupport, subscribePushStatus } from '../services/webPushClient';
 
 const row = { flexDirection: 'row', alignItems: 'center' };
 const quantity = value => Number(value || 0).toLocaleString('es-EC', { maximumFractionDigits: 3 });
@@ -48,6 +49,17 @@ export default function InventoryScreen() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const toast = useToast();
+  // Avisos de «queda poco» al teléfono de quien administra (los mismos avisos push del mesero).
+  const [push, setPush] = useState(pushStatus());
+  useEffect(() => { enableWebPush({ ask: false }).catch(() => {}); return subscribePushStatus(setPush); }, []);
+  const askPush = async () => {
+    const result = await enableWebPush({ ask: true });
+    if (result === 'active') toast.show('Listo: te avisaremos al teléfono cuando algo esté por acabarse.', 'green', 6000);
+    else if (result === 'denied') toast.show('El navegador bloqueó los avisos. Permítelos en los ajustes del sitio.', 'amber', 8000);
+    else if (result === 'ios-install') toast.show('En iPhone, instala la app en la pantalla de inicio y actívalo desde ahí.', 'amber', 8000);
+    else if (result === 'unsupported') toast.show('Este navegador no permite avisos al teléfono.', 'amber', 6000);
+    else if (result === 'error') toast.show('No se pudo activar. Intenta de nuevo en un momento.', 'red', 6000);
+  };
   React.useEffect(() => { if (notice) { toast.show(notice); setNotice(''); } }, [notice]);
   const money = n => `${configuracion?.simbolo_moneda || '$'}${Number(n || 0).toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const card = { backgroundColor: c.surface, borderWidth: 1, borderColor: c.line, borderRadius: 10, overflow: 'hidden' };
@@ -121,7 +133,11 @@ export default function InventoryScreen() {
   </View>;
   return <View style={{ flex: 1 }} onLayout={e => setWidth(e.nativeEvent.layout.width)}>
     <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: space.x3 }}>
-      <PageHeader title="Inventario" actions={<Button variant="primary" onPress={() => open('edit')}>Agregar insumo</Button>} />
+      <PageHeader title="Inventario" description={push === 'active' ? 'Te avisamos al teléfono cuando algo esté por acabarse.' : 'Al vender, cada plato descuenta sus ingredientes de la receta.'}
+        actions={<View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
+          {push !== 'active' && pushSupport() !== 'unsupported' ? <Button onPress={askPush}>Avisarme al teléfono</Button> : null}
+          <Button variant="primary" onPress={() => open('edit')}>Agregar insumo</Button>
+        </View>} />
       {lowCount + emptyCount > 0 ? <Banner tone="warning" style={{ marginBottom: space.lg }} title={`${lowCount + emptyCount} ${lowCount + emptyCount === 1 ? 'insumo necesita' : 'insumos necesitan'} reposición`}
         action={status === 'all' ? <Button size="sm" onPress={() => setStatus(emptyCount ? 'empty' : 'low')}>Ver insumos</Button> : null}>
         {`${emptyCount ? `${emptyCount} sin disponible` : ''}${emptyCount && lowCount ? ' · ' : ''}${lowCount ? `${lowCount} bajo el mínimo` : ''}.`}

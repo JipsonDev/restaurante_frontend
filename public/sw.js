@@ -1,4 +1,4 @@
-const CACHE_NAME = 'morena-mia-webapp-v5';
+const CACHE_NAME = 'morena-mia-webapp-v6';
 const APP_SHELL = ['/', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/icon-maskable-192.png', '/icons/icon-maskable-512.png', '/icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (event) => {
@@ -66,3 +66,30 @@ self.addEventListener('notificationclick', (event) => {
     })
   );
 });
+
+// Aviso del servidor (Web Push): llega aunque el teléfono esté bloqueado o la app cerrada.
+// Si la app está abierta y a la vista, ya sonó dentro de la app: no se repite el aviso.
+const PUSH_VIBRATION = { ready: [0, 320, 120, 320, 120, 520], call: [0, 500, 150, 500], reserve: [0, 200, 100, 200], stock: [0, 200] };
+self.addEventListener('push', (event) => {
+  let message = {};
+  try { message = event.data ? event.data.json() : {}; } catch { message = { title: 'Morena Mía', body: event.data ? event.data.text() : '' }; }
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      const watching = clients.some((client) => client.visibilityState === 'visible' && client.focused);
+      if (watching && message.tag !== 'prueba') return undefined;
+      return self.registration.showNotification(message.title || 'Morena Mía', {
+        body: message.body || '',
+        tag: message.tag || 'aviso',
+        renotify: true,
+        icon: '/icons/icon-192.png',
+        badge: '/icons/icon-192.png',
+        vibrate: PUSH_VIBRATION[message.kind] || PUSH_VIBRATION.ready,
+        requireInteraction: message.kind === 'ready' || message.kind === 'call',
+        data: message.data || { url: '/' },
+      });
+    })
+  );
+});
+
+// El navegador renovó la suscripción por su cuenta: la app la vuelve a registrar al abrirse.
+self.addEventListener('pushsubscriptionchange', () => {});

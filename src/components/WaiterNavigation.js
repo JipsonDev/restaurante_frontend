@@ -3,13 +3,14 @@
 // «Más» abre una hoja con Promos, borradores, actualizar, tema y cerrar sesión.
 import React, { useEffect, useState } from 'react';
 import { View } from 'react-native';
-import { Bell, BellRing, BadgePercent, CalendarClock, ChefHat, CloudOff, Download, FileText, LogOut, Moon, MoreHorizontal, RefreshCw, ShoppingBag, Smartphone, Sun, Users, Vibrate, Volume2 } from 'lucide-react-native';
+import { Bell, BellRing, BadgePercent, CalendarClock, ChefHat, CloudOff, Download, FileText, Lock, LogOut, Moon, MoreHorizontal, RefreshCw, ShoppingBag, Smartphone, Sun, Users, Vibrate, Volume2 } from 'lucide-react-native';
 import Logo from './Logo';
 import { connectionState } from '../utils/waiterSync.mjs';
 import { useTheme } from '../theme';
 import { BottomSheet, ConnectionDot, IconButton, Label, Num, Press, T, TabBar, space } from './waiter/comanda';
 import { useInstallAction } from './waiter/install';
 import { alertSettings, alertWaiter, keepAwakeSupported, saveAlertSettings, subscribeAlertSettings } from '../services/waiterAlerts';
+import { pushStatus, pushSupport, subscribePushStatus, testWebPush } from '../services/webPushClient';
 
 const initialsOf = name => String(name || 'Mesero').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
 const clock = at => at ? new Date(at).toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : '';
@@ -71,6 +72,26 @@ export function WaiterMoreSheet({ open, onClose, name, navigate, dark, toggleThe
   const installer = useInstallAction();
   const [alerts, setAlerts] = useState(alertSettings());
   useEffect(() => subscribeAlertSettings(setAlerts), []);
+  const [push, setPush] = useState(pushStatus());
+  useEffect(() => subscribePushStatus(setPush), []);
+  const [testing, setTesting] = useState(false);
+  const [testNote, setTestNote] = useState('');
+  const support = pushSupport();
+  // Con avisos push activos, la prueba viaja por el servidor: es exactamente el camino de «plato listo».
+  const runTest = async () => {
+    if (push !== 'active') { alertWaiter('ready', { title: 'Prueba: Mesa 4 lista', body: 'Así suena cuando cocina termina un plato.' }); return; }
+    setTesting(true);
+    try {
+      if (await testWebPush(8)) { setTestNote('Bloquea el teléfono: el aviso llega en unos 8 segundos.'); setTimeout(() => setTestNote(''), 12000); }
+      else alertWaiter('ready', { title: 'Prueba: Mesa 4 lista' });
+    } catch { alertWaiter('ready', { title: 'Prueba: Mesa 4 lista' }); }
+    finally { setTesting(false); }
+  };
+  const lockState = push === 'active' ? { icon: Lock, tone: c.green, title: 'Con el teléfono bloqueado: activado', detail: 'Los avisos llegan aunque cierres la app.' }
+    : support === 'ios-install' ? { icon: Lock, tone: c.amber, title: 'Con el teléfono bloqueado: falta instalar', detail: 'En iPhone, toca Compartir → «Agregar a inicio» y abre la app desde ahí.' }
+    : push === 'error' ? { icon: Lock, tone: c.amber, title: 'Con el teléfono bloqueado: no se activó', detail: 'Toca para intentarlo otra vez.', retry: true }
+    : support === 'unsupported' ? { icon: Lock, tone: c.muted, title: 'Con el teléfono bloqueado: no disponible', detail: 'Este navegador no lo permite. Usa Chrome en Android o instala la app en iPhone.' }
+    : null;
   const row = (Icon, label, detail, onPress, tone, right) => <Press key={label} accessibilityRole="button" accessibilityLabel={label} onPress={() => { onClose(); onPress(); }} hapticKind="tap"
     style={{ minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.sm, borderRadius: 18 }} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
     <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: tone === c.red ? c.redSoft : tone === c.amber ? c.amberSoft : c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><Icon size={20} color={tone || c.text} /></View>
@@ -101,10 +122,19 @@ export function WaiterMoreSheet({ open, onClose, name, navigate, dark, toggleThe
       {setting(Volume2, 'Sonido', 'Suena cuando un plato está listo', 'sound')}
       {setting(Vibrate, 'Vibración', null, 'vibrate')}
       {keepAwakeSupported() ? setting(Smartphone, 'Pantalla siempre encendida', 'El teléfono no se duerme: no te pierdes avisos', 'keepAwake') : null}
-      <Press accessibilityRole="button" accessibilityLabel="Probar el aviso" onPress={() => alertWaiter('ready', { title: 'Prueba: Mesa 4 lista', body: 'Así suena cuando cocina termina un plato.' })} hapticKind={null}
+      {lockState ? <Press accessibilityRole={lockState.retry ? 'button' : 'text'} disabled={!lockState.retry} onPress={() => { onClose(); enableAlerts(); }} scaleTo={1}
+        style={{ minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.sm }}>
+        <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: lockState.tone === c.green ? c.greenSoft : lockState.tone === c.amber ? c.amberSoft : c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><lockState.icon size={20} color={lockState.tone} /></View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <T size={16} weight="600">{lockState.title}</T>
+          <T size={14} color={c.muted}>{lockState.detail}</T>
+        </View>
+      </Press> : null}
+      <Press accessibilityRole="button" accessibilityLabel="Probar el aviso" disabled={testing} onPress={runTest} hapticKind={null}
         style={{ alignSelf: 'flex-start', minHeight: 44, paddingHorizontal: space.lg, marginLeft: 62, borderRadius: 22, backgroundColor: c.surfaceAlt, justifyContent: 'center' }}>
-        <T size={15} weight="700">Probar el aviso</T>
+        <T size={15} weight="700">{testing ? 'Enviando…' : 'Probar el aviso'}</T>
       </Press>
+      {testNote ? <T size={14} weight="700" color={c.green} accessibilityLiveRegion="polite" style={{ marginLeft: 62, marginTop: 6 }}>{testNote}</T> : null}
       {alertPermission === 'denied' ? <T size={13} color={c.muted} style={{ paddingHorizontal: space.sm, marginTop: 6 }}>El navegador tiene bloqueados los avisos del sistema. Con la app abierta igual suena; para el resto, permite las notificaciones en los ajustes del sitio.</T> : null}
 
       {section('Ajustes')}
