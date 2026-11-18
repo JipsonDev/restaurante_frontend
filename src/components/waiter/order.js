@@ -8,7 +8,6 @@ import {
   BottomSheet, Button, Chip, EASE, IconButton, Label, LeaderLine, Num, Perforation, Press, RollingNumber, Stamp, SwipeRow, Tally, T,
   TOUCH, TOUCH_MAIN, elevate, haptic, money, radius, space,
 } from './kit';
-import { ProductArt } from './ProductArt';
 
 const ND = false; // height/opacidad no se pueden animar en el hilo nativo
 
@@ -54,7 +53,6 @@ export function OrderLine({ item, total, detail, image, product, expanded, onTog
     <SwipeRow direction="left" onSwipe={remove} label="Quitar" icon={Trash2} disabled={locked || leaving} radius={0}>
     <View style={{ paddingVertical: space.md, backgroundColor: c.bg, borderBottomWidth: 1, borderBottomColor: c.line, opacity: locked ? 0.6 : 1 }} pointerEvents={locked ? 'none' : 'auto'}>
       <View style={{ flexDirection: 'row', gap: space.md, alignItems: 'flex-start' }}>
-        <View style={{ width: 56 }}><ProductArt product={product || item} radius={12} iconScale={0.42} /></View>
         <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
           <LeaderLine left={<T size={16} weight="600" numberOfLines={2}>{item.nombre}</T>}
             right={<RollingNumber value={total} format={money} size={16} weight="700" />} />
@@ -143,7 +141,6 @@ export function PastRound({ round, index, children, action }) {
     </Press>
     {open ? <View style={{ paddingBottom: space.md, gap: 2 }}>
       {items.map((it, i) => <View key={`${it.id || i}`} style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: 5 }}>
-        <View style={{ width: 36 }}><ProductArt product={it} radius={8} iconScale={0.46} /></View>
         <T size={15} style={{ flex: 1 }} numberOfLines={2}><Num size={15} weight="700">{it.cantidad}× </Num>{it.nombre}</T>
         {it.listo_at && round.estado !== 'LISTO' && round.estado !== 'ENTREGADO' ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}><Check size={14} color={c.green} strokeWidth={3} /><T size={13} weight="700" color={c.green}>lista</T></View> : null}
         <Num size={15} color={c.muted}>{money((Number(it.precio) || 0) * (Number(it.cantidad) || 0))}</Num>

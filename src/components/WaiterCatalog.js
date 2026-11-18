@@ -9,7 +9,6 @@ import { filterMenuProducts, menuStock } from '../utils/waiterCatalog.mjs';
 import { draftDeliveryStatus } from '../utils/waiterSync.mjs';
 import { T, Num, Press, Button, EmptyState, RollingNumber, Appear, Tally, UnderlineTabs, elevate, money, radius, space } from './waiter/kit';
 import { MenuSearch } from './waiter/menu';
-import { ProductArt } from './waiter/ProductArt';
 
 const price = n => `$${Number(n || 0).toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -24,9 +23,9 @@ function useProductState(producto, qty, canAdd, locked, onAdd, onCustomize, choo
   return { stock, soldOut, off, low, add, custom, label };
 }
 
-// Control sobre la esquina de la foto, como en las apps de delivery:
+// Control de cantidad, como en las apps de delivery:
 // sin pedir → «+»; pedido → un cuadro con la cantidad; al tocarlo se abre «− n +» y se cierra solo a los 3 s.
-function AddControl({ producto, qty, off, locked, add, onDecrement, onAdd, small }) {
+function AddControl({ producto, qty, off, locked, add, onDecrement, onAdd, small, plusBg }) {
   const { c } = useTheme();
   const [open, setOpen] = useState(false);
   const timer = useRef(null);
@@ -52,60 +51,45 @@ function AddControl({ producto, qty, off, locked, add, onDecrement, onAdd, small
   }
   if (off) return null;
   return <Press accessibilityRole="button" accessibilityLabel={`Añadir ${producto.nombre}`} onPress={add} hapticKind="tap" scaleTo={0.88}
-    style={[box, { width: size }]}>
-    <Plus size={20} color={c.onPrimary} strokeWidth={2.6} />
+    style={[box, { width: size, backgroundColor: plusBg || c.surfaceAlt }]}>
+    <Plus size={20} color={c.text} strokeWidth={2.4} />
   </Press>;
 }
 
-// ── Fila (celular) ─────────────────────────────────────────────────────────
+// ── Fila (celular): solo texto, sin foto; el control a la derecha ─────────
 const ProductRow = memo(function ProductRow({ producto, qty, canAdd, locked, onAdd, onDecrement, onCustomize, chooseTarget }) {
   const { c } = useTheme();
   const s = useProductState(producto, qty, canAdd, locked, onAdd, onCustomize, chooseTarget);
-  // El «+» va fuera del botón de la fila (un botón no puede contener otro), encima de la foto.
-  return <View>
-  <Press accessibilityRole="button" accessibilityLabel={s.label} accessibilityHint={s.soldOut ? undefined : canAdd ? 'Toca para añadir; mantén presionado para notas o extras' : 'Elige primero la mesa'}
-    disabled={s.off} onPress={s.add} onLongPress={canAdd && !s.off ? s.custom : undefined} hapticKind={s.off ? undefined : 'tap'} scaleTo={0.985}
-    style={{ flexDirection: 'row', gap: space.md, paddingVertical: space.md, minHeight: 112 }}>
-    <View style={{ flex: 1, minWidth: 0, gap: 4, justifyContent: 'center' }}>
-      <T size={16} weight="600" numberOfLines={2}>{producto.nombre}</T>
+  // El control va al lado del botón de la fila, no dentro (un botón no puede contener otro).
+  return <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: 68 }}>
+    <Press accessibilityRole="button" accessibilityLabel={s.label} accessibilityHint={s.soldOut ? undefined : canAdd ? 'Toca para añadir; mantén presionado para notas o extras' : 'Elige primero la mesa'}
+      disabled={s.off} onPress={s.add} onLongPress={canAdd && !s.off ? s.custom : undefined} hapticKind={s.off ? undefined : 'tap'} scaleTo={0.985}
+      style={{ flex: 1, minWidth: 0, paddingVertical: space.md, gap: 2 }}>
+      <T size={16} weight="600" numberOfLines={2} color={s.soldOut ? c.muted : c.text}>{producto.nombre}</T>
       {producto.descripcion ? <T size={14} color={c.muted} numberOfLines={1}>{producto.descripcion}</T> : null}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
-        <Num size={16} weight="700" color={s.soldOut ? c.muted : c.text}>{price(producto.precio)}</Num>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Num size={15} weight="600" color={s.soldOut ? c.muted : c.text}>{price(producto.precio)}</Num>
         {s.soldOut ? <T size={13} weight="700" color={c.red}>Agotado</T> : s.low ? <T size={13} weight="700" color={c.amber}>Quedan {s.stock}</T> : null}
       </View>
-    </View>
-    <View style={{ width: 96 }}>
-      <ProductArt product={producto} radius={radius.lg} dim={s.soldOut} iconScale={0.34} />
-    </View>
-  </Press>
-  <View style={{ position: 'absolute', right: 6, top: space.md + 96 - 6 - 34 }}>
+    </Press>
     <AddControl producto={producto} qty={qty} off={s.off} locked={locked} add={s.add} onAdd={onAdd} onDecrement={onDecrement} small />
-  </View>
   </View>;
 });
 
-// ── Tarjeta (tablet) ───────────────────────────────────────────────────────
+// ── Tarjeta (tablet): bloque de texto, sin foto ───────────────────────────
 const ProductCard = memo(function ProductCard({ producto, qty, canAdd, locked, onAdd, onDecrement, onCustomize, chooseTarget }) {
   const { c } = useTheme();
   const s = useProductState(producto, qty, canAdd, locked, onAdd, onCustomize, chooseTarget);
-  const [photoH, setPhotoH] = useState(0);
-  return <View style={{ flex: 1, minWidth: 0 }}>
+  return <View style={{ flex: 1, minWidth: 0, minHeight: 108, padding: space.md, borderRadius: radius.lg, backgroundColor: c.surfaceAlt, justifyContent: 'space-between', gap: space.sm }}>
     <Press accessibilityRole="button" accessibilityLabel={s.label} disabled={s.off} onPress={s.add} onLongPress={canAdd && !s.off ? s.custom : undefined} hapticKind={s.off ? undefined : 'tap'} scaleTo={0.98}
-      style={{ gap: 8 }}>
-      <View onLayout={e => setPhotoH(e.nativeEvent.layout.height)}>
-        <ProductArt product={producto} radius={radius.lg} dim={s.soldOut} aspect={4 / 3} iconScale={0.26} />
-      </View>
-      <View style={{ gap: 2, paddingHorizontal: 2 }}>
-        <T size={16} weight="600" numberOfLines={2}>{producto.nombre}</T>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Num size={16} weight="700" color={s.soldOut ? c.muted : c.text}>{price(producto.precio)}</Num>
-          {s.soldOut ? <T size={13} weight="700" color={c.red}>Agotado</T> : s.low ? <T size={13} weight="700" color={c.amber}>Quedan {s.stock}</T> : null}
-        </View>
-      </View>
+      style={{ gap: 2, flex: 1 }}>
+      <T size={16} weight="600" numberOfLines={2} color={s.soldOut ? c.muted : c.text}>{producto.nombre}</T>
+      {s.soldOut ? <T size={13} weight="700" color={c.red}>Agotado</T> : s.low ? <T size={13} weight="700" color={c.amber}>Quedan {s.stock}</T> : null}
     </Press>
-    {photoH ? <View style={{ position: 'absolute', right: 8, top: photoH - 8 - 38 }}>
-      <AddControl producto={producto} qty={qty} off={s.off} locked={locked} add={s.add} onAdd={onAdd} onDecrement={onDecrement} />
-    </View> : null}
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.sm }}>
+      <Num size={15} weight="600" color={s.soldOut ? c.muted : c.text}>{price(producto.precio)}</Num>
+      <AddControl producto={producto} qty={qty} off={s.off} locked={locked} add={s.add} onAdd={onAdd} onDecrement={onDecrement} small plusBg={c.bg} />
+    </View>
   </View>;
 });
 
