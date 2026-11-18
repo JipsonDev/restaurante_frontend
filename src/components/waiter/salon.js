@@ -1,16 +1,17 @@
-// Salón del mesero — dirección «Suave».
-// Tarjetas de mesa redondeadas con sombra suave y píldora de estado (punto + texto);
-// «Por cobrar» se rellena con el rojo de la marca. Bandeja «Listo», acciones rápidas y transferir.
+// Salón del mesero (marca blanca).
+// Casillas de mesa con un solo estado en colores fijos: Lista (verde lleno) y Por cobrar (ámbar lleno) resaltan;
+// el resto es neutro con el estado en texto e icono. Bandeja «Listo», acciones rápidas y transferir.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, ScrollView, TextInput, View } from 'react-native';
+import { Animated, Platform, ScrollView, TextInput, View } from 'react-native';
+const WEB_RING = Platform.OS === 'web';
 import axios from 'axios';
 import { ArrowRightLeft, BellRing, CalendarClock, ChefHat, CheckCheck, Clock3, CloudOff, Lock, Phone, Receipt, Search, Users, UserCheck, Utensils, X } from 'lucide-react-native';
-import { comandaTableMeta, useTheme } from '../../theme';
+import { comandaTableMeta, meseroTableTone, useTheme } from '../../theme';
 import { BASE_URL } from '../../context/AuthContext';
 import { serviceDate, serviceDuration, serviceRounds } from '../../utils/serviceTiming.mjs';
 import { RESERVATION_LABELS, addDays, dayOf, holdingReservation, isLate, localStamp, minutesUntil, nextByTable, timeOf } from '../../utils/reservationLogic.mjs';
 import { REALTIME_EVENTS, subscribeRealtime } from '../../services/realtime';
-import { Appear, BottomSheet, Button, Chip, EASE, EmptyState, IconButton, Label, Num, Perforation, Ping, Press, Stamp, SwipeRow, T, TOUCH, elevate, haptic, money, radius, space } from './comanda';
+import { Appear, BottomSheet, Button, Chip, EASE, EmptyState, IconButton, Label, Num, Perforation, Ping, Press, Stamp, SwipeRow, T, TOUCH, elevate, haptic, money, radius, space } from './kit';
 
 // Minutos desde una fecha (o null).
 export function minutesSince(value, now = Date.now()) {
@@ -78,41 +79,41 @@ export function readyItems(pedidos = []) {
 // ── Casilla de mesa ────────────────────────────────────────────────────────
 export function TableTile({ mesa, state, order, width, now, selected, ready, alert, reservation, held, queued, onPress, onLongPress }) {
   const { c } = useTheme();
-  const meta = comandaTableMeta(state, c);
-  const filled = meta.shape === 'filled';
-  const free = state === 'Libre';
+  // Destello solo cuando cocina deja lista otra ronda (no por cambios que hizo el propio mesero).
+  const prevReady = useRef(ready); const [pingKey, setPingKey] = useState(0);
+  useEffect(() => { if (ready > prevReady.current) setPingKey(k => k + 1); prevReady.current = ready; }, [ready]);
   const balance = order ? Number(order.saldo_pendiente ?? Math.max(0, Number(order.total || 0) - Number(order.abonado || 0))) : 0;
   const resMinutes = reservation ? minutesUntil(reservation) : null;
   const rounds = order ? serviceRounds(order) : [];
   const cooking = rounds.some(r => ['PENDIENTE', 'PREPARANDO'].includes(r.estado));
-  // Un solo estado por mesa, del más urgente al más tranquilo.
-  const status = ready ? { icon: CheckCheck, text: ready > 1 ? `${ready} listas` : 'Lista', color: filled ? c.onPrimary : c.green, soft: filled ? 'rgba(255,255,255,0.18)' : c.greenSoft }
-    : state === 'Cuenta' ? { icon: Receipt, text: 'Cobrar', color: c.onPrimary, soft: 'rgba(255,255,255,0.18)' }
-    : alert ? { icon: Clock3, text: `${alert.minutos} min`, color: c.red, soft: c.redSoft }
-    : cooking ? { icon: ChefHat, text: 'En cocina', color: c.sky, soft: c.skySoft }
-    : order ? { icon: Utensils, text: 'Comiendo', color: c.muted, soft: c.surfaceAlt }
-    : held ? { icon: Lock, text: `Reservada ${timeOf(held.fecha_hora)}`, color: c.purple, soft: c.purpleSoft }
-    : state === 'Reservada' || (reservation && resMinutes != null && resMinutes <= 90) ? { icon: CalendarClock, text: timeOf(reservation?.fecha_hora) || 'Reserva', color: c.purple, soft: c.purpleSoft }
-    : { icon: Users, text: 'Libre', color: c.green, soft: c.isDark ? 'rgba(255,255,255,0.06)' : '#FFFFFF' };
-  // Una ronda guardada sin enviar manda sobre todo lo demás: el mesero tiene que saber que cocina aún no la ve.
-  const shown = queued ? { icon: CloudOff, text: 'Sin enviar', color: filled ? c.onPrimary : c.amber, soft: filled ? 'rgba(255,255,255,0.18)' : c.amberSoft } : status;
-  const Icon = shown.icon;
-  const label = `Mesa ${mesa.numero}, ${shown.text}${order ? `, ${money(balance)}` : ''}`;
+  // Un solo estado por mesa, del más urgente al más tranquilo. Sin enviar manda sobre todo: cocina aún no la ve.
+  const [kind, Icon, text] = queued ? ['queued', CloudOff, 'Sin enviar']
+    : ready ? ['ready', CheckCheck, ready > 1 ? `${ready} listas` : 'Lista']
+    : state === 'Cuenta' ? ['bill', Receipt, 'Por cobrar']
+    : alert ? ['late', Clock3, `Espera ${alert.minutos} min`]
+    : cooking ? ['kitchen', ChefHat, 'En cocina']
+    : order ? ['eating', Utensils, 'Comiendo']
+    : held ? ['reserved', Lock, `Reservada ${timeOf(held.fecha_hora)}`]
+    : state === 'Reservada' || (reservation && resMinutes != null && resMinutes <= 90) ? ['reserved', CalendarClock, `Reserva ${timeOf(reservation?.fecha_hora) || ''}`.trim()]
+    : ['free', Users, mesa.capacidad ? `Libre · ${mesa.capacidad}` : 'Libre'];
+  // Todas las mesas son bloques de color sólido, sin bordes: libre gris claro, ocupada oscura, estados con su color.
+  const tone = meseroTableTone(kind, c);
+  const free = kind === 'free';
+  const calm = free || kind === 'kitchen' || kind === 'eating';
+  const filled = !calm;
+  const fg = filled ? tone.fg : c.text;
+  const label = `Mesa ${mesa.numero}, ${text}${order ? `, ${money(balance)}` : ''}`;
   return <Press accessibilityRole="button" accessibilityLabel={label} accessibilityHint="Toca para pedir; mantén presionado para más acciones" accessibilityState={{ selected }}
-    onPress={() => onPress(mesa)} onLongPress={onLongPress ? () => onLongPress(mesa) : undefined} hapticKind="tap" scaleTo={0.95}
-    style={[{ width, minHeight: 112, padding: 12, borderRadius: radius.lg, justifyContent: 'space-between', gap: 8, borderWidth: 2,
-      backgroundColor: filled ? c.primary : held && free ? c.purpleSoft : free ? c.surfaceAlt : c.surface, borderColor: selected ? c.ink : queued && !filled ? c.amber : filled ? c.primary : held && free ? c.purpleSoft : free ? c.surfaceAlt : (c.isDark ? c.line : 'rgba(16,24,40,0.05)') },
-      free ? null : elevate(c, filled ? 2 : 1)]}>
-    <Ping trigger={`${state}-${ready}`} color={filled ? c.primary : shown.color} radius={radius.lg} />
-    <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-      <Num size={32} weight="800" color={filled ? c.onPrimary : c.text} style={{ lineHeight: 36 }}>{mesa.numero}</Num>
-      <View style={{ width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: held && free && !queued ? (c.isDark ? 'rgba(255,255,255,0.08)' : '#FFFFFF') : shown.soft }}>
-        <Icon size={16} color={shown.color} strokeWidth={2.4} />
-      </View>
+    onPress={() => onPress(mesa)} onLongPress={onLongPress ? () => onLongPress(mesa) : undefined} hapticKind="tap" scaleTo={0.96}
+    style={[{ width, minHeight: 92, padding: 12, borderRadius: radius.lg, justifyContent: 'space-between', gap: 10, backgroundColor: tone.bg },
+      selected ? (WEB_RING ? { boxShadow: `0 0 0 2px ${c.bg}, 0 0 0 4px ${c.text}` } : { opacity: 0.85 }) : null]}>
+    <Ping trigger={pingKey} color={c.greenFill} radius={radius.lg} />
+    <View>
+      <Num size={28} weight="700" color={free ? c.muted : fg} style={{ lineHeight: 32 }}>{mesa.numero}</Num>
     </View>
-    <View style={{ gap: 1 }}>
-      <T size={13} weight="800" color={shown.color} numberOfLines={1}>{shown.text}</T>
-      {order ? <Num size={16} weight="800" color={filled ? c.onPrimary : c.text}>{money(balance)}</Num> : null}
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+      <Icon size={15} color={filled ? fg : tone.fg} strokeWidth={2.4} />
+      <T size={13} weight={filled ? '700' : '600'} color={filled ? fg : tone.fg} numberOfLines={1} style={{ flexShrink: 1 }}>{text}</T>
     </View>
   </Press>;
 }
@@ -127,7 +128,7 @@ export function ReservationHoldSheet({ hold, onClose, onSeat, onUseAnyway }) {
   return <BottomSheet visible={!!hold} onClose={onClose} title={hold ? `Mesa ${hold.mesa.numero} está reservada` : ''} subtitle={r ? `A las ${timeOf(r.fecha_hora)} · ${when}` : ''}>
     {r ? <View style={{ gap: space.lg }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.lg, borderRadius: radius.lg, backgroundColor: c.purpleSoft }}>
-        <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: c.isDark ? 'rgba(255,255,255,0.08)' : '#FFFFFF', alignItems: 'center', justifyContent: 'center' }}><CalendarClock size={22} color={c.purple} /></View>
+        <View style={{ width: 48, height: 48, borderRadius: 8, backgroundColor: c.isDark ? 'rgba(255,255,255,0.08)' : '#FFFFFF', alignItems: 'center', justifyContent: 'center' }}><CalendarClock size={22} color={c.purple} /></View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <T size={18} weight="800" numberOfLines={1}>{r.cliente_nombre}</T>
           <T size={14} color={c.muted}>{r.personas} {Number(r.personas) === 1 ? 'persona' : 'personas'}{r.notas ? ` · ${r.notas}` : ''}</T>
@@ -188,24 +189,29 @@ export function AlertsBanner({ visible, onEnable, onDismiss }) {
 export function AttentionStrip({ items, onOpen }) {
   const { c } = useTheme();
   if (!items.length) return null;
-  // Una sola línea por ficha: «● Mesa 1 · Pidió la cuenta». Ocupa poco alto en pantallas chicas.
-  return <Appear>
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: space.sm, marginHorizontal: -12 }} contentContainerStyle={{ gap: space.sm, paddingHorizontal: 12, paddingVertical: 2, alignItems: 'center' }}>
-      <View accessibilityRole="header" accessibilityLabel={`Atender ahora: ${items.length}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingRight: 2 }}>
-        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: c.primary }} />
-        <T size={13} weight="800" color={c.primaryText}>Ahora</T>
-      </View>
+  // Tarjetas cortas y deslizables con lo que necesita al mesero ya: rondas listas, esperas, cuentas y reservas.
+  return <View style={{ marginBottom: space.lg }}>
+    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: space.sm, marginBottom: space.sm }}>
+      <T size={17} weight="700" accessibilityRole="header">Atender ahora</T>
+      <Num size={15} weight="600" color={c.muted}>{items.length}</Num>
+    </View>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginHorizontal: -16 }} contentContainerStyle={{ gap: space.sm, paddingHorizontal: 16 }}>
       {items.map(it => {
-        const tone = it.tone === 'ready' ? c.green : it.tone === 'late' ? c.red : it.tone === 'reserve' ? c.purple : c.primaryText;
-        const soft = it.tone === 'ready' ? c.greenSoft : it.tone === 'late' ? c.redSoft : it.tone === 'reserve' ? c.purpleSoft : c.primarySoft;
-        return <Press key={it.key} accessibilityRole="button" accessibilityLabel={`${it.title}, ${it.detail}`} onPress={() => onOpen(it)} hapticKind="tap" scaleTo={0.95}
-          style={{ minHeight: 40, maxWidth: 280, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: soft, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <T size={14} weight="800" numberOfLines={1} style={{ flexShrink: 0 }}>{it.title}</T>
-          <T size={13} weight="700" color={tone} numberOfLines={1} style={{ flexShrink: 1 }}>{it.detail}</T>
+        const kind = it.tone === 'ready' ? 'ready' : it.tone === 'late' ? 'late' : it.tone === 'reserve' ? 'reserved' : 'bill';
+        const tone = meseroTableTone(kind, c);
+        const filled = kind === 'ready' || kind === 'bill';
+        const Icon = kind === 'ready' ? CheckCheck : kind === 'late' ? Clock3 : kind === 'reserved' ? CalendarClock : Receipt;
+        return <Press key={it.key} accessibilityRole="button" accessibilityLabel={`${it.title}, ${it.detail}`} onPress={() => onOpen(it)} hapticKind="tap" scaleTo={0.96}
+          style={{ width: 172, minHeight: 64, padding: 12, borderRadius: radius.md, backgroundColor: filled ? tone.bg : c.surfaceAlt, gap: 2 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Icon size={16} color={filled ? tone.fg : tone.fg} strokeWidth={2.4} />
+            <T size={15} weight="700" color={filled ? tone.fg : c.text} numberOfLines={1}>{it.title}</T>
+          </View>
+          <T size={13} weight="500" color={filled ? tone.fg : c.muted} numberOfLines={1}>{it.detail}</T>
         </Press>;
       })}
     </ScrollView>
-  </Appear>;
+  </View>;
 }
 
 // ── Pestañas de zona con subrayado que se desliza ─────────────────────────
@@ -218,17 +224,17 @@ export function ZoneTabs({ zones, value, onChange, counts = {} }) {
   const move = (key, instant) => {
     const l = layouts.current[key]; if (!l) return;
     if (instant) { x.setValue(l.x); w.setValue(l.width); return; }
-    Animated.parallel([Animated.spring(x, { toValue: l.x, speed: 16, bounciness: 6, useNativeDriver: false }), Animated.spring(w, { toValue: l.width, speed: 16, bounciness: 6, useNativeDriver: false })]).start();
+    x.setValue(l.x); w.setValue(l.width);
   };
   useEffect(() => { move(value); }, [value]);
   return <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>
-    <View accessibilityRole="tablist" style={{ flexDirection: 'row', gap: 2, padding: 4, borderRadius: radius.pill, backgroundColor: c.surfaceAlt }}>
-      {ready ? <Animated.View pointerEvents="none" style={[{ position: 'absolute', top: 4, bottom: 4, borderRadius: radius.pill, backgroundColor: c.surface, left: x, width: w }, elevate(c, 1)]} /> : null}
+    <View accessibilityRole="tablist" style={{ flexDirection: 'row', gap: 2, padding: 4, borderRadius: radius.md, backgroundColor: c.surfaceAlt }}>
+      {ready ? <Animated.View pointerEvents="none" style={[{ position: 'absolute', top: 4, bottom: 4, borderRadius: radius.md, backgroundColor: c.surface, left: x, width: w }, elevate(c, 1)]} /> : null}
       {zones.map(z => {
         const active = z === value;
         return <Press key={z} accessibilityRole="tab" accessibilityState={{ selected: active }} onPress={() => onChange(z)} hapticKind="select" scaleTo={0.96} sink={0}
           onLayout={e => { layouts.current[z] = e.nativeEvent.layout; if (active) { move(z, true); setReady(true); } }}
-          style={{ minHeight: 40, paddingHorizontal: 14, borderRadius: radius.pill, justifyContent: 'center', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          style={{ minHeight: 40, paddingHorizontal: 14, borderRadius: radius.md, justifyContent: 'center', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <T size={14} weight={active ? '800' : '600'} color={active ? c.text : c.muted}>{z === 'Todas' ? 'Todo' : z}</T>
           {counts[z] != null ? <Num size={12} weight="700" color={c.faint}>{counts[z]}</Num> : null}
         </Press>;
@@ -244,7 +250,7 @@ export function TableActionsSheet({ mesa, state, order, onClose, actions }) {
   const balance = order ? Number(order.saldo_pendiente ?? Math.max(0, Number(order.total || 0) - Number(order.abonado || 0))) : 0;
   const row = (Icon, label, detail, onPress, disabled) => <Press key={label} accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={() => { onClose(); onPress(); }} hapticKind="tap"
     style={{ minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.sm, borderRadius: radius.md, opacity: disabled ? 0.4 : 1 }} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
-    <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><Icon size={20} color={c.text} /></View>
+    <View style={{ width: 42, height: 42, borderRadius: 8, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><Icon size={20} color={c.text} /></View>
     <View style={{ flex: 1 }}><T size={17} weight="600">{label}</T>{detail ? <T size={14} color={c.muted}>{detail}</T> : null}</View>
   </Press>;
   return <BottomSheet visible={!!mesa} onClose={onClose} title={mesa ? `Mesa ${mesa.numero}` : ''} subtitle={mesa ? `${meta.label}${order ? ` · saldo ${money(balance)}` : ''}${mesa.capacidad ? ` · ${mesa.capacidad} puestos` : ''}` : ''}>
@@ -279,7 +285,7 @@ export function TransferSheet({ open, from, mesas, stateFor, onPick, onClose, bu
 
 // ── Bandeja «Listo» ────────────────────────────────────────────────────────
 // Rondas listas con «Entregado» en un toque, demoras y actividad reciente.
-export function ReadyTray({ open, onClose, ready, partial = [], alerts, activity, onDeliver, deliveringId, onOpen, clearActivity, now }) {
+export function ReadyTray({ open, onClose, ready, partial = [], alerts, activity, onDeliver, deliveringId, onOpen, clearActivity, now, alertsPrompt }) {
   const { c } = useTheme();
   const [tab, setTab] = useState('listo');
   const unread = activity.filter(a => !a.read).length;
@@ -287,42 +293,49 @@ export function ReadyTray({ open, onClose, ready, partial = [], alerts, activity
   const placeOf = (pedido, item) => (pedido?.mesa_id || item?.mesa_id) ? `Mesa ${pedido?.mesa_numero || item?.mesa_numero || pedido?.mesa_id || item?.mesa_id}` : `${(pedido?.tipo || item?.origen) === 'Delivery' ? 'Delivery' : 'Para llevar'} #${pedido?.id || item?.pedido_id}`;
   const itemsText = round => (round.items || []).slice(0, 4).map(i => `${i.cantidad}× ${i.nombre || i.producto_nombre || 'Producto'}`).join(' · ');
   return <BottomSheet visible={open} onClose={onClose} title="Bandeja" subtitle={ready.length ? `${ready.length} ${ready.length === 1 ? 'ronda lista' : 'rondas listas'} para llevar a la mesa` : 'Nada esperando en el pase'}>
+    {alertsPrompt?.visible ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.md, borderRadius: radius.md, backgroundColor: c.surfaceAlt }}>
+      <BellRing size={20} color={c.text} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <T size={15} weight="700">Avisos de plato listo</T>
+        <T size={13} color={c.muted}>Suena y vibra aunque tengas el teléfono bloqueado.</T>
+      </View>
+      <Button size="sm" variant="ink" onPress={alertsPrompt.enable} accessibilityLabel="Activar los avisos de plato listo">Activar</Button>
+    </View> : null}
     <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
       <Chip selected={tab === 'listo'} onPress={() => setTab('listo')} count={ready.length + partial.length}>Listo</Chip>
       <Chip selected={tab === 'demoras'} onPress={() => setTab('demoras')} count={late.length}>Demoras</Chip>
       <Chip selected={tab === 'actividad'} onPress={() => setTab('actividad')} count={unread}>Actividad</Chip>
     </View>
     {tab === 'listo' ? (ready.length ? <View style={{ gap: space.sm }}>
-      <T size={13} color={c.muted}>Desliza una ronda hacia la derecha para marcarla como entregada.</T>
-      {ready.map(({ round, pedido, minutes }, i) => <Appear key={round.id} delay={i * 40}>
+      {ready.map(({ round, pedido, minutes }) => <View key={round.id}>
         <SwipeRow direction="right" label="Entregado" icon={CheckCheck} disabled={deliveringId === round.id} onSwipe={() => onDeliver(round, pedido)}>
-        <View style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.isDark ? c.surfaceAlt : '#F2FAF5', borderWidth: 1, borderColor: c.isDark ? c.line : '#D7EFDF', gap: 6 }}>
+        <View style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.surfaceAlt, gap: 6 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
             <T size={18} weight="700" style={{ flex: 1 }}>{placeOf(pedido)}</T>
-            <Num size={14} weight="700" color={minutes != null && minutes >= (alerts.limits?.lista || 5) ? c.red : c.green}>{minutes ? `lista hace ${shortMinutes(minutes)}` : 'recién lista'}</Num>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><CheckCheck size={15} color={c.green} strokeWidth={2.4} /><T size={14} weight="700" color={c.green}>Lista</T></View>
           </View>
+          <Num size={13} color={minutes != null && minutes >= (alerts.limits?.lista || 5) ? c.red : c.muted}>{minutes ? `hace ${shortMinutes(minutes)}` : 'recién salida'}</Num>
           {itemsText(round) ? <T size={15} color={c.muted} numberOfLines={2}>{itemsText(round)}</T> : null}
           <View style={{ flexDirection: 'row', gap: space.sm, marginTop: 4 }}>
-            <Button variant="ink" icon={CheckCheck} loading={deliveringId === round.id} onPress={() => onDeliver(round, pedido)} hapticKind="success">Entregado</Button>
+            <Button variant="ink" icon={CheckCheck} loading={deliveringId === round.id} onPress={() => onDeliver(round, pedido)} hapticKind="tap">Entregado</Button>
             <Button variant="ghost" onPress={() => onOpen({ mesa_id: pedido.mesa_id, pedido_id: pedido.id, pedido })}>Ver</Button>
           </View>
         </View>
         </SwipeRow>
-      </Appear>)}
+      </View>)}
     </View> : partial.length ? null : <EmptyState icon={CheckCheck} title="Pase vacío" description="Cuando cocina marque una ronda como lista aparecerá aquí, con vibración." />) : null}
     {tab === 'listo' && partial.length ? <View style={{ gap: space.sm }}>
-      <T size={15} weight="800">Platos listos de rondas en preparación</T>
-      <T size={13} color={c.muted}>Cocina ya sacó estos platos; el resto de la ronda sigue en preparación.</T>
-      {partial.map(({ round, pedido, items, total }, i) => <Appear key={round.id} delay={i * 40}>
+      <T size={15} weight="700" style={{ marginTop: space.sm }}>Platos sueltos ya listos</T>
+      {partial.map(({ round, pedido, items, total }) => <View key={round.id}>
         <Press accessibilityRole="button" accessibilityLabel={`${placeOf(pedido)}: ${items.map(it => it.nombre).join(', ')} listos`} onPress={() => onOpen({ mesa_id: pedido.mesa_id, pedido_id: pedido.id, pedido })} hapticKind="tap"
-          style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.skySoft, gap: 4 }}>
+          style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.surfaceAlt, gap: 4 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
             <T size={17} weight="800" style={{ flex: 1 }}>{placeOf(pedido)}</T>
-            <Num size={13} weight="800" color={c.sky}>{items.length} de {total} listos</Num>
+            <Num size={13} weight="600" color={c.muted}>{items.length} de {total} listos</Num>
           </View>
           {items.map(it => <T key={it.id} size={15} weight="700" color={c.text}>✓ {it.cantidad}× {it.nombre}</T>)}
         </Press>
-      </Appear>)}
+      </View>)}
     </View> : null}
     {tab === 'demoras' ? <View style={{ gap: space.sm }}>
       {alerts.error ? <View style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.amberSoft, gap: space.sm }}>
@@ -331,7 +344,7 @@ export function ReadyTray({ open, onClose, ready, partial = [], alerts, activity
       </View> : null}
       {!alerts.error && !late.length ? <EmptyState icon={Clock3} title={alerts.limits?.enabled === false ? 'Avisos en pausa' : 'Sin demoras'} description={alerts.limits?.enabled === false ? 'Las alertas de demora están desactivadas en Ajustes.' : `Se avisa cuando cocina pasa de ${alerts.limits?.espera ?? 20} min.`} /> : null}
       {late.map(item => <Press key={item.id} accessibilityRole="button" onPress={() => onOpen(item)} hapticKind="tap"
-        style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.redSoft, gap: 4 }}>
+        style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.surfaceAlt, gap: 4 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
           <T size={17} weight="700" style={{ flex: 1 }}>{placeOf(null, item)}</T>
           <Num size={15} weight="700" color={c.red}>{serviceDuration(item.minutos)}</Num>
@@ -363,13 +376,13 @@ export function SearchToggle({ value, onChange }) {
   const [open, setOpen] = useState(!!value);
   const v = useRef(new Animated.Value(value ? 1 : 0)).current;
   useEffect(() => { Animated.timing(v, { toValue: open ? 1 : 0, duration: 180, easing: EASE, useNativeDriver: false }).start(); }, [open]);
-  if (!open) return <IconButton icon={Search} label="Buscar mesa" onPress={() => { haptic('tap'); setOpen(true); }} />;
-  return <Animated.View style={{ flex: 1, opacity: v, flexDirection: 'row', alignItems: 'center', minHeight: TOUCH, borderRadius: radius.pill, paddingLeft: 16, backgroundColor: c.surfaceAlt }}>
+  if (!open) return <IconButton icon={Search} label="Buscar mesa" onPress={() => { haptic('tap'); setOpen(true); }} filled />;
+  return <Animated.View style={{ flex: 1, opacity: v, flexDirection: 'row', alignItems: 'center', minHeight: TOUCH, borderRadius: radius.md, paddingLeft: 14, backgroundColor: c.surfaceAlt }}>
     <Search size={18} color={c.muted} />
-    <TextInput autoFocus value={value} onChangeText={onChange} placeholder="Mesa o zona" placeholderTextColor={c.faint} accessibilityLabel="Buscar mesa por número o zona"
+    <TextInput autoFocus value={value} onChangeText={onChange} placeholder="Mesa o zona" placeholderTextColor={c.muted} accessibilityLabel="Buscar mesa por número o zona"
       style={{ flex: 1, minWidth: 0, fontSize: 16, color: c.text, paddingHorizontal: 8, paddingVertical: 10, ...(typeof document !== 'undefined' ? { outlineStyle: 'none' } : {}) }} />
     <IconButton icon={X} label="Cerrar búsqueda" onPress={() => { onChange(''); setOpen(false); }} />
   </Animated.View>;
 }
 
-export { haptic as salonHaptic } from './comanda';
+export { haptic as salonHaptic } from './kit';

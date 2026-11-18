@@ -182,6 +182,9 @@ export function AuthProvider({ children }) {
   };
 
   const logout = async () => {
+    // Antes de borrar la sesión: este teléfono deja de recibir los avisos de esta persona.
+    // (require dentro de la función: webPushClient también importa este archivo)
+    if (Platform.OS === 'web') { try { await require('../services/webPushClient').disableWebPush(); } catch { /* sin avisos activos */ } }
     await writeSession(async () => {
       await safeStorage.removeItem('token');
       await safeStorage.removeItem('user');

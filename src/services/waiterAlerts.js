@@ -3,6 +3,7 @@
 import { Platform, Vibration } from 'react-native';
 import * as safeStorage from './storage';
 import { installWebAudioUnlock, playWebAlertTone } from './webAudioAlerts';
+import { pushStatus } from './webPushClient';
 
 const WEB = Platform.OS === 'web';
 const KEY = 'mm:waiter-alerts:v1';
@@ -100,6 +101,7 @@ export function alertWaiter(kind = 'ready', { title = '', body = '', tag } = {})
       else Vibration.vibrate(k.vibration);
     } catch { /* sin motor de vibración */ }
   }
-  if (hidden) { flashTitle(title); systemNotification({ title, body, tag: tag || kind, vibration: settings.vibrate ? k.vibration : undefined }); }
+  // Con los avisos push activos, el aviso del sistema lo manda el servidor (llega aunque el teléfono esté bloqueado): no se duplica.
+  if (hidden) { flashTitle(title); if (pushStatus() !== 'active') systemNotification({ title, body, tag: tag || kind, vibration: settings.vibrate ? k.vibration : undefined }); }
   return { sounded, hidden };
 }

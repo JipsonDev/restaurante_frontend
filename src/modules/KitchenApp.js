@@ -128,6 +128,11 @@ function Kitchen() {
     loadProducts();
     const unsub = [REALTIME_EVENTS.ORDER_CREATED, REALTIME_EVENTS.ORDER_UPDATED, REALTIME_EVENTS.PRINT_COMANDA].map(ev => subscribeRealtime(ev, () => load()));
     unsub.push(subscribeRealtime(REALTIME_EVENTS.CATALOG_UPDATED, (payload = {}) => {
+      if (payload.action === 'stock' && Array.isArray(payload.productos)) {
+        const byId = new Map(payload.productos.map(p => [Number(p.producto_id), Number(p.stock_disponible)]));
+        setProducts(prev => prev.map(p => byId.has(Number(p.id)) ? { ...p, stock_disponible: byId.get(Number(p.id)) } : p));
+        return;
+      }
       if (!payload.producto_id) return;
       setProducts(prev => prev.map(p => Number(p.id) === Number(payload.producto_id) ? { ...p, agotado: payload.agotado ? 1 : 0 } : p));
     }));
@@ -396,11 +401,13 @@ function Kitchen() {
 
   const history = board.ENTREGADO.filter(r => new Date(String(r.created_at).replace(' ', 'T')).toDateString() === new Date().toDateString());
   const pendingToPrint = [...board.PENDIENTE, ...board.PREPARANDO];
-  const soldOut = products.filter(p => Number(p.agotado) === 1);
+  // Sin stock en inventario: agotado solo, sin que nadie lo marque (vuelve solo al reponer).
+  const noStock = p => p.stock_disponible != null && Number(p.stock_disponible) <= 0;
+  const soldOut = products.filter(p => Number(p.agotado) === 1 || noStock(p));
   const productList = products
     .filter(p => !productQuery || normalizeText(`${p.nombre} ${p.estacion || ''} ${p.categoria_nombre || ''}`).includes(normalizeText(productQuery)))
-    .filter(p => station === 'Todas' || (p.estacion || GENERAL) === station || Number(p.agotado) === 1)
-    .sort((a, b) => Number(b.agotado || 0) - Number(a.agotado || 0) || String(a.nombre).localeCompare(String(b.nombre), 'es'));
+    .filter(p => station === 'Todas' || (p.estacion || GENERAL) === station || Number(p.agotado) === 1 || noStock(p))
+    .sort((a, b) => Number(Number(b.agotado) === 1 || noStock(b)) - Number(Number(a.agotado) === 1 || noStock(a)) || String(a.nombre).localeCompare(String(b.nombre), 'es'));
   const productOfItem = item => products.find(p => Number(p.id) === Number(item?.producto_id));
   const menuRow = (Icon, label, detail, onPress, tone) => <Press key={label} accessibilityRole="button" onPress={() => { setSheet(null); onPress(); }} hapticKind="tap"
     style={{ minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.sm, borderRadius: 18 }} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
@@ -459,14 +466,17 @@ function Kitchen() {
       <View style={{ gap: 6 }}>
         {productList.slice(0, 120).map(p => {
           const out = Number(p.agotado) === 1;
-          return <Press key={p.id} accessibilityRole="switch" accessibilityState={{ checked: out }} accessibilityLabel={`${p.nombre}: ${out ? 'agotado' : 'disponible'}`} onPress={() => setSoldOut(p.id, !out)} hapticKind={null}
-            style={{ minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.md, borderRadius: radius.lg, backgroundColor: out ? c.redSoft : c.surfaceAlt }}>
+          const empty = !out && noStock(p);
+          const units = Number(p.stock_disponible);
+          return <Press key={p.id} accessibilityRole="switch" accessibilityState={{ checked: out || empty, disabled: empty }} disabled={empty}
+            accessibilityLabel={`${p.nombre}: ${out ? 'agotado' : empty ? 'sin stock en inventario' : 'disponible'}`} onPress={() => setSoldOut(p.id, !out)} hapticKind={null}
+            style={{ minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.md, borderRadius: radius.lg, backgroundColor: out || empty ? c.redSoft : c.surfaceAlt }}>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <T size={16} weight="800" numberOfLines={1} color={out ? c.red : c.text}>{p.nombre}</T>
-              <T size={13} color={c.muted} numberOfLines={1}>{[p.estacion || GENERAL, p.categoria_nombre].filter(Boolean).join(' · ')}</T>
+              <T size={16} weight="800" numberOfLines={1} color={out || empty ? c.red : c.text}>{p.nombre}</T>
+              <T size={13} color={c.muted} numberOfLines={1}>{empty ? 'Se acabó en inventario · vuelve solo al reponer' : [p.estacion || GENERAL, p.categoria_nombre, Number.isFinite(units) && units > 0 && units <= 5 ? `quedan ${units}` : null].filter(Boolean).join(' · ')}</T>
             </View>
-            <View style={{ paddingHorizontal: 12, height: 32, borderRadius: radius.pill, justifyContent: 'center', backgroundColor: out ? c.primary : c.surface }}>
-              <T size={13} weight="800" color={out ? c.onPrimary : c.muted}>{out ? 'Agotado' : 'Disponible'}</T>
+            <View style={{ paddingHorizontal: 12, height: 32, borderRadius: radius.pill, justifyContent: 'center', backgroundColor: out ? c.primary : empty ? c.surface : c.surface }}>
+              <T size={13} weight="800" color={out ? c.onPrimary : empty ? c.red : c.muted}>{out ? 'Agotado' : empty ? 'Sin stock' : 'Disponible'}</T>
             </View>
           </Press>;
         })}

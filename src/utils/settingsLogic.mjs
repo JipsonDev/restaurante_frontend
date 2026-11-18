@@ -15,6 +15,10 @@ export function settingsPayload(form = {}) {
   if (!/^[A-Z]{3}$/.test(payload.moneda)) throw new Error('La moneda debe tener tres letras, por ejemplo USD.');
   if (!payload.simbolo_moneda || payload.simbolo_moneda.length > 5) throw new Error('Escribe un símbolo de moneda válido.');
   if (payload.correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.correo)) throw new Error('El correo de facturación no es válido.');
+  if (payload.color_marca !== undefined) {
+    payload.color_marca = payload.color_marca.toUpperCase();
+    if (payload.color_marca && !/^#[0-9A-F]{6}$/.test(payload.color_marca)) throw new Error('El color de marca debe ser un código como #D63B20.');
+  }
   if (payload.ruc && !/^\d{10,13}$/.test(payload.ruc)) throw new Error('El RUC o identificación fiscal debe tener entre 10 y 13 dígitos.');
   if (payload.alertas_demora_activas !== undefined && !['0','1'].includes(payload.alertas_demora_activas)) throw new Error('Las alertas deben usar 0 o 1.');
   for (const key of ['alerta_espera_minutos','alerta_lista_minutos']) {

@@ -4,10 +4,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, TextInput, View, useWindowDimensions } from 'react-native';
 import { MapPin, Phone, Search, UtensilsCrossed, X } from 'lucide-react-native';
 import { BASE_URL } from '../context/AuthContext';
-import { WaiterAppearance, useTheme } from '../theme';
+import { MeseroAppearance, setBrandColor, useTheme } from '../theme';
 import Logo from '../components/Logo';
 import { ProductArt } from '../components/waiter/ProductArt';
-import { Appear, BottomSheet, Button, FONT, Num, Press, T, elevate, radius, space, useComandaFonts } from '../components/waiter/comanda';
+import { Appear, BottomSheet, Button, FONT, Num, Press, T, elevate, radius, space, useComandaFonts } from '../components/waiter/kit';
 
 const strip = value => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
@@ -54,6 +54,7 @@ function Menu({ code }) {
       .catch(e => { if (alive) setError(e.message === 'Failed to fetch' ? 'Parece que no hay internet. Revisa tu conexión e intenta de nuevo.' : e.message); });
     return () => { alive = false; };
   }, [code, attempt]);
+  useEffect(() => { if (menu?.negocio) setBrandColor(menu.negocio.color_marca || null); }, [menu?.negocio?.color_marca]);
   useEffect(() => { if (menu?.negocio?.nombre && typeof document !== 'undefined') document.title = `Menú · ${menu.negocio.nombre}`; }, [menu]);
 
   const columns = width >= 900 ? 4 : width >= 600 ? 3 : 2;
@@ -71,7 +72,7 @@ function Menu({ code }) {
     <Logo width={160} dark={c.isDark} />
     <T size={18} weight="800" style={{ textAlign: 'center' }}>No pudimos abrir el menú</T>
     <T size={15} color={c.muted} style={{ textAlign: 'center', maxWidth: 320 }}>{error}</T>
-    <Button variant="primary" size="lg" onPress={() => setAttempt(n => n + 1)}>Intentar de nuevo</Button>
+    <Button variant="primary" size="lg" onPress={() => setAttempt(n => n + 1)} style={{ alignSelf: 'stretch', maxWidth: 320, width: '100%', marginHorizontal: 'auto' }}>Intentar de nuevo</Button>
   </View>;
   if (!menu) return <View style={{ flex: 1, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center', gap: space.lg }}>
     <Logo width={160} dark={c.isDark} />
@@ -86,7 +87,7 @@ function Menu({ code }) {
       <View style={{ alignItems: 'center', paddingTop: 28, paddingBottom: 18, paddingHorizontal: 20, gap: 12, backgroundColor: c.primarySoft }}>
         <Logo width={Math.min(220, width * 0.56)} dark={c.isDark} />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          {menu.mesa ? <View style={{ height: 34, paddingHorizontal: 14, borderRadius: 17, backgroundColor: c.primary, justifyContent: 'center' }}>
+          {menu.mesa ? <View style={{ height: 34, paddingHorizontal: 14, borderRadius: 8, backgroundColor: c.primary, justifyContent: 'center' }}>
             <T size={15} weight="800" color={c.onPrimary}>Mesa {menu.mesa.numero}</T>
           </View> : null}
           <T size={15} weight="600" color={c.muted}>Nuestro menú</T>
@@ -95,18 +96,18 @@ function Menu({ code }) {
 
       {/* Categorías, siempre a la vista al bajar. */}
       <View style={{ backgroundColor: c.bg, paddingTop: 12, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: c.line }}>
-        {searching ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, height: 48, paddingLeft: 16, paddingRight: 4, borderRadius: 24, backgroundColor: c.surfaceAlt }}>
+        {searching ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, height: 48, paddingLeft: 16, paddingRight: 4, borderRadius: 8, backgroundColor: c.surfaceAlt }}>
           <Search size={18} color={c.muted} />
           <TextInput autoFocus value={query} onChangeText={setQuery} placeholder="Buscar un plato o bebida" placeholderTextColor={c.muted} accessibilityLabel="Buscar en el menú"
             style={{ flex: 1, minWidth: 0, fontSize: 16, color: c.text, fontFamily: FONT, outlineStyle: 'none', height: 48 }} />
           <Press accessibilityRole="button" accessibilityLabel="Cerrar la búsqueda" onPress={() => { setQuery(''); setSearching(false); }} style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}><X size={20} color={c.text} /></Press>
         </View>
           : <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 16, alignItems: 'center' }}>
-            <Press accessibilityRole="button" accessibilityLabel="Buscar en el menú" onPress={() => setSearching(true)} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><Search size={19} color={c.text} /></Press>
+            <Press accessibilityRole="button" accessibilityLabel="Buscar en el menú" onPress={() => setSearching(true)} style={{ width: 44, height: 44, borderRadius: 8, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><Search size={19} color={c.text} /></Press>
             {chips.map(name => {
               const active = name === category;
               return <Press key={name} accessibilityRole="tab" accessibilityState={{ selected: active }} onPress={() => setCategory(name)} scaleTo={0.96}
-                style={{ height: 44, paddingHorizontal: 18, borderRadius: 22, justifyContent: 'center', backgroundColor: active ? c.ink : c.surfaceAlt }}>
+                style={{ height: 44, paddingHorizontal: 18, borderRadius: 8, justifyContent: 'center', backgroundColor: active ? c.ink : c.surfaceAlt }}>
                 <T size={15} weight={active ? '800' : '600'} color={active ? c.onInk : c.text}>{name}</T>
               </Press>;
             })}
@@ -153,7 +154,7 @@ function Menu({ code }) {
         {open.descripcion ? <T size={16} color={c.muted} style={{ lineHeight: 23 }}>{open.descripcion}</T> : null}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <Num size={26} weight="800">{symbol}{Number(open.precio).toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Num>
-          {open.agotado ? <View style={{ height: 30, paddingHorizontal: 12, borderRadius: 15, backgroundColor: c.surfaceAlt, justifyContent: 'center' }}><T size={14} weight="800" color={c.muted}>Agotado por hoy</T></View> : null}
+          {open.agotado ? <View style={{ height: 30, paddingHorizontal: 12, borderRadius: 8, backgroundColor: c.surfaceAlt, justifyContent: 'center' }}><T size={14} weight="800" color={c.muted}>Agotado por hoy</T></View> : null}
         </View>
         <Button variant="ink" size="lg" full onPress={() => setOpen(null)}>Seguir viendo el menú</Button>
       </View> : null}
@@ -162,7 +163,7 @@ function Menu({ code }) {
 }
 
 export default function PublicMenu({ code }) {
-  return <WaiterAppearance><Menu code={code} /></WaiterAppearance>;
+  return <MeseroAppearance><Menu code={code} /></MeseroAppearance>;
 }
 
 /** Código de mesa si la página se abrió desde un QR («/?menu=5-a1b2c3d4e5»); si no, null. */

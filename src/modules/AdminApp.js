@@ -18,7 +18,7 @@ import ReportsScreen from '../screens/ReportsScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import AuditScreen from '../screens/AuditScreen';
 import CashScreen from '../screens/CashScreen';
-import { Button, FadeIn, ToastProvider, space, type } from '../components/admin/ui';
+import { Button, FadeIn, ToastProvider, space, type, useToast } from '../components/admin/ui';
 import { TOP_INSET } from '../utils/safeArea';
 
 const WEB = Platform.OS === 'web';
@@ -90,6 +90,7 @@ function AdminLayout() {
           {!isCompact && <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />}
           <View style={{ flex: 1, minWidth: 0, backgroundColor: c.bg }}>
             <ReadErrorBanner />
+            <InventoryAlertToast onOpen={() => setActiveTab('inventario')} />
             <View style={{ flex: 1, paddingHorizontal: isCompact ? space.sm : space.xxl, paddingTop: isCompact ? space.md : space.xl, paddingBottom: isCompact ? 0 : space.lg }}>
               <FadeIn trigger={activeTab} style={{ flex: 1, width: '100%', maxWidth: 1200, alignSelf: 'center' }}>
                 <ActiveScreen tab={activeTab} setActiveTab={setActiveTab} />
@@ -101,6 +102,18 @@ function AdminLayout() {
       </View>
     </ToastProvider>
   </AdminProvider>;
+}
+
+// «Queda poco» / «se acabó» / «repuesto» mientras administración trabaja en cualquier pantalla.
+function InventoryAlertToast({ onOpen }) {
+  const { inventoryAlert } = useAdmin();
+  const toast = useToast();
+  useEffect(() => {
+    if (!inventoryAlert) return;
+    if (inventoryAlert.body) toast.show(inventoryAlert.body, inventoryAlert.se_acabo?.length ? 'red' : 'amber', 12000, { label: 'Ver inventario', onPress: onOpen });
+    else if (inventoryAlert.repuesto?.length) toast.show(`Repuesto: ${inventoryAlert.repuesto.slice(0, 3).join(', ')}${inventoryAlert.repuesto.length > 3 ? ` y ${inventoryAlert.repuesto.length - 3} más` : ''}.`, 'green', 6000);
+  }, [inventoryAlert?.at]);
+  return null;
 }
 
 export default function AdminApp() {

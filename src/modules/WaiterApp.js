@@ -54,14 +54,16 @@ import {
   X,
   CakeSlice,
   ArrowRightLeft,
-  StickyNote
+  StickyNote,
+  MoreHorizontal,
+  ChevronRight
 } from 'lucide-react-native';
 import axios from 'axios';
 import { useFonts } from 'expo-font';
 import { runExclusive } from '../utils/waiterLogic.mjs';
 import { useAuth, BASE_URL, assetUrl } from '../context/AuthContext';
-import { useTheme, operationalColors as UI_COLORS, tableStatusMeta, WaiterAppearance } from '../theme';
-import { ComandaToastProvider, FONT as COMANDA_FONT, useComandaFonts, useComandaToast, useToastLift } from '../components/waiter/comanda';
+import { useTheme, operationalColors as UI_COLORS, tableStatusMeta, MeseroAppearance, setBrandColor } from '../theme';
+import { ComandaToastProvider, FONT as COMANDA_FONT, useComandaFonts, useComandaToast, useToastLift } from '../components/waiter/kit';
 import Logo from '../components/Logo';
 import WaiterFloor from '../components/WaiterFloor';
 import { ReservationHoldSheet, ReservationsTodaySheet, TableActionsSheet, TransferSheet, readyItems, readyRounds, salonHaptic, useTodayReservations } from '../components/waiter/salon'; // Salón:
@@ -70,6 +72,7 @@ import { topProducts, lastRoundItems, extrasForProduct } from '../utils/waiterFa
 import CustomizeSheet from '../components/waiter/CustomizeSheet'; // Menú:
 import { TargetPickerSheet, MenuSearch, CategoryChips } from '../components/waiter/menu'; // Menú:
 import { createRefreshQueue } from '../utils/kitchenLogic.mjs';
+import { expressStage } from '../utils/expressWorkspace.mjs';
 import ProductCard from '../components/WaiterProductCard';
 import WaiterNavigation, { WaiterBottomBar, WaiterMoreSheet } from '../components/WaiterNavigation';
 import useWaiterDrafts from '../services/useWaiterDrafts';
@@ -77,7 +80,7 @@ import { validateDraft, emptyExpressInfo, isExpressDraftKey, savedDraftKeys } fr
 // Comanda: hoja de pedido y cola sin conexión.
 import { ComandaHeader, LineCustomizer, NoticeSheet, OfflineQueue, OrderLine, PastRound, PriceChangesSheet, SectionLabel, SendBar, TearAway, TotalsBlock } from '../components/waiter/order';
 import { classifyError, nextDelay, priceDiffs, queueSummary, reusableExpressDraft } from '../utils/sendQueue.mjs';
-import { BottomSheet as CBottomSheet, Button as CButton, Chip as CChip, LeaderLine as CLeaderLine, Tally as CTally, Field as CField, Label as CLabel, Num as CNum, Perforation as CPerforation, StampBurst as CStampBurst, T as CT, money as cMoney } from '../components/waiter/comanda';
+import { haptic, IconButton as CIconButton, Press as CPress, BottomSheet as CBottomSheet, Button as CButton, Chip as CChip, LeaderLine as CLeaderLine, Tally as CTally, Field as CField, Label as CLabel, Num as CNum, Perforation as CPerforation, T as CT, money as cMoney } from '../components/waiter/kit';
 import ExpressDraftList from '../components/ExpressDraftList';
 import { catalogContext } from '../utils/waiterNavigation.mjs';
 import { BOTTOM_INSET, TOP_INSET } from '../utils/safeArea';
@@ -89,6 +92,7 @@ import {
   registerWaiterPushToken,
 } from '../services/waiterNotifications';
 import { alertWaiter, loadAlertSettings, notificationPermission, requestNotificationPermission } from '../services/waiterAlerts';
+import { enableWebPush } from '../services/webPushClient';
 import * as safeStorage from '../services/storage';
 import { packSnapshot, parseSnapshot, queuedByTable, snapshotAge } from '../utils/offlineSnapshot.mjs';
 import { dueReminders } from '../utils/waiterAlertLogic.mjs';
@@ -186,71 +190,10 @@ const softShadow = Platform.select({
 
 const EXPRESS_DESTINATION = '__express__';
 
-// BUG FIX #3: SwipeableRow — el PanResponder se recrea cuando cambia `enabled`,
-// lo que provocaba que el swipe quedara bloqueado después del primer render.
-// Solución: mover `enabled` a un ref para que el PanResponder siempre lo lea actualizado
-// sin necesidad de recrearse.
-const SwipeableRow = ({ children, onDelete, enabled, colors }) => {
-  const pan = useRef(new Animated.Value(0)).current;
-  const isOpen = useRef(false);
-  const enabledRef = useRef(enabled);
-  const onDeleteRef = useRef(onDelete);
-
-  useEffect(() => { enabledRef.current = enabled; }, [enabled]);
-  useEffect(() => { onDeleteRef.current = onDelete; }, [onDelete]);
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponderCapture: (e, gestureState) => {
-        return enabledRef.current
-          && Math.abs(gestureState.dx) > 20
-          && Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
-      },
-      onPanResponderMove: (e, gestureState) => {
-        let newDx = isOpen.current ? gestureState.dx - 80 : gestureState.dx;
-        if (newDx < -100) newDx = -100 - (Math.abs(newDx + 100) * 0.1);
-        if (newDx > 0) newDx = 0;
-        pan.setValue(newDx);
-      },
-      onPanResponderRelease: (e, gestureState) => {
-        if (gestureState.dx < -50 || (isOpen.current && gestureState.dx < 10)) {
-          isOpen.current = true;
-          Animated.spring(pan, { toValue: -80, useNativeDriver: true, tension: 50, friction: 8 }).start();
-        } else {
-          isOpen.current = false;
-          Animated.spring(pan, { toValue: 0, useNativeDriver: true, tension: 50, friction: 8 }).start();
-        }
-      },
-      onPanResponderTerminate: () => {
-        isOpen.current = false;
-        Animated.spring(pan, { toValue: 0, useNativeDriver: true, tension: 50, friction: 8 }).start();
-      }
-    })
-  ).current;
-
-  if (!enabled) return children;
-
-  return (
-    <View style={{ position: 'relative', width: '100%' }}>
-      <View style={{
-        position: 'absolute', top: 0, bottom: 0, right: 0, width: 90,
-        backgroundColor: colors.danger, borderRadius: 8,
-        alignItems: 'flex-end', justifyContent: 'center', paddingRight: 24
-      }}>
-        <TouchableOpacity onPress={() => onDeleteRef.current?.()} style={{ height: '100%', justifyContent: 'center' }}>
-          <Trash2 size={24} color={colors.onAccent} />
-        </TouchableOpacity>
-      </View>
-      <Animated.View {...panResponder.panHandlers} style={{ transform: [{ translateX: pan }] }}>
-        {children}
-      </Animated.View>
-    </View>
-  );
-};
 
 // La app del mesero usa su propia identidad («Comanda»), independiente del panel de administración.
 export default function WaiterApp() {
-  return <WaiterAppearance><ComandaToastProvider bottomOffset={BOTTOM_INSET + 72}><App /></ComandaToastProvider></WaiterAppearance>;
+  return <MeseroAppearance><ComandaToastProvider bottomOffset={BOTTOM_INSET + 72}><App /></ComandaToastProvider></MeseroAppearance>;
 }
 
 function App() {
@@ -278,6 +221,7 @@ function App() {
   }), [palette]);
 
   const [step, setStep] = useState('mesas');
+  const stepRef = useRef(step); stepRef.current = step;
   const [noteOpen, setNoteOpen] = useState(false); // nota general plegada hasta que se necesite
   const serviceNow = useServiceClock(['mesas', 'express', 'pedido'].includes(step));
   const [mesas, setMesas] = useState([]);
@@ -285,6 +229,8 @@ function App() {
   const [extras, setExtras] = useState([]);
   const [pedidos, setPedidos] = useState([]);
   const [businessConfig, setBusinessConfig] = useState(DEFAULT_BUSINESS_CONFIG);
+  // Marca blanca: el color del local pinta la acción principal, la pestaña activa y el carrito.
+  useEffect(() => { setBrandColor(businessConfig.color_marca || null); }, [businessConfig.color_marca]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState(null);
@@ -325,7 +271,6 @@ function App() {
   const [customAlert, setCustomAlert] = useState(null);
   // Comanda: animación de envío, cambios de precio y cola sin conexión.
   const [tearing, setTearing] = useState(false);
-  const [sentBurst, setSentBurst] = useState(false);
   const [priceReview, setPriceReview] = useState(null); // { diffs, message, items, config }
   const [priceAccepting, setPriceAccepting] = useState(false);
   const [resendTick, setResendTick] = useState(0);
@@ -357,6 +302,7 @@ function App() {
   const [splitSending, setSplitSending] = useState(false);
 
   const [splitOpen, setSplitOpen] = useState(false);
+  const [accountMenu, setAccountMenu] = useState(false);
   const [splitMode, setSplitMode] = useState('equal');
   const [splitWays, setSplitWays] = useState(2);
   const [splitGuests, setSplitGuests] = useState([1, 2]);
@@ -453,6 +399,8 @@ function App() {
   const isExpressOrder = orderMode === 'express';
   const mesaActual = useMemo(() => mesas.find((m) => Number(m.id) === Number(mesaSel)) || null, [mesas, mesaSel]);
   const expressOrders = useMemo(() => activeOrders.filter(isPickupOrder), [activeOrders]);
+  // Insignia de Express: solo lo que pide acción (pedidos listos en cocina).
+  const expressReadyCount = useMemo(() => expressOrders.filter(o => expressStage(o).ready).length, [expressOrders]);
   const selectedExpressOrder = useMemo(
     () => pedidos.find((pedido) => isPickupOrder(pedido) && Number(pedido.id) === Number(selectedExpressPedidoId)) || null,
     [pedidos, selectedExpressPedidoId]
@@ -915,6 +863,25 @@ function App() {
       subscribeRealtime(REALTIME_EVENTS.TABLE_UPDATED, applyTablePayload(null)),
       // Cocina marcó un producto como agotado (o disponible otra vez): el menú se actualiza al instante.
       subscribeRealtime(REALTIME_EVENTS.CATALOG_UPDATED, (payload = {}) => {
+        // Cambió el stock (venta, preparación, reposición): unidades al día y aviso si algo se acabó o volvió.
+        if (payload.action === 'stock' && Array.isArray(payload.productos)) {
+          const byId = new Map(payload.productos.map((p) => [Number(p.producto_id), Number(p.stock_disponible)]));
+          let soldOut = [], back = [];
+          setProductos((prev) => prev.map((p) => {
+            if (!byId.has(Number(p.id))) return p;
+            const units = byId.get(Number(p.id)), before = Number(p.stock_disponible ?? 1);
+            if (units <= 0 && before > 0 && Number(p.agotado) !== 1) soldOut.push(p.nombre);
+            if (units > 0 && before <= 0 && Number(p.agotado) !== 1) back.push(p.nombre);
+            return { ...p, stock_disponible: units };
+          }));
+          // (las listas se llenan dentro de setProductos; se avisa en el siguiente ciclo)
+          setTimeout(() => {
+            const list = (names) => names.length > 2 ? `${names.slice(0, 2).join(', ')} y ${names.length - 2} más` : names.join(' y ');
+            if (soldOut.length) toast.show(`${list(soldOut)}: se ${soldOut.length === 1 ? 'agotó' : 'agotaron'}`, { tone: 'warning', detail: 'No queda stock. Ya aparece como «Agotado» en el menú.' });
+            else if (back.length) toast.show(`${list(back)}: otra vez disponible`, { tone: 'success', detail: 'Se repuso el stock.' });
+          }, 0);
+          return;
+        }
         if (!payload.producto_id) return;
         setProductos((prev) => prev.map((p) => Number(p.id) === Number(payload.producto_id) ? { ...p, agotado: payload.agotado ? 1 : 0 } : p));
         toast.show(payload.agotado ? `${payload.nombre || 'Un producto'} se agotó` : `${payload.nombre || 'Un producto'} está disponible otra vez`,
@@ -1223,7 +1190,6 @@ function App() {
       const sentMesaId = !isExpressOrder ? (sentMesa?.id ?? finalOrder.mesa_id) : null;
       const sentExpressId = isExpressOrder ? finalOrder.id : null;
       setTearing(true);
-      setSentBurst(true);
       setTimeout(() => {
         setTearing(false);
         setEditItemId(null);
@@ -1231,6 +1197,7 @@ function App() {
       }, 260);
       toast.show('Ronda enviada a cocina', {
         tone: 'success',
+        haptic: 'success',
         detail: sentMesaId ? `Mesa ${String(sentMesa?.numero ?? sentMesaId).padStart(2, '0')}` : (finalOrder.cliente_nombre || undefined),
         action: { label: sentMesaId ? 'Ver mesa' : 'Ver pedido', onPress: () => {
           if (sentMesaId) { setOrderMode('mesa'); setSelectedExpressPedidoId(null); setMesaSel(sentMesaId); setStep('pedido'); }
@@ -1342,6 +1309,7 @@ function App() {
     try {
       const { data } = await axios.put(`${BASE_URL}/pedidos/${round.pedido_id}/rondas/${round.id}`, { estado: 'ENTREGADO' });
       if (data.pedido) setPedidos((prev) => upsertById(prev, data.pedido));
+      haptic('success');
       scheduleLiveSync();
     } catch (error) {
       setCustomAlert({ title: 'Error al entregar', message: error.response?.data?.message || error.message });
@@ -1491,7 +1459,7 @@ function App() {
                   return <TouchableOpacity key={item.splitKey} accessibilityRole="button" accessibilityState={{ selected: mine }} accessibilityLabel={`${item.nombre}, comensal ${assignedTo}`}
                     onPress={() => setItemAssignments(prev => ({ ...prev, [item.splitKey]: activeGuest }))}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52, borderBottomWidth: 1, borderColor: colors.line }}>
-                    <View style={{ minWidth: 38, height: 30, paddingHorizontal: 6, borderRadius: 15, backgroundColor: mine ? colors.primary : colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+                    <View style={{ minWidth: 38, height: 30, paddingHorizontal: 6, borderRadius: 8, backgroundColor: mine ? colors.primary : colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
                       <CNum size={13} weight="800" color={mine ? colors.onPrimary : colors.text}>C{assignedTo}</CNum>
                     </View>
                     <View style={{ flex: 1 }}><CLeaderLine left={<CT size={16} weight={mine ? '600' : '400'} numberOfLines={1}>{item.nombre}</CT>} right={<CNum size={15}>{cMoney(item.unitPrice)}</CNum>} /></View>
@@ -1513,12 +1481,14 @@ function App() {
   };
 
   const renderTopTabs = () => <WaiterNavigation
+    brand={{ name: businessConfig.nombre_restaurante, logo: businessConfig.logo_url ? assetUrl(businessConfig.logo_url) : null }}
+    alertsPending={alertPermission === 'default'}
     colors={colors} width={width} step={step} navigate={navigate}
     menuOpen={menuOpen} setMenuOpen={setMenuOpen} name={meseroNombre}
     dark={isDark} toggleTheme={toggleTheme} unread={unreadNotifications + serviceAlerts.items.length} delayCount={serviceAlerts.items.length}
     notifications={() => setNotiOpen(true)} refresh={loadData} logout={logout}
     draftCount={draftKeys.length} draftAttention={!!drafts.error || Object.keys(drafts.pending).length > 0} openDrafts={() => setDraftListOpen(true)}
-    connection={realtimeStatus} expressCount={expressOrders.length} cartCount={cartCount}
+    connection={realtimeStatus} expressCount={expressReadyCount} cartCount={cartCount}
     lastSyncAt={lastSyncAt} syncing={loading || backgroundSyncing} syncError={loadError}
     contextLabel={catalog.label} topInset={TOP_INSET} bottomInset={BOTTOM_INSET}
   />;
@@ -1546,7 +1516,7 @@ function App() {
     <View style={{ gap: 8, marginBottom: 12 }}>
       {loadError ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Reintentar carga del catálogo" onPress={loadData} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: colors.danger, fontSize: 14, fontWeight: '600' }}>No se pudo cargar el catálogo. Toca para reintentar.</Text></TouchableOpacity> : null}
       <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Destino: ${catalog.label}. ${catalog.editable ? 'Cambiar' : 'Elegir destino'}`} onPress={() => setTargetOpen(true)}
-        style={{ minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, borderRadius: 24, backgroundColor: catalog.editable ? colors.primarySoft : colors.surfaceAlt }}>
+        style={{ minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, borderRadius: 8, backgroundColor: catalog.editable ? colors.primarySoft : colors.surfaceAlt }}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={{ color: colors.muted, fontSize: 13, fontWeight: '600' }}>{catalog.editable ? 'Pidiendo para' : 'Sin destino'}</Text>
           <Text numberOfLines={1} style={{ color: colors.ink, fontSize: 18, fontWeight: '800' }}>{isExpressOrder && !selectedExpressPedidoId ? `${pickupTypeLabel(pickupType)} · borrador` : catalog.label}</Text>
@@ -1601,7 +1571,7 @@ function App() {
         const waiting = !!drafts.pending[key];
         const count = (carritos[key] || []).reduce((n, it) => n + Number(it.cantidad || 0), 0);
         return <TouchableOpacity key={key} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={`Continuar ${draftLabel(key)}`} onPress={() => resumeDraft(key)}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 20, backgroundColor: colors.surfaceAlt || colors.elevated, borderWidth: waiting ? 2 : 0, borderColor: colors.warning }}>
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 8, backgroundColor: waiting ? colors.amberSoft : colors.surfaceAlt }}>
           <View style={{ flex: 1, minWidth: 0 }}>
             <CT size={17} weight="800" numberOfLines={1}>{draftLabel(key)}</CT>
             <CT size={14} color={colors.muted}>{waiting ? 'Sin enviar a cocina · se reintenta sola' : `${count} ${count === 1 ? 'producto' : 'productos'} sin enviar`}</CT>
@@ -1631,14 +1601,14 @@ function App() {
         body = <View style={{ flex: 1, minHeight: 0, flexDirection: 'row' }}>
           <View style={{ flex: 1.35, minWidth: 0, minHeight: 0 }}>{renderProductos()}</View>
           <View style={{ width: Math.min(460, Math.max(360, width * 0.4)), minHeight: 0, borderLeftWidth: 1, borderColor: colors.line, backgroundColor: colors.surface }}>
-            {renderShell(renderPedidoBody(), true, renderSendBar())}
+            {renderShell(<>{renderPedidoBody()}{renderAccountMenu()}</>, true, renderSendBar())}
           </View>
         </View>;
       } finally { bareShell.current = false; }
     }
     return (
       <View style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderTopTabs()}
+        {step === 'pedido' && !splitView ? null : renderTopTabs()}
         {renderDraftStatus()}
         {splitView ? body : scrollable ? (
           <ScrollView
@@ -1654,7 +1624,7 @@ function App() {
           </View>
         )}
         {splitView ? null : footer}
-        <WaiterBottomBar step={step} navigate={navigate} cartCount={cartCount} expressCount={expressOrders.length} bottomInset={BOTTOM_INSET} setMenuOpen={setMenuOpen} />
+        <WaiterBottomBar step={step} navigate={navigate} cartCount={cartCount} expressCount={expressReadyCount} bottomInset={BOTTOM_INSET} setMenuOpen={setMenuOpen} />
       </View>
     );
   };
@@ -1719,7 +1689,8 @@ function App() {
     const where = first.pedido.mesa_id ? `Mesa ${first.pedido.mesa_numero || first.pedido.mesa_id}` : `Pedido #${first.pedido.id}`;
     const title = due.length === 1 ? `${where}: lista hace ${first.minutes} min` : `${due.length} rondas listas esperando`;
     alertWaiter('ready', { title, body: 'Sigue en cocina. Llévala a la mesa.', tag: 'recordatorio-listo' });
-    toast.show(title, { tone: 'warning', detail: 'Sigue en cocina sin entregar.', haptic: false, duration: 6000, action: { label: 'Ver', onPress: () => setNotiOpen(true) } });
+    // En Mesas la tarjeta verde ya lo dice: solo suena. En otras pantallas, un aviso breve.
+    if (stepRef.current !== 'mesas') toast.show(title, { tone: 'warning', haptic: false, duration: 5000, action: { label: 'Ver', onPress: () => setNotiOpen(true) } });
   }, [salonReady]);
 
   // Reservas: aviso cuando faltan 15 minutos o menos para que lleguen.
@@ -1744,7 +1715,14 @@ function App() {
     const result = await requestNotificationPermission();
     setAlertPermission(result);
     setAlertPromptDismissed(true); safeStorage.setItem('mm:waiter-alerts-prompt', 'no').catch(() => {});
-    if (result === 'granted') { alertWaiter('ready', { title: 'Avisos activados' }); toast.show('Avisos activados', { tone: 'success', detail: 'Así sonará cuando un plato esté listo.' }); }
+    if (result === 'granted') {
+      alertWaiter('ready', { title: 'Avisos activados' });
+      const push = await enableWebPush({ ask: false });
+      toast.show('Avisos activados', { tone: 'success', duration: 7000,
+        detail: push === 'active' ? 'Te llegarán aunque el teléfono esté bloqueado.'
+          : push === 'ios-install' ? 'Con la app abierta. En iPhone, instala la app en la pantalla de inicio para recibirlos con el teléfono bloqueado.'
+          : 'Así sonará cuando un plato esté listo.' });
+    }
     else if (result === 'denied') toast.show('El navegador bloqueó los avisos', { tone: 'warning', detail: 'Igual sonará con la app abierta. Para el aviso del sistema, permite las notificaciones en los ajustes del sitio.', duration: 8000 });
   };
   const dismissAlertsPrompt = () => { setAlertPromptDismissed(true); safeStorage.setItem('mm:waiter-alerts-prompt', 'no').catch(() => {}); };
@@ -1758,7 +1736,6 @@ function App() {
       compact={compactTables} setCompact={setCompactTables} selected={mesaSel} selectTable={selectMesa}
       stateFor={mesaEstadoVisual} orderFor={activeOrderForMesa} zones={mesaZones} zone={mesaZone} setZone={setMesaZone}
       refresh={loadData} refreshing={loading} loadError={loadError} offline={offline} queued={queuedTables}
-      alertsPrompt={{ visible: alertPermission === 'default' && !alertPromptDismissed, enable: enableAlerts, dismiss: dismissAlertsPrompt }}
       reservations={salonReservations} onLongPressTable={setSalonActionsMesa} openTray={() => setNotiOpen(true)} readyCount={salonReady.length + salonPartial.length}
     />)}
     <TableActionsSheet mesa={salonActionsMesa} state={salonActionsMesa ? mesaEstadoVisual(salonActionsMesa) : 'Libre'} order={salonActionsOrder} onClose={() => setSalonActionsMesa(null)}
@@ -1842,7 +1819,7 @@ function App() {
       const index = cart.findIndex(i => (i.localId || i.id) === itemId);
       removeItem(item);
       if (isEditing) setEditItemId(null);
-      toast.show(`${item.nombre} quitado`, { duration: 5000, action: { label: 'Deshacer', onPress: () => setCarritos(prev => {
+      toast.show(`${item.nombre} quitado`, { duration: 5000, haptic: false, action: { label: 'Deshacer', onPress: () => setCarritos(prev => {
         const list = [...(prev[key] || [])];
         if (list.some(i => (i.localId || i.id) === itemId)) return prev;
         list.splice(Math.max(0, Math.min(index, list.length)), 0, item);
@@ -1877,14 +1854,6 @@ function App() {
           </PastRound>;
         })}
         {paid ? <CT size={15} weight="600" color={colors.success} style={{ marginTop: 12 }}>{pedidoActual.pendiente_entrega ? 'Pago completo · falta la entrega' : 'Pedido completado · guardado en el historial'}</CT> : null}
-        <View style={{ gap: 8, marginTop: 16 }}>
-          {catalog.editable && !showingCart ? <CButton variant="primary" size="lg" icon={Plus} full onPress={() => setStep('productos')}>Pedir más</CButton> : null}
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <CButton icon={PieChart} disabled={paid} onPress={() => setSplitOpen(true)} style={{ flex: 1, paddingHorizontal: 8 }}>Dividir</CButton>
-            {!isExpressOrder ? <CButton icon={ArrowRightLeft} onPress={() => setTransferOpen(true)} style={{ flex: 1, paddingHorizontal: 8 }}>Mover</CButton> : null}
-            <CButton icon={Printer} disabled={paid} onPress={solicitarCobroCaja} style={{ flex: 1, paddingHorizontal: 8 }} accessibilityLabel="Solicitar cobro en caja">{paid ? 'Pagado' : 'Cobrar'}</CButton>
-          </View>
-        </View>
       </View>
     );
   };
@@ -1918,8 +1887,9 @@ function App() {
     const split = width >= 900;
 
     return (
-      <TearAway tearing={tearing} style={{ padding: split ? 20 : bodyPad, paddingTop: 20, maxWidth: split ? undefined : 760, alignSelf: 'center', width: '100%' }}>
-        <ComandaHeader number={null} meta={meta} title={title} subtitle={subtitle} stamp={stamp} stampColor={stampColor}>
+      <TearAway tearing={tearing} style={{ padding: split ? 20 : bodyPad, paddingTop: 12, maxWidth: split ? undefined : 760, alignSelf: 'center', width: '100%' }}>
+        <ComandaHeader number={null} meta={meta} title={title} subtitle={subtitle} stamp={stamp} stampColor={stampColor} onBack={!split && catalog.editable ? () => setStep('productos') : null}
+          action={pedidoActual ? <CIconButton icon={MoreHorizontal} label="Más acciones de la cuenta" onPress={() => setAccountMenu(true)} /> : null}>
           {isExpressOrder && currentExpressDraft ? <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
             <CButton variant="ghost" onPress={() => setDraftListOpen(true)} accessibilityLabel="Cambiar borrador Express">Cambiar borrador</CButton>
           </View> : null}
@@ -1943,37 +1913,61 @@ function App() {
 
         {cartItems.length || !pedidoActual ? <SectionLabel right={cartCount ? <CNum size={14} color={colors.muted}>{cartCount} {cartCount === 1 ? 'producto' : 'productos'}</CNum> : null}>{pendingSend ? 'Ronda por confirmar' : 'Para enviar a cocina'}</SectionLabel> : null}
         {cartItems.length ? cartItems.map(item => renderOrderItem(item, true)) : pedidoActual ? null : (
-          <View style={{ paddingVertical: 28, borderRadius: 24, backgroundColor: colors.surfaceAlt, alignItems: 'center', gap: 12 }}>
+          <View style={{ paddingVertical: 28, borderRadius: 8, backgroundColor: colors.surfaceAlt, alignItems: 'center', gap: 12 }}>
             <CT size={15} color={colors.muted}>{catalog.editable ? 'Sin productos en esta ronda.' : 'Esta cuenta ya no admite rondas nuevas.'}</CT>
             {catalog.editable && !split ? <CButton variant="primary" icon={Plus} onPress={() => setStep('productos')} style={{ alignSelf: 'center' }}>Elegir productos</CButton> : null}
           </View>
         )}
-        {(cartItems.length && catalog.editable && !split) || ((showingCart || editingCustomer) && !orderNote && !noteOpen) ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
-          {cartItems.length && catalog.editable && !split ? <CButton variant="ghost" icon={Plus} onPress={() => setStep('productos')}>Añadir más</CButton> : null}
-          {(showingCart || editingCustomer) && !orderNote && !noteOpen ? <CButton variant="ghost" icon={StickyNote} onPress={() => setNoteOpen(true)} accessibilityLabel="Añadir nota general">Nota general</CButton> : null}
-        </View> : null}
+        {cartItems.length && catalog.editable && !split ? <CPress accessibilityRole="button" onPress={() => setStep('productos')} scaleTo={0.99}
+          style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Plus size={18} color={colors.text} strokeWidth={2.4} /><CT size={15} weight="600">Añadir productos</CT>
+        </CPress> : null}
+        {(showingCart || editingCustomer) && !orderNote && !noteOpen ? <CPress accessibilityRole="button" accessibilityLabel="Añadir nota general" onPress={() => setNoteOpen(true)} scaleTo={0.99}
+          style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 8, borderTopWidth: 1, borderTopColor: colors.line }}>
+          <StickyNote size={18} color={colors.muted} /><CT size={15} color={colors.text} style={{ flex: 1 }}>Nota para toda la mesa</CT><ChevronRight size={18} color={colors.muted} />
+        </CPress> : null}
         {(showingCart || editingCustomer) && (orderNote || noteOpen) ? <CField label="Nota general" value={orderNote} onChangeText={updateOrderNote} editable={!pendingSend} placeholder="Ej. entregar todo junto, silla para bebé" multiline autoFocus={noteOpen && !orderNote} maxLength={120} style={{ marginTop: 12 }} accessibilityLabel="Notas generales de la cuenta" />
           : !(showingCart || editingCustomer) && pedidoActual?.notas ? <CT size={15} color={colors.muted} style={{ marginTop: 12 }}>Nota: {pedidoActual.notas}</CT> : null}
 
+        {renderTotals()}
         <TotalsBlock
           rows={[
-            ...(showingCart ? [[`Ronda nueva`, subtotal]] : []),
             ...(service > 0 ? [[showingCart ? `Servicio ${servicePercent}%` : 'Servicio incluido', service]] : []),
-            ...(showingCart && pedidoActual ? [['Ya en la cuenta', storedTotal]] : []),
           ]}
           grand={mesaDisplayTotal} grandLabel={isExpressOrder ? 'Total del pedido' : 'Total de la mesa'} />
 
-        {renderTotals()}
 
 
       </TearAway>
     );
   };
 
-  const renderSendBar = () => (showingCart || pendingSend) ? <SendBar count={cartCount} amount={total} onPress={enviarCocina} sending={orderSending}
-    pending={!!pendingSend} offline={realtimeStatus !== 'connected'} disabled={!drafts.ready} /> : null;
+  const renderSendBar = () => {
+    if (showingCart || pendingSend) return <SendBar count={cartCount} amount={total} onPress={enviarCocina} sending={orderSending}
+      pending={!!pendingSend} offline={realtimeStatus !== 'connected'} disabled={!drafts.ready} />;
+    if (!pedidoActual) return null;
+    // Sin ronda nueva: las dos cosas que se hacen con una cuenta abierta.
+    const paid = pedidoActual.estado_cobro === 'PAGADO';
+    return <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 6, borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.bg }}>
+      {catalog.editable ? <CButton variant="primary" size="lg" icon={Plus} onPress={() => setStep('productos')} style={{ flex: 1 }}>Pedir más</CButton> : null}
+      <CButton variant="outline" size="lg" icon={Printer} disabled={paid} onPress={solicitarCobroCaja} style={{ flex: 1 }} accessibilityLabel="Solicitar cobro en caja">{paid ? 'Pagado' : 'Cobrar'}</CButton>
+    </View>;
+  };
 
-  const renderPedido = () => renderShell(renderPedidoBody(), true, renderSendBar());
+  const renderAccountMenu = () => {
+    const paid = pedidoActual?.estado_cobro === 'PAGADO';
+    const item = (Icon, label, onPress, disabled) => <CPress key={label} accessibilityRole="button" disabled={disabled} onPress={() => { setAccountMenu(false); onPress(); }} scaleTo={0.99}
+      style={{ minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 14, opacity: disabled ? 0.4 : 1 }}>
+      <Icon size={20} color={colors.text} /><CT size={16} weight="500">{label}</CT>
+    </CPress>;
+    return <CBottomSheet visible={accountMenu && !!pedidoActual} onClose={() => setAccountMenu(false)} title={isExpressOrder ? 'Pedido' : `Mesa ${mesaActual?.numero || pedidoActual?.mesa_numero || ''}`}>
+      {item(PieChart, 'Dividir la cuenta', () => setSplitOpen(true), paid)}
+      {!isExpressOrder ? item(ArrowRightLeft, 'Mover a otra mesa', () => setTransferOpen(true)) : null}
+      {item(Printer, paid ? 'Cuenta pagada' : 'Pedir el cobro en caja', solicitarCobroCaja, paid)}
+    </CBottomSheet>;
+  };
+
+  const renderPedido = () => renderShell(<>{renderPedidoBody()}{renderAccountMenu()}</>, true, renderSendBar());
 
   const renderCustomAlertModal = () => (
     // Comanda: avisos como hoja inferior (arrastrable), no modal centrado.
@@ -1982,7 +1976,8 @@ function App() {
 
   // Salón: bandeja «Listo» (rondas listas con «Entregado», demoras y actividad).
   const renderNotifications = () => <WaiterNotifications colors={colors} alerts={serviceAlerts} activity={notificaciones} close={()=>setNotiOpen(false)} openOrder={openPedidoFromNotification} clearActivity={()=>setNotificaciones([])}
-    ready={salonReady} partial={salonPartial} onDeliver={salonEntregar} deliveringId={trayDelivering} now={serviceNow}/>;
+    ready={salonReady} partial={salonPartial} onDeliver={salonEntregar} deliveringId={trayDelivering} now={serviceNow}
+    alertsPrompt={{ visible: alertPermission === 'default', enable: enableAlerts }}/>;
 
   if ((loading && !dataLoaded.current) || !drafts.ready) {
     return (
@@ -1995,7 +1990,7 @@ function App() {
   }
 
   return (
-    <View onLayout={measureViewport} pointerEvents={orderSending ? 'none' : 'auto'} style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', backgroundColor: colors.pageBg, fontFamily: WAITER_FONT }}>
+    <View dataSet={{ mesero: "true" }} onLayout={measureViewport} pointerEvents={orderSending ? 'none' : 'auto'} style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', backgroundColor: colors.pageBg, fontFamily: WAITER_FONT }}>
       {renderTargetPicker()}
       {renderDraftList()}
       {step === 'mesas' ? renderMesas() : null}
@@ -2009,7 +2004,6 @@ function App() {
       {/* Menú: el aviso «añadido» ahora es un toast Comanda con «Ver comanda» (ver announceAdded). */}
 
       {/* Comanda: sin modal bloqueante; el estado «Enviando…» vive en la barra de envío. */}
-      <CStampBurst text="ENVIADA" visible={sentBurst} onDone={() => setSentBurst(false)} />
       <PriceChangesSheet visible={!!priceReview} diffs={priceReview?.diffs} message={priceReview?.message} busy={priceAccepting}
         onAccept={acceptPriceChanges} onClose={() => setPriceReview(null)} />
       {customAlert ? renderCustomAlertModal() : null}

@@ -3,7 +3,7 @@ import React, { useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { FileText, ShoppingBag, Trash2, Truck } from 'lucide-react-native';
 import { useTheme } from '../theme';
-import { Button, EmptyState, Field, IconButton, Num, Press, T, money, radius, space } from './waiter/comanda';
+import { Button, EmptyState, Field, IconButton, Num, Press, T, money, radius, space } from './waiter/kit';
 const normalize = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 export default function ExpressDraftList({ drafts, onOpen, onDiscard }) {
@@ -29,12 +29,12 @@ export default function ExpressDraftList({ drafts, onOpen, onDiscard }) {
       const count = items.reduce((sum, item) => sum + Number(item.cantidad || 0), 0);
       const subtotal = items.reduce((sum, item) => sum + (Number(item.precio || 0) + (item.modificadores || []).reduce((extra, mod) => extra + Number(mod.precio_extra || 0), 0)) * Number(item.cantidad || 0), 0);
       const pending = !!drafts.pending[key];
-      return <View key={key} style={{ borderRadius: radius.lg, backgroundColor: c.surfaceAlt, borderWidth: pending ? 2 : 0, borderColor: c.amber, overflow: 'hidden' }}>
+      return <View key={key} style={{ borderRadius: radius.lg, backgroundColor: pending ? c.amberSoft : c.surfaceAlt, overflow: 'hidden' }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingRight: space.sm }}>
           <Press accessibilityRole="button" accessibilityLabel={`Continuar el pedido de ${name}, ${delivery ? 'delivery' : 'para llevar'}`} onPress={() => onOpen(key)} hapticKind="tap"
             style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.md }}>
-            <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: delivery ? c.skySoft : c.primarySoft, alignItems: 'center', justifyContent: 'center' }}>
-              {delivery ? <Truck size={19} color={c.sky} /> : <ShoppingBag size={19} color={c.primaryText} />}
+            <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+              {delivery ? <Truck size={19} color={c.text} /> : <ShoppingBag size={19} color={c.text} />}
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
               <T size={16} weight="800" numberOfLines={1}>{name}</T>

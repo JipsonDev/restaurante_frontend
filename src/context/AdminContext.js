@@ -22,6 +22,7 @@ function upsertById(items, nextItem) {
 export function AdminProvider({ children }) {
   const { user } = useAuth();
   const [pedidos, setPedidos] = useState([]);
+  const [inventoryAlert, setInventoryAlert] = useState(null); // último aviso de «queda poco» / repuesto
   const [productos, setProductos] = useState([]);
   const [categorias, setCategorias] = useState([]);
   const [mesas, setMesas] = useState([]);
@@ -283,6 +284,18 @@ export function AdminProvider({ children }) {
       subscribeRealtime(REALTIME_EVENTS.TABLE_OCCUPIED, applyTable),
       subscribeRealtime(REALTIME_EVENTS.TABLE_FREED, applyTable),
       subscribeRealtime(REALTIME_EVENTS.TABLE_UPDATED, applyTable),
+      // Vigilante de stock: unidades al día, «queda poco» y lo que se repuso.
+      subscribeRealtime(REALTIME_EVENTS.CATALOG_UPDATED, (payload = {}) => {
+        if (payload.action === 'stock' && Array.isArray(payload.productos)) {
+          const byId = new Map(payload.productos.map((p) => [Number(p.producto_id), Number(p.stock_disponible)]));
+          setProductos((current) => current.map((p) => byId.has(Number(p.id)) ? { ...p, stock_disponible: byId.get(Number(p.id)) } : p));
+        } else fetchProductos();
+        fetchInventario();
+      }),
+      subscribeRealtime(REALTIME_EVENTS.INVENTORY_ALERT, (payload = {}) => {
+        fetchInventario();
+        setInventoryAlert({ ...payload, at: Date.now() });
+      }),
       subscribeRealtime(REALTIME_EVENTS.RESERVATION_UPDATED, (payload = {}) => {
         if (!payload.reserva) { fetchReservas(); return; }
         if (payload.action === 'eliminada') setReservas(current => current.filter(r => Number(r.id) !== Number(payload.reserva.id)));
@@ -463,6 +476,7 @@ export function AdminProvider({ children }) {
   return (
     <AdminContext.Provider
       value={{
+        inventoryAlert,
         pedidos,
         productos,
         categorias,

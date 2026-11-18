@@ -6,7 +6,7 @@ import { Check } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import { menuStock } from '../../utils/waiterCatalog.mjs';
 import { extrasForProduct, toModifier, unitPrice } from '../../utils/waiterFavorites.mjs';
-import { T, Num, Label, Press, Button, Tally, Field, BottomSheet, Perforation, money, TOUCH, radius, space } from './comanda';
+import { T, Num, Label, Press, Button, Tally, Field, BottomSheet, Perforation, money, TOUCH, radius, space } from './kit';
 
 const GROUPS = [
   ['EXTRA', 'Extras'], ['EXCLUSION', 'Quitar'], ['TERMINO', 'Término'], ['NOTA', 'Indicaciones'],
@@ -25,8 +25,8 @@ function Option({ extra, selected, onPress, radio }) {
   const cost = Number(extra.precio_extra ?? extra.precio ?? 0);
   return <Press accessibilityRole={radio ? 'radio' : 'checkbox'} accessibilityState={{ checked: selected }} accessibilityLabel={`${extra.nombre}${cost ? `, más ${money(cost)}` : ''}`}
     onPress={onPress} hapticKind="select" scaleTo={0.98} hoverStyle={{ backgroundColor: selected ? c.primarySoft : c.soft }}
-    style={{ minHeight: TOUCH + 8, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.md, marginBottom: 6, borderRadius: radius.lg, borderWidth: 2,
-      borderColor: selected ? c.primary : 'transparent', backgroundColor: selected ? c.primarySoft : c.surfaceAlt }}>
+    style={{ minHeight: TOUCH + 8, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.md, marginBottom: 6, borderRadius: radius.lg,
+      backgroundColor: selected ? c.primarySoft : c.surfaceAlt }}>
     <View style={{ width: 24, height: 24, borderRadius: radio ? 12 : 8, borderWidth: 2, borderColor: selected ? c.primary : c.lineStrong, backgroundColor: selected ? c.primary : c.surface, alignItems: 'center', justifyContent: 'center' }}>
       {selected ? radio ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: c.onPrimary }} /> : <Check size={16} color={c.onPrimary} strokeWidth={3} /> : null}
     </View>

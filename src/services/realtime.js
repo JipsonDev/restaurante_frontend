@@ -17,7 +17,8 @@ export const REALTIME_EVENTS = {
   RESERVATION_UPDATED: 'reservation:updated',
   PRINT_COMANDA: 'print:comanda',
   PRINT_PRECUENTA: 'print:precuenta',
-  CATALOG_UPDATED: 'catalog:updated', // producto agotado o disponible otra vez (cocina)
+  CATALOG_UPDATED: 'catalog:updated', // producto agotado o disponible otra vez (cocina) o cambio de stock (action: 'stock')
+  INVENTORY_ALERT: 'inventory:alert', // «queda poco», «se acabó» y lo repuesto (administración)
 };
 
 function socketUrl() {

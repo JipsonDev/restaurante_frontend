@@ -5,7 +5,7 @@ import { Image, Platform, View } from 'react-native';
 import { Download, PlusSquare, Share, X } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import { dismissInstall, getInstallState, installDismissed, onInstallChange, promptInstall } from '../../services/pwa';
-import { Appear, BottomSheet, Button, IconButton, Num, T, elevate, haptic, radius, space } from './comanda';
+import { Appear, BottomSheet, Button, IconButton, Num, T, elevate, haptic, radius, space } from './kit';
 
 export function useInstall() {
   const [state, setState] = useState(() => Platform.OS === 'web' ? getInstallState() : { standalone: true, canPrompt: false, ios: false });
@@ -16,7 +16,7 @@ export function useInstall() {
 export function IOSInstallSheet({ visible, onClose }) {
   const { c } = useTheme();
   const step = (n, Icon, title, detail) => <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-    <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: c.primarySoft, alignItems: 'center', justifyContent: 'center' }}><Num size={15} weight="800" color={c.primaryText}>{n}</Num></View>
+    <View style={{ width: 36, height: 36, borderRadius: 8, backgroundColor: c.primarySoft, alignItems: 'center', justifyContent: 'center' }}><Num size={15} weight="800" color={c.primaryText}>{n}</Num></View>
     <View style={{ flex: 1 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><T size={16} weight="800">{title}</T>{Icon ? <Icon size={18} color={c.sky} /> : null}</View>
       {detail ? <T size={14} color={c.muted}>{detail}</T> : null}
@@ -51,8 +51,8 @@ export function InstallBanner() {
   if (!install.available || hidden) return sheet;
   return <>
     <Appear style={{ marginBottom: space.lg }}>
-      <View style={[{ flexDirection: 'row', alignItems: 'flex-start', gap: space.md, padding: space.md, borderRadius: radius.xl, backgroundColor: c.surface, borderWidth: 1, borderColor: c.isDark ? c.line : 'rgba(16,24,40,0.05)' }, elevate(c, 1)]}>
-        <Image source={{ uri: '/icons/icon-192.png' }} style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: c.surfaceAlt }} accessibilityIgnoresInvertColors />
+      <View style={[{ flexDirection: 'row', alignItems: 'flex-start', gap: space.md, padding: space.md, borderRadius: radius.lg, backgroundColor: c.surfaceAlt }]}>
+        <Image source={{ uri: '/icons/icon-192.png' }} style={{ width: 52, height: 52, borderRadius: radius.md, backgroundColor: c.bg }} accessibilityIgnoresInvertColors />
         <View style={{ flex: 1, minWidth: 0, gap: 8 }}>
           <View>
             <T size={15} weight="800">Instala Morena Mía</T>
