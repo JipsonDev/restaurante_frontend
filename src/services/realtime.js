@@ -41,14 +41,17 @@ export function getRealtimeSocket() {
         safeStorage.getItem('token').then(token => callback({ token: token || '' }), () => callback({ token: '' }));
       },
     });
+    // Si el servidor cierra la conexión (p. ej. venció el token), socket.io no reintenta solo: se reintenta
+    // con el token que haya ahora (se lee en cada intento).
+    socket.on('disconnect', reason => { if (reason === 'io server disconnect') setTimeout(() => { if (socket && !socket.connected) socket.connect(); }, 1500); });
     installWakeHandlers();
   }
   return socket;
 }
 
-// Al volver a la app (pantalla desbloqueada, pestaña visible, vuelve internet) se reconecta YA, sin esperar
-// el siguiente reintento. Si estuvo en segundo plano más de 25 s, se renueva la conexión: el socket pudo
-// quedar «zombi» (el sistema congeló la app) y los datos se resincronizan al conectar.
+// Al volver a la app (pantalla desbloqueada, pestaña visible, vuelve internet) se reconecta YA si se había
+// caído, sin esperar el siguiente reintento. Un socket sano no se toca (abrir la ventana de impresión también
+// oculta la página: renovarlo hacía parpadear «Reconectando…»); si quedó «zombi», el latido lo detecta.
 let wakeInstalled = false;
 let hiddenAt = 0;
 function installWakeHandlers() {
@@ -56,10 +59,8 @@ function installWakeHandlers() {
   wakeInstalled = true;
   const wake = () => {
     if (!socket) return;
-    const longAway = hiddenAt && Date.now() - hiddenAt > 25000;
     hiddenAt = 0;
     if (!socket.connected) socket.connect();
-    else if (longAway) { socket.disconnect(); socket.connect(); }
   };
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') hiddenAt = Date.now(); else wake(); });

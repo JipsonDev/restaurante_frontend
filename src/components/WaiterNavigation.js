@@ -15,10 +15,11 @@ const initialsOf = name => String(name || 'Mesero').trim().split(/\s+/).slice(0,
 const clock = at => at ? new Date(at).toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : '';
 
 // Estado de conexión en lenguaje del mesero.
+// Lo que manda es el socket: mientras esté conectado se ve «En línea», aunque se esté sincronizando
+// (eso pasa con cada acción de cualquiera) o haya fallado una actualización puntual (se reintenta sola).
 export function connectionSummary({ connection, lastSyncAt, syncing, syncError }) {
-  const s = connectionState({ connection, lastSyncAt, syncing, error: syncError });
-  if (s.key === 'live') return { state: 'live', label: `En línea${lastSyncAt ? ` · ${clock(lastSyncAt)}` : ''}` };
-  if (syncError || s.key === 'offline' || s.key === 'error') return { state: 'offline', label: 'Sin conexión' };
+  if (connection === 'connected') return { state: 'live', label: `En línea${lastSyncAt ? ` · ${clock(lastSyncAt)}` : ''}` };
+  if (connection === 'error' || connection === 'disconnected') return { state: 'offline', label: 'Sin conexión' };
   return { state: 'reconnecting', label: 'Reconectando…' };
 }
 

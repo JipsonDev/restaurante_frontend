@@ -8,19 +8,8 @@ import { receiptTotals } from '../utils/cashLogic.mjs';
 import { runExclusive } from '../utils/waiterLogic.mjs';
 import { groupUnpaidAccounts } from '../utils/accountLogic.mjs';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-  useWindowDimensions,
-} from 'react-native';
+import { ActivityIndicator, Modal, Platform, SafeAreaView, ScrollView, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert } from '../utils/adminAlert';
 import {
   Banknote,
   CreditCard,
@@ -336,6 +325,9 @@ function CashierShell() {
   const [historyVersion, setHistoryVersion] = useState(0);
   const [printBusy, setPrintBusy] = useState(false);
   const [pendingPayment, setPendingPayment] = useState(null);
+  // El cobro se guarda como «pendiente» ANTES de enviarlo (por si se corta la conexión), pero el aviso solo se
+  // muestra si de verdad quedó sin confirmar: al abrir la caja con uno guardado o si el intento falló.
+  const [pendingStuck, setPendingStuck] = useState(false);
   const pendingPaymentRef = useRef(null);
   const [pendingReady, setPendingReady] = useState(false);
   const pendingKey = `cash.pending.${user?.id}`;
@@ -343,7 +335,7 @@ function CashierShell() {
     let active = true;
     AsyncStorage.getItem(pendingKey).then(raw => {
       if (!active) return;
-      if (raw) { const pending = JSON.parse(raw); pendingPaymentRef.current = pending; setPendingPayment(pending); }
+      if (raw) { const pending = JSON.parse(raw); pendingPaymentRef.current = pending; setPendingPayment(pending); setPendingStuck(true); }
       setPendingReady(true);
     }).catch(() => { if (active) Alert.alert('Almacenamiento no disponible', 'No se pudo verificar si hay un cobro pendiente. Recarga antes de cobrar.'); });
     return () => { active = false; };
@@ -424,7 +416,8 @@ function CashierShell() {
   useEffect(() => {
     installWebAudioUnlock();
     refreshAll();
-    const timer = setInterval(refreshAll, 10000);
+    // Respaldo por si se pierde un evento; lo normal llega en tiempo real (antes cada 10 s: ráfagas de peticiones).
+    const timer = setInterval(refreshAll, 45000);
     return () => clearInterval(timer);
   }, [refreshAll]);
   useEffect(() => () => {
@@ -991,23 +984,24 @@ function CashierShell() {
       const settlement = await cobrarPedido(payload.pedido_id, payload.metodo, payload);
       registered = true;
       await AsyncStorage.removeItem(pendingKey);
-      pendingPaymentRef.current = null; setPendingPayment(null);
+      pendingPaymentRef.current = null; setPendingPayment(null); setPendingStuck(false);
       setSelectedId(Number(settlement.snapshot.saldo_pendiente) > 0 ? payload.pedido_id : null);
       setHistoryVersion(v=>v+1);
       try { await printSavedPayment(settlement, printWindow, { direct, drawer: true }); }
       catch (error) { printWindow?.close(); Alert.alert('Cobro guardado · impresión pendiente', `${error.message} Puedes reimprimir desde Comprobantes.`); }
-      refreshAll().catch(()=>{});
+      // cobrarPedido ya actualiza todo: no se repite la ráfaga de peticiones.
     } catch (error) {
       printWindow?.close();
       if (!registered && error.response?.status >= 400 && error.response.status < 500) {
         await AsyncStorage.removeItem(pendingKey); pendingPaymentRef.current = null; setPendingPayment(null);
       }
+      if (pendingPaymentRef.current) setPendingStuck(true); // sin respuesta: ahora sí queda «sin confirmar»
       Alert.alert(registered ? 'Cobro guardado' : 'No se pudo confirmar el cobro', error.response?.data?.message || 'Reintenta el cobro pendiente. Se usará el mismo identificador para evitar duplicados.');
     } finally { setBusy(false); }
   });
 
   // Cobro sin confirmar: se pregunta al servidor si llegó (al abrir la caja y cuando vuelve la conexión).
-  const clearPending = async () => { await AsyncStorage.removeItem(pendingKey).catch(() => {}); pendingPaymentRef.current = null; setPendingPayment(null); };
+  const clearPending = async () => { await AsyncStorage.removeItem(pendingKey).catch(() => {}); pendingPaymentRef.current = null; setPendingPayment(null); setPendingStuck(false); };
   const checkPendingPayment = useCallback(async () => {
     const pending = pendingPaymentRef.current;
     if (!pending?.idempotency_key || cashActionLock.current) return;
@@ -1024,12 +1018,12 @@ function CashierShell() {
       }
     } catch { /* sin conexión: el aviso sigue y se vuelve a revisar al reconectar */ }
   }, [pendingKey, showCashNotice]);
-  useEffect(() => { if (pendingReady && pendingPayment) checkPendingPayment(); }, [pendingReady, !!pendingPayment]);
+  useEffect(() => { if (pendingReady && pendingStuck) checkPendingPayment(); }, [pendingReady, pendingStuck]);
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
     const online = () => checkPendingPayment();
     window.addEventListener('online', online);
-    const timer = setInterval(() => { if (pendingPaymentRef.current) checkPendingPayment(); }, 30000);
+    const timer = setInterval(() => { if (pendingPaymentRef.current && !cashActionLock.current) checkPendingPayment(); }, 30000);
     return () => { window.removeEventListener('online', online); clearInterval(timer); };
   }, [checkPendingPayment]);
   const discardPendingPayment = () => {
@@ -1298,7 +1292,7 @@ function CashierShell() {
   return <>
     <CashierWorkspace
       model={{ pos, isDark, user, connected, caja, turnTotals, stats, activeOrders, filteredOrders,
-        selectedOrder, selectedSplit, subtotal, tax, service, total, change, taxPercent: selectedOrder ? Number(selectedOrder?.totales_cobro?.taxPercent ?? businessConfig.iva_porcentaje ?? 0) : null, balanceDue, chargeAmount, chargeMode, partialAmount, divisionId, mixedAmounts, mixedTotal, cashPortion, historyVersion, printBusy, pendingPayment, cart, cartSubtotal, cartTotal,
+        selectedOrder, selectedSplit, subtotal, tax, service, total, change, taxPercent: selectedOrder ? Number(selectedOrder?.totales_cobro?.taxPercent ?? businessConfig.iva_porcentaje ?? 0) : null, balanceDue, chargeAmount, chargeMode, partialAmount, divisionId, mixedAmounts, mixedTotal, cashPortion, historyVersion, printBusy, pendingPayment: pendingStuck ? pendingPayment : null, cart, cartSubtotal, cartTotal,
         customer, customerError, saleType, saleNote, paymentMethods, paymentMethod, cashReceived, reference,
         billingMode, billingName, billingId, billingPhone, billingEmail, matchingClients,
         menuSearch, menuCategory, menuCategories, filteredMenu: visibleProducts, orderSearch, orderFilter,
