@@ -1006,6 +1006,40 @@ function CashierShell() {
     } finally { setBusy(false); }
   });
 
+  // Cobro sin confirmar: se pregunta al servidor si llegó (al abrir la caja y cuando vuelve la conexión).
+  const clearPending = async () => { await AsyncStorage.removeItem(pendingKey).catch(() => {}); pendingPaymentRef.current = null; setPendingPayment(null); };
+  const checkPendingPayment = useCallback(async () => {
+    const pending = pendingPaymentRef.current;
+    if (!pending?.idempotency_key || cashActionLock.current) return;
+    try {
+      const { data } = await axios.get(`${BASE_URL}/caja/cobro-pendiente/${pending.idempotency_key}`, { params: { pedido_id: pending.pedido_id } });
+      if (data.registrado) {
+        await clearPending();
+        showCashNotice({ type: 'success', title: `El cobro del pedido #${pending.pedido_id} sí se registró`, detail: data.comprobante_numero ? `Comprobante ${data.comprobante_numero}. Puedes reimprimirlo desde Comprobantes.` : 'Puedes reimprimirlo desde Comprobantes.' });
+        setHistoryVersion(v => v + 1); refreshAll().catch(() => {});
+      } else if (!data.pedido_estado || ['PAGADO', 'CANCELADO'].includes(String(data.pedido_estado).toUpperCase())) {
+        await clearPending();
+        showCashNotice({ type: 'info', title: `El pedido #${pending.pedido_id} ya no tiene saldo por cobrar`, detail: 'Se quitó el cobro pendiente.' });
+        refreshAll().catch(() => {});
+      }
+    } catch { /* sin conexión: el aviso sigue y se vuelve a revisar al reconectar */ }
+  }, [pendingKey, showCashNotice]);
+  useEffect(() => { if (pendingReady && pendingPayment) checkPendingPayment(); }, [pendingReady, !!pendingPayment]);
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
+    const online = () => checkPendingPayment();
+    window.addEventListener('online', online);
+    const timer = setInterval(() => { if (pendingPaymentRef.current) checkPendingPayment(); }, 30000);
+    return () => { window.removeEventListener('online', online); clearInterval(timer); };
+  }, [checkPendingPayment]);
+  const discardPendingPayment = () => {
+    const pending = pendingPaymentRef.current;
+    if (!pending) return;
+    const doIt = async () => { await clearPending(); showCashNotice({ type: 'info', title: 'Cobro pendiente descartado', detail: `Revisa el pedido #${pending.pedido_id} antes de volver a cobrarlo.` }); };
+    if (Platform.OS === 'web' && typeof window !== 'undefined') { if (window.confirm(`¿Descartar el cobro sin confirmar del pedido #${pending.pedido_id}? Hazlo solo si estás seguro de que no se cobró.`)) doIt(); return; }
+    Alert.alert('Descartar cobro', `¿Descartar el cobro sin confirmar del pedido #${pending.pedido_id}?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Descartar', style: 'destructive', onPress: doIt }]);
+  };
+
   const openOrder = (order) => {
     setSelectedId(order.id);
   };
@@ -1276,7 +1310,7 @@ function CashierShell() {
         setSaleType, setCustomerName: (value) => { if (!orderActionLock.current) { setCustomer({ nombre: value }); setCustomerError(''); } },
         setSaleNote: (value) => { if (!orderActionLock.current) setSaleNote(value); },
         setMenuSearch, setMenuCategory, setOrderSearch, setOrderFilter, addToCart, changeCartQty,
-        clearCart: () => { if (!orderActionLock.current) setCart([]); }, createPickupOrder, handleCharge,
+        clearCart: () => { if (!orderActionLock.current) setCart([]); }, createPickupOrder, handleCharge, discardPendingPayment,
         printReceipt, reprintPayment, printShiftReport, setTipAmount, openDrawer, applyAdjustment, removeAdjustment, splitByItems, setChargeMode, setPartialAmount, setDivisionId, setMixedAmounts, handleOpenCaja, handleCloseCaja, openMovement, openPaymentAuthorization,
         showHistory: () => setHistoryModal(true), dismissNotice: () => setCashNotice(null) }}
       helpers={{ money, orderLabel, itemLineTotal, itemExtras, activePayment, assetUrl }}

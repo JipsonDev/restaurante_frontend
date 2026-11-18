@@ -85,7 +85,7 @@ import { haptic, IconButton as CIconButton, Press as CPress, BottomSheet as CBot
 import ExpressDraftList from '../components/ExpressDraftList';
 import { catalogContext } from '../utils/waiterNavigation.mjs';
 import { BOTTOM_INSET, TOP_INSET } from '../utils/safeArea';
-import { REALTIME_EVENTS, getRealtimeSocket, subscribeRealtime } from '../services/realtime';
+import { REALTIME_EVENTS, getRealtimeSocket, subscribeRealtime, watchConnection } from '../services/realtime';
 import {
   addWaiterNotificationResponseListener,
   configureWaiterNotifications,
@@ -751,17 +751,7 @@ function App() {
   useEffect(() => {
     const client = getRealtimeSocket();
 
-    const onConnect = () => {
-      setRealtimeStatus('connected');
-      scheduleLiveSync();
-    };
-    const onDisconnect = () => setRealtimeStatus('disconnected');
-    const onConnectError = () => setRealtimeStatus('error');
-
-    setRealtimeStatus(client.connected ? 'connected' : 'connecting');
-    client.on('connect', onConnect);
-    client.on('disconnect', onDisconnect);
-    client.on('connect_error', onConnectError);
+    const stopWatching = watchConnection(setRealtimeStatus, { onReconnect: () => scheduleLiveSync() });
 
     const applyOrderPayload = (payload = {}) => {
       // Cocina marcó platos sueltos como listos: avisar al mesero de esa cuenta qué puede llevar ya.
@@ -891,9 +881,7 @@ function App() {
     ];
 
     return () => {
-      client.off('connect', onConnect);
-      client.off('disconnect', onDisconnect);
-      client.off('connect_error', onConnectError);
+      stopWatching();
       unsubs.forEach((fn) => fn?.());
     };
   }, [addNotification, scheduleLiveSync, user?.id]);
