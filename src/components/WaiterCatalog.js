@@ -7,7 +7,7 @@ import { ChevronDown, Minus, Plus, Trash2, Receipt, RotateCcw, Search } from 'lu
 import { useTheme } from '../theme';
 import { filterMenuProducts, menuStock } from '../utils/waiterCatalog.mjs';
 import { draftDeliveryStatus } from '../utils/waiterSync.mjs';
-import { T, Num, Press, Button, EmptyState, RollingNumber, Appear, Tally, UnderlineTabs, elevate, money, radius, space } from './waiter/kit';
+import { T, Num, Press, Button, EmptyState, RollingNumber, Appear, Tally, QtyControl, UnderlineTabs, elevate, money, radius, space } from './waiter/kit';
 import { MenuSearch } from './waiter/menu';
 
 const price = n => `$${Number(n || 0).toLocaleString('es-EC', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -27,28 +27,9 @@ function useProductState(producto, qty, canAdd, locked, onAdd, onCustomize, choo
 // sin pedir → «+»; pedido → un cuadro con la cantidad; al tocarlo se abre «− n +» y se cierra solo a los 3 s.
 function AddControl({ producto, qty, off, locked, add, onDecrement, onAdd, small, plusBg }) {
   const { c } = useTheme();
-  const [open, setOpen] = useState(false);
-  const timer = useRef(null);
-  const keepOpen = () => { clearTimeout(timer.current); setOpen(true); timer.current = setTimeout(() => setOpen(false), 3000); };
-  useEffect(() => () => clearTimeout(timer.current), []);
-  useEffect(() => { if (!qty) setOpen(false); }, [qty]);
   const size = small ? 34 : 38;
-  const box = { height: size, borderRadius: radius.md, backgroundColor: c.primary, alignItems: 'center', justifyContent: 'center' };
-  if (qty > 0 && !locked) {
-    if (!open) return <Press accessibilityRole="button" accessibilityLabel={`${qty} de ${producto.nombre} en la ronda. Cambiar cantidad`} onPress={keepOpen} hapticKind="tap" scaleTo={0.9}
-      style={[box, { minWidth: size, paddingHorizontal: 6 }]}>
-      <Num size={16} weight="800" color={c.onPrimary}>{qty}</Num>
-    </Press>;
-    const step = (delta, Icon, label) => <Press accessibilityRole="button" accessibilityLabel={label} hapticKind="select" scaleTo={0.85}
-      onPress={() => { keepOpen(); delta > 0 ? onAdd(producto) : onDecrement(producto); }} style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-      <Icon size={17} color={c.onPrimary} strokeWidth={2.6} />
-    </Press>;
-    return <View accessibilityLabel={`Cantidad de ${producto.nombre}: ${qty}`} style={[box, { flexDirection: 'row' }]}>
-      {step(-1, qty <= 1 ? Trash2 : Minus, qty <= 1 ? `Quitar ${producto.nombre}` : `Quitar uno de ${producto.nombre}`)}
-      <Num size={16} weight="800" color={c.onPrimary} style={{ minWidth: 20, textAlign: 'center' }}>{qty}</Num>
-      {step(1, Plus, `Añadir otro ${producto.nombre}`)}
-    </View>;
-  }
+  const box = { height: size, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' };
+  if (qty > 0 && !locked) return <QtyControl value={qty} tone="brand" size={size} label={producto.nombre} onInc={() => onAdd(producto)} onDec={() => onDecrement(producto)} />;
   if (off) return null;
   return <Press accessibilityRole="button" accessibilityLabel={`Añadir ${producto.nombre}`} onPress={add} hapticKind="tap" scaleTo={0.88}
     style={[box, { width: size, backgroundColor: plusBg || c.surfaceAlt }]}>

@@ -54,7 +54,9 @@ import {
   X,
   CakeSlice,
   ArrowRightLeft,
-  StickyNote
+  StickyNote,
+  MoreHorizontal,
+  ChevronRight
 } from 'lucide-react-native';
 import axios from 'axios';
 import { useFonts } from 'expo-font';
@@ -77,7 +79,7 @@ import { validateDraft, emptyExpressInfo, isExpressDraftKey, savedDraftKeys } fr
 // Comanda: hoja de pedido y cola sin conexión.
 import { ComandaHeader, LineCustomizer, NoticeSheet, OfflineQueue, OrderLine, PastRound, PriceChangesSheet, SectionLabel, SendBar, TearAway, TotalsBlock } from '../components/waiter/order';
 import { classifyError, nextDelay, priceDiffs, queueSummary, reusableExpressDraft } from '../utils/sendQueue.mjs';
-import { BottomSheet as CBottomSheet, Button as CButton, Chip as CChip, LeaderLine as CLeaderLine, Tally as CTally, Field as CField, Label as CLabel, Num as CNum, Perforation as CPerforation, StampBurst as CStampBurst, T as CT, money as cMoney } from '../components/waiter/kit';
+import { IconButton as CIconButton, Press as CPress, BottomSheet as CBottomSheet, Button as CButton, Chip as CChip, LeaderLine as CLeaderLine, Tally as CTally, Field as CField, Label as CLabel, Num as CNum, Perforation as CPerforation, StampBurst as CStampBurst, T as CT, money as cMoney } from '../components/waiter/kit';
 import ExpressDraftList from '../components/ExpressDraftList';
 import { catalogContext } from '../utils/waiterNavigation.mjs';
 import { BOTTOM_INSET, TOP_INSET } from '../utils/safeArea';
@@ -361,6 +363,7 @@ function App() {
   const [splitSending, setSplitSending] = useState(false);
 
   const [splitOpen, setSplitOpen] = useState(false);
+  const [accountMenu, setAccountMenu] = useState(false);
   const [splitMode, setSplitMode] = useState('equal');
   const [splitWays, setSplitWays] = useState(2);
   const [splitGuests, setSplitGuests] = useState([1, 2]);
@@ -1656,7 +1659,7 @@ function App() {
         body = <View style={{ flex: 1, minHeight: 0, flexDirection: 'row' }}>
           <View style={{ flex: 1.35, minWidth: 0, minHeight: 0 }}>{renderProductos()}</View>
           <View style={{ width: Math.min(460, Math.max(360, width * 0.4)), minHeight: 0, borderLeftWidth: 1, borderColor: colors.line, backgroundColor: colors.surface }}>
-            {renderShell(renderPedidoBody(), true, renderSendBar())}
+            {renderShell(<>{renderPedidoBody()}{renderAccountMenu()}</>, true, renderSendBar())}
           </View>
         </View>;
       } finally { bareShell.current = false; }
@@ -1909,14 +1912,6 @@ function App() {
           </PastRound>;
         })}
         {paid ? <CT size={15} weight="600" color={colors.success} style={{ marginTop: 12 }}>{pedidoActual.pendiente_entrega ? 'Pago completo · falta la entrega' : 'Pedido completado · guardado en el historial'}</CT> : null}
-        <View style={{ gap: 8, marginTop: 16 }}>
-          {catalog.editable && !showingCart ? <CButton variant="primary" size="lg" icon={Plus} full onPress={() => setStep('productos')}>Pedir más</CButton> : null}
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <CButton icon={PieChart} disabled={paid} onPress={() => setSplitOpen(true)} style={{ flex: 1, paddingHorizontal: 8 }}>Dividir</CButton>
-            {!isExpressOrder ? <CButton icon={ArrowRightLeft} onPress={() => setTransferOpen(true)} style={{ flex: 1, paddingHorizontal: 8 }}>Mover</CButton> : null}
-            <CButton icon={Printer} disabled={paid} onPress={solicitarCobroCaja} style={{ flex: 1, paddingHorizontal: 8 }} accessibilityLabel="Solicitar cobro en caja">{paid ? 'Pagado' : 'Cobrar'}</CButton>
-          </View>
-        </View>
       </View>
     );
   };
@@ -1951,7 +1946,8 @@ function App() {
 
     return (
       <TearAway tearing={tearing} style={{ padding: split ? 20 : bodyPad, paddingTop: 12, maxWidth: split ? undefined : 760, alignSelf: 'center', width: '100%' }}>
-        <ComandaHeader number={null} meta={meta} title={title} subtitle={subtitle} stamp={stamp} stampColor={stampColor} onBack={!split && catalog.editable ? () => setStep('productos') : null}>
+        <ComandaHeader number={null} meta={meta} title={title} subtitle={subtitle} stamp={stamp} stampColor={stampColor} onBack={!split && catalog.editable ? () => setStep('productos') : null}
+          action={pedidoActual ? <CIconButton icon={MoreHorizontal} label="Más acciones de la cuenta" onPress={() => setAccountMenu(true)} /> : null}>
           {isExpressOrder && currentExpressDraft ? <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
             <CButton variant="ghost" onPress={() => setDraftListOpen(true)} accessibilityLabel="Cambiar borrador Express">Cambiar borrador</CButton>
           </View> : null}
@@ -1980,30 +1976,56 @@ function App() {
             {catalog.editable && !split ? <CButton variant="primary" icon={Plus} onPress={() => setStep('productos')} style={{ alignSelf: 'center' }}>Elegir productos</CButton> : null}
           </View>
         )}
-        {(cartItems.length && catalog.editable && !split) || ((showingCart || editingCustomer) && !orderNote && !noteOpen) ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
-          {cartItems.length && catalog.editable && !split ? <CButton variant="ghost" icon={Plus} onPress={() => setStep('productos')}>Añadir más</CButton> : null}
-          {(showingCart || editingCustomer) && !orderNote && !noteOpen ? <CButton variant="ghost" icon={StickyNote} onPress={() => setNoteOpen(true)} accessibilityLabel="Añadir nota general">Nota general</CButton> : null}
-        </View> : null}
+        {cartItems.length && catalog.editable && !split ? <CPress accessibilityRole="button" onPress={() => setStep('productos')} scaleTo={0.99}
+          style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Plus size={18} color={colors.primaryText} strokeWidth={2.4} /><CT size={15} weight="600" color={colors.primaryText}>Añadir productos</CT>
+        </CPress> : null}
+        {(showingCart || editingCustomer) && !orderNote && !noteOpen ? <CPress accessibilityRole="button" accessibilityLabel="Añadir nota general" onPress={() => setNoteOpen(true)} scaleTo={0.99}
+          style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 8, borderTopWidth: 1, borderTopColor: colors.line }}>
+          <StickyNote size={18} color={colors.muted} /><CT size={15} color={colors.text} style={{ flex: 1 }}>Nota para toda la mesa</CT><ChevronRight size={18} color={colors.muted} />
+        </CPress> : null}
         {(showingCart || editingCustomer) && (orderNote || noteOpen) ? <CField label="Nota general" value={orderNote} onChangeText={updateOrderNote} editable={!pendingSend} placeholder="Ej. entregar todo junto, silla para bebé" multiline autoFocus={noteOpen && !orderNote} maxLength={120} style={{ marginTop: 12 }} accessibilityLabel="Notas generales de la cuenta" />
           : !(showingCart || editingCustomer) && pedidoActual?.notas ? <CT size={15} color={colors.muted} style={{ marginTop: 12 }}>Nota: {pedidoActual.notas}</CT> : null}
 
+        {renderTotals()}
         <TotalsBlock
           rows={[
             ...(service > 0 ? [[showingCart ? `Servicio ${servicePercent}%` : 'Servicio incluido', service]] : []),
           ]}
           grand={mesaDisplayTotal} grandLabel={isExpressOrder ? 'Total del pedido' : 'Total de la mesa'} />
 
-        {renderTotals()}
 
 
       </TearAway>
     );
   };
 
-  const renderSendBar = () => (showingCart || pendingSend) ? <SendBar count={cartCount} amount={total} onPress={enviarCocina} sending={orderSending}
-    pending={!!pendingSend} offline={realtimeStatus !== 'connected'} disabled={!drafts.ready} /> : null;
+  const renderSendBar = () => {
+    if (showingCart || pendingSend) return <SendBar count={cartCount} amount={total} onPress={enviarCocina} sending={orderSending}
+      pending={!!pendingSend} offline={realtimeStatus !== 'connected'} disabled={!drafts.ready} />;
+    if (!pedidoActual) return null;
+    // Sin ronda nueva: las dos cosas que se hacen con una cuenta abierta.
+    const paid = pedidoActual.estado_cobro === 'PAGADO';
+    return <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 6, borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.bg }}>
+      {catalog.editable ? <CButton variant="primary" size="lg" icon={Plus} onPress={() => setStep('productos')} style={{ flex: 1 }}>Pedir más</CButton> : null}
+      <CButton variant="outline" size="lg" icon={Printer} disabled={paid} onPress={solicitarCobroCaja} style={{ flex: 1 }} accessibilityLabel="Solicitar cobro en caja">{paid ? 'Pagado' : 'Cobrar'}</CButton>
+    </View>;
+  };
 
-  const renderPedido = () => renderShell(renderPedidoBody(), true, renderSendBar());
+  const renderAccountMenu = () => {
+    const paid = pedidoActual?.estado_cobro === 'PAGADO';
+    const item = (Icon, label, onPress, disabled) => <CPress key={label} accessibilityRole="button" disabled={disabled} onPress={() => { setAccountMenu(false); onPress(); }} scaleTo={0.99}
+      style={{ minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 14, opacity: disabled ? 0.4 : 1 }}>
+      <Icon size={20} color={colors.text} /><CT size={16} weight="500">{label}</CT>
+    </CPress>;
+    return <CBottomSheet visible={accountMenu && !!pedidoActual} onClose={() => setAccountMenu(false)} title={isExpressOrder ? 'Pedido' : `Mesa ${mesaActual?.numero || pedidoActual?.mesa_numero || ''}`}>
+      {item(PieChart, 'Dividir la cuenta', () => setSplitOpen(true), paid)}
+      {!isExpressOrder ? item(ArrowRightLeft, 'Mover a otra mesa', () => setTransferOpen(true)) : null}
+      {item(Printer, paid ? 'Cuenta pagada' : 'Pedir el cobro en caja', solicitarCobroCaja, paid)}
+    </CBottomSheet>;
+  };
+
+  const renderPedido = () => renderShell(<>{renderPedidoBody()}{renderAccountMenu()}</>, true, renderSendBar());
 
   const renderCustomAlertModal = () => (
     // Comanda: avisos como hoja inferior (arrastrable), no modal centrado.

@@ -313,6 +313,32 @@ export function Tally({ value, onChange, min = 0, max = 99, label = 'Cantidad', 
   </View>;
 }
 
+// Cantidad compacta: un cuadro con el número; al tocarlo se abre «− n +» y se cierra solo a los 3 s.
+// tone="brand" (platos ya pedidos en el menú) o "neutral" (líneas de la cuenta). En 1, el «−» es una papelera.
+export function QtyControl({ value, onInc, onDec, label = 'producto', tone = 'neutral', size = 34 }) {
+  const { c } = useTheme();
+  const [open, setOpen] = useState(false);
+  const timer = useRef(null);
+  const keepOpen = () => { clearTimeout(timer.current); setOpen(true); timer.current = setTimeout(() => setOpen(false), 3000); };
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const bg = tone === 'brand' ? c.primary : c.surfaceAlt;
+  const fg = tone === 'brand' ? c.onPrimary : c.text;
+  const box = { height: size, borderRadius: radius.md, backgroundColor: bg, alignItems: 'center', justifyContent: 'center' };
+  if (!open) return <Press accessibilityRole="button" accessibilityLabel={`${value} de ${label}. Cambiar cantidad`} onPress={keepOpen} hapticKind="tap" scaleTo={0.9}
+    style={[box, { minWidth: size, paddingHorizontal: 6 }]}>
+    <Num size={16} weight="800" color={fg}>{value}</Num>
+  </Press>;
+  const step = (delta, Icon, a11y, color) => <Press accessibilityRole="button" accessibilityLabel={a11y} hapticKind="select" scaleTo={0.85}
+    onPress={() => { keepOpen(); delta > 0 ? onInc() : onDec(); }} style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+    <Icon size={17} color={color || fg} strokeWidth={2.6} />
+  </Press>;
+  return <View accessibilityLabel={`Cantidad de ${label}: ${value}`} style={[box, { flexDirection: 'row' }]}>
+    {step(-1, value <= 1 ? Trash2 : Minus, value <= 1 ? `Quitar ${label}` : `Quitar uno de ${label}`, value <= 1 && tone !== 'brand' ? c.red : null)}
+    <Num size={16} weight="800" color={fg} style={{ minWidth: 20, textAlign: 'center' }}>{value}</Num>
+    {step(1, Plus, `Añadir otro ${label}`)}
+  </View>;
+}
+
 // ── Hoja inferior ──────────────────────────────────────────────────────────
 // Sube con curva de cajón (300 ms) y baja más rápido (200 ms); se cierra arrastrando (30 % o un tirón) o tocando el fondo.
 let openSheets = 0;

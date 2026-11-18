@@ -5,14 +5,14 @@ import { Animated, Image, TextInput, View, useWindowDimensions } from 'react-nat
 import { ArrowLeft, Check, ChevronDown, CloudOff, RefreshCw, Send, PencilLine, Trash2 } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 import {
-  BottomSheet, Button, Chip, EASE, IconButton, Label, LeaderLine, Num, Perforation, Press, RollingNumber, Stamp, SwipeRow, Tally, T,
+  BottomSheet, Button, Chip, EASE, IconButton, Label, LeaderLine, QtyControl, Num, Perforation, Press, RollingNumber, Stamp, SwipeRow, Tally, T,
   TOUCH, TOUCH_MAIN, elevate, haptic, money, radius, space,
 } from './kit';
 
 const ND = false; // height/opacidad no se pueden animar en el hilo nativo
 
 // Encabezado de la cuenta: volver al menú, la mesa y su estado.
-export function ComandaHeader({ number, title, subtitle, meta, stamp, stampColor, children, onBack }) {
+export function ComandaHeader({ number, title, subtitle, meta, stamp, stampColor, children, onBack, action }) {
   const { c } = useTheme();
   return <View style={{ paddingBottom: space.md }}>
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
@@ -22,6 +22,7 @@ export function ComandaHeader({ number, title, subtitle, meta, stamp, stampColor
         {[meta, subtitle].filter(Boolean).length ? <T size={14} color={c.muted} numberOfLines={2}>{[meta, subtitle].filter(Boolean).join(' · ')}</T> : null}
       </View>
       {stamp ? <Stamp color={stampColor}>{stamp}</Stamp> : null}
+      {action}
     </View>
     {children}
   </View>;
@@ -34,9 +35,9 @@ export function SectionLabel({ children, right }) {
   </View>;
 }
 
-// Línea de la ronda nueva, como en un carrito: foto, nombre, notas, precio y − n + (en 1, la papelera quita).
+// Línea de la ronda nueva: [cantidad] nombre · precio; debajo, la nota (o «Añadir nota»). Tocar el texto abre notas y extras.
 // Al quitarla se encoge (alto + opacidad, 200 ms) y luego avisa a onRemove. También se puede deslizar a la izquierda.
-export function OrderLine({ item, total, detail, image, product, expanded, onToggle, onQty, onRemove, locked, children }) {
+export function OrderLine({ item, total, detail, expanded, onToggle, onQty, onRemove, locked, children }) {
   const { c } = useTheme();
   const v = useRef(new Animated.Value(1)).current;
   const [h, setH] = useState(null);
@@ -51,21 +52,16 @@ export function OrderLine({ item, total, detail, image, product, expanded, onTog
   return <Animated.View style={style}>
     <View onLayout={e => !leaving && setH(e.nativeEvent.layout.height)}>
     <SwipeRow direction="left" onSwipe={remove} label="Quitar" icon={Trash2} disabled={locked || leaving} radius={0}>
-    <View style={{ paddingVertical: space.md, backgroundColor: c.bg, borderBottomWidth: 1, borderBottomColor: c.line, opacity: locked ? 0.6 : 1 }} pointerEvents={locked ? 'none' : 'auto'}>
+    <View style={{ paddingVertical: space.md, backgroundColor: c.bg, opacity: locked ? 0.6 : 1 }} pointerEvents={locked ? 'none' : 'auto'}>
       <View style={{ flexDirection: 'row', gap: space.md, alignItems: 'flex-start' }}>
-        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+        <QtyControl value={qty} label={item.nombre} onInc={() => onQty(1)} onDec={() => qty <= 1 ? remove() : onQty(-1)} />
+        <Press accessibilityRole="button" accessibilityState={{ expanded: !!expanded }} accessibilityLabel={`${item.nombre}. Notas y extras`} onPress={onToggle} scaleTo={0.99}
+          style={{ flex: 1, minWidth: 0, minHeight: 34, justifyContent: 'center', gap: 2 }}>
           <LeaderLine left={<T size={16} weight="600" numberOfLines={2}>{item.nombre}</T>}
-            right={<RollingNumber value={total} format={money} size={16} weight="700" />} />
-          {detail ? <T size={14} color={c.muted} numberOfLines={3}>{detail}</T> : null}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, marginTop: 6 }}>
-            <Tally value={qty} size="sm" removable onChange={n => n <= 0 ? remove() : onQty(n - qty)} label={`Cantidad de ${item.nombre}`} />
-            <Press accessibilityRole="button" accessibilityState={{ expanded: !!expanded }} accessibilityLabel={`Notas y extras de ${item.nombre}`} onPress={onToggle} hapticKind="tap"
-              style={{ minHeight: 38, paddingHorizontal: 12, borderRadius: radius.md, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: expanded ? c.ink : c.surfaceAlt }}>
-              <PencilLine size={15} color={expanded ? c.onInk : c.text} />
-              <T size={14} weight="600" color={expanded ? c.onInk : c.text}>{expanded ? 'Listo' : 'Notas'}</T>
-            </Press>
-          </View>
-        </View>
+            right={<RollingNumber value={total} format={money} size={16} weight="600" />} />
+          {detail ? <T size={14} color={c.muted} numberOfLines={2}>{detail}</T>
+            : <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><PencilLine size={13} color={c.muted} /><T size={14} color={c.muted}>{expanded ? 'Cerrar' : 'Añadir nota'}</T></View>}
+        </Press>
       </View>
       {expanded ? <View style={{ marginTop: space.md }}>{children}</View> : null}
     </View>
@@ -79,8 +75,8 @@ export function LineCustomizer({ item, exclusions = [], paid = [], custom = {}, 
   const { c } = useTheme();
   const active = extra => (item.modificadores || []).some(m => m.nombre === extra.nombre);
   const priceOf = extra => Number(extra.precio_extra ?? extra.precio ?? 0);
-  const input = { minHeight: TOUCH, borderRadius: radius.md, backgroundColor: c.surface, color: c.text, paddingHorizontal: space.md, fontSize: 16 };
-  return <View style={{ gap: space.md, padding: space.md, backgroundColor: c.surfaceAlt, borderRadius: radius.lg }}>
+  const input = { minHeight: TOUCH, borderRadius: radius.md, backgroundColor: c.surfaceAlt, color: c.text, paddingHorizontal: space.md, fontSize: 16, minWidth: 0 };
+  return <View style={{ gap: space.md, marginLeft: 34 + space.md }}>
     <View><Label style={{ marginBottom: 6 }}>Nota para cocina</Label>
       <TextInput value={item.notas || ''} onChangeText={onNote} placeholder="Ej. sin cebolla, poco picante" placeholderTextColor={c.muted} multiline accessibilityLabel={`Notas para ${item.nombre}`} style={[input, { paddingVertical: 10 }]} /></View>
     {exclusions.length ? <View><Label style={{ marginBottom: 6 }}>Sin / opciones</Label>
@@ -88,9 +84,9 @@ export function LineCustomizer({ item, exclusions = [], paid = [], custom = {}, 
     {paid.length ? <View><Label style={{ marginBottom: 6 }}>Extras con costo</Label>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>{paid.map(x => <Chip key={x.nombre} selected={active(x)} onPress={() => onToggle(x)} accessibilityLabel={`Extra ${x.nombre}`}>{x.nombre} +{money(priceOf(x))}</Chip>)}</View></View> : null}
     <View><Label style={{ marginBottom: 6 }}>Otro extra</Label>
-      <View style={{ flexDirection: 'row', gap: space.sm }}>
-        <TextInput value={custom.nombre || ''} onChangeText={nombre => onCustomChange({ nombre })} placeholder="Nombre" placeholderTextColor={c.muted} accessibilityLabel="Nombre del extra personalizado" style={[input, { flex: 1 }]} />
-        <TextInput value={custom.precio || ''} onChangeText={precio => onCustomChange({ precio })} placeholder="0,00" placeholderTextColor={c.muted} keyboardType="decimal-pad" accessibilityLabel="Precio del extra personalizado" style={[input, { width: 84, textAlign: 'right' }]} />
+      <TextInput value={custom.nombre || ''} onChangeText={nombre => onCustomChange({ nombre })} placeholder="Nombre" placeholderTextColor={c.muted} accessibilityLabel="Nombre del extra personalizado" style={input} />
+      <View style={{ flexDirection: 'row', gap: space.sm, marginTop: space.sm }}>
+        <TextInput value={custom.precio || ''} onChangeText={precio => onCustomChange({ precio })} placeholder="0,00" placeholderTextColor={c.muted} keyboardType="decimal-pad" accessibilityLabel="Precio del extra personalizado" style={[input, { flex: 1, textAlign: 'right' }]} />
         <Button variant="ink" onPress={onCustomAdd} disabled={!String(custom.nombre || '').trim()} accessibilityLabel="Añadir extra personalizado">Añadir</Button>
       </View></View>
   </View>;
