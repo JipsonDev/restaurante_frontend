@@ -24,7 +24,7 @@ function useProductState(producto, qty, canAdd, locked, onAdd, onCustomize, choo
   return { stock, soldOut, off, low, add, custom, label };
 }
 
-// «+» en la esquina de la foto. Con cantidad, el − n + va junto al precio (fuera de la foto), como en un carrito.
+// «+» en la esquina de la foto. Con cantidad, el − n + va debajo de la foto, a su mismo ancho.
 function AddControl({ producto, qty, off, locked, add, onDecrement, onAdd, small }) {
   const { c } = useTheme();
   if (qty > 0 && !locked) return <Tally value={qty} size="sm" removable stretch bg={c.bg} label={producto.nombre} onChange={next => next > qty ? onAdd(producto) : onDecrement(producto)} />;
@@ -40,16 +40,15 @@ const ProductRow = memo(function ProductRow({ producto, qty, canAdd, locked, onA
   const { c } = useTheme();
   const s = useProductState(producto, qty, canAdd, locked, onAdd, onCustomize, chooseTarget);
   // El «+» va fuera del botón de la fila (un botón no puede contener otro), encima de la foto.
-  const [priceY, setPriceY] = useState(null);
   const counting = qty > 0 && !locked;
   return <View>
   <Press accessibilityRole="button" accessibilityLabel={s.label} accessibilityHint={s.soldOut ? undefined : canAdd ? 'Toca para añadir; mantén presionado para notas o extras' : 'Elige primero la mesa'}
     disabled={s.off} onPress={s.add} onLongPress={canAdd && !s.off ? s.custom : undefined} hapticKind={s.off ? undefined : 'tap'} scaleTo={0.985}
-    style={{ flexDirection: 'row', gap: space.md, paddingVertical: space.md, minHeight: 112 }}>
+    style={{ flexDirection: 'row', gap: space.md, paddingTop: space.md, paddingBottom: counting ? space.md + 8 + 34 : space.md, minHeight: 112 }}>
     <View style={{ flex: 1, minWidth: 0, gap: 4, justifyContent: 'center' }}>
       <T size={16} weight="600" numberOfLines={2}>{producto.nombre}</T>
       {producto.descripcion ? <T size={14} color={c.muted} numberOfLines={1}>{producto.descripcion}</T> : null}
-      <View onLayout={e => setPriceY(e.nativeEvent.layout.y)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2, minHeight: 34 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
         <Num size={16} weight="700" color={s.soldOut ? c.muted : c.text}>{price(producto.precio)}</Num>
         {s.soldOut ? <T size={13} weight="700" color={c.red}>Agotado</T> : s.low ? <T size={13} weight="700" color={c.amber}>Quedan {s.stock}</T> : null}
       </View>
@@ -58,9 +57,9 @@ const ProductRow = memo(function ProductRow({ producto, qty, canAdd, locked, onA
       <ProductArt product={producto} radius={radius.lg} dim={s.soldOut} iconScale={0.34} />
     </View>
   </Press>
-  {counting ? (priceY != null ? <View style={{ position: 'absolute', right: 96 + space.md * 2, top: space.md + priceY }}>
-    <Tally value={qty} size="sm" removable label={producto.nombre} onChange={next => next > qty ? onAdd(producto) : onDecrement(producto)} />
-  </View> : null) : <View style={{ position: 'absolute', right: 6, top: space.md + 96 - 6 - 34 }}>
+  {counting ? <View style={{ position: 'absolute', right: 0, width: 96, top: space.md + 96 + 8 }}>
+    <Tally value={qty} size="sm" removable stretch label={producto.nombre} onChange={next => next > qty ? onAdd(producto) : onDecrement(producto)} />
+  </View> : <View style={{ position: 'absolute', right: 6, top: space.md + 96 - 6 - 34 }}>
     <AddControl producto={producto} qty={qty} off={s.off} locked={locked} add={s.add} onAdd={onAdd} onDecrement={onDecrement} small />
   </View>}
   </View>;
@@ -77,6 +76,7 @@ const ProductCard = memo(function ProductCard({ producto, qty, canAdd, locked, o
       <View onLayout={e => setPhotoH(e.nativeEvent.layout.height)}>
         <ProductArt product={producto} radius={radius.lg} dim={s.soldOut} aspect={4 / 3} iconScale={0.26} />
       </View>
+      {qty > 0 && !locked ? <View style={{ height: 34 }} /> : null}
       <View style={{ gap: 2, paddingHorizontal: 2 }}>
         <T size={16} weight="600" numberOfLines={2}>{producto.nombre}</T>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -85,8 +85,8 @@ const ProductCard = memo(function ProductCard({ producto, qty, canAdd, locked, o
         </View>
       </View>
     </Press>
-    {qty > 0 && !locked ? <View style={{ marginTop: 8 }}>
-      <Tally value={qty} size="sm" removable label={producto.nombre} onChange={next => next > qty ? onAdd(producto) : onDecrement(producto)} />
+    {qty > 0 && !locked ? <View style={{ position: 'absolute', left: 0, right: 0, top: photoH + 8 }}>
+      <Tally value={qty} size="sm" removable stretch label={producto.nombre} onChange={next => next > qty ? onAdd(producto) : onDecrement(producto)} />
     </View> : photoH ? <View style={{ position: 'absolute', right: 8, top: photoH - 8 - 38 }}>
       <AddControl producto={producto} qty={qty} off={s.off} locked={locked} add={s.add} onAdd={onAdd} onDecrement={onDecrement} />
     </View> : null}
