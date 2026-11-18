@@ -123,7 +123,7 @@ export function RoundStatus({ estado }) {
 
 const clockOf = value => { const d = value ? new Date(String(value).replace(' ', 'T')) : null; return d && !Number.isNaN(d.getTime()) ? d.toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : ''; };
 // Ronda ya pedida: hora, seguimiento de cocina y sus platos (se pliega al tocar el encabezado).
-export function PastRound({ round, index, children, action }) {
+export function PastRound({ round, index, title, children, action }) {
   const { c } = useTheme();
   const [open, setOpen] = useState(false);
   const turn = useRef(new Animated.Value(0)).current;
@@ -132,10 +132,10 @@ export function PastRound({ round, index, children, action }) {
   const sum = items.reduce((s, it) => s + (Number(it.subtotal) || (Number(it.precio) || 0) * (Number(it.cantidad) || 0)), 0);
   const time = clockOf(round.created_at);
   return <View style={{ borderTopWidth: index > 1 ? 1 : 0, borderTopColor: c.line, marginBottom: space.xs }}>
-    <Press accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={`Ronda ${index}${time ? `, ${time}` : ''}`} onPress={toggle} scaleTo={0.99}
+    <Press accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={`${title || `Ronda ${index}`}${time ? `, ${time}` : ''}`} onPress={toggle} scaleTo={0.99}
       style={{ paddingTop: space.md, paddingBottom: open ? space.sm : space.md, gap: space.sm }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-        <T size={16} weight="600" style={{ flex: 1 }} numberOfLines={1}>Ronda {index}{time ? <T size={14} color={c.muted}>{`  ·  ${time}`}</T> : null}</T>
+        <T size={16} weight="600" style={{ flex: 1 }} numberOfLines={1}>{title || `Ronda ${index}`}{time ? <T size={14} color={c.muted}>{`  ·  ${time}`}</T> : null}</T>
         <RoundStatus estado={round.estado} />
         {sum ? <Num size={15} weight="600">{money(sum)}</Num> : null}
         <Animated.View style={{ transform: [{ rotate: turn.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] }) }] }}><ChevronDown size={18} color={c.muted} /></Animated.View>
