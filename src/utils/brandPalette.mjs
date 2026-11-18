@@ -35,7 +35,8 @@ const WHITE = [255, 255, 255], BLACK = [0, 0, 0], INK = [20, 22, 26];
 export function brandTones(hex, { dark = false, bg = dark ? [14, 15, 18] : WHITE, surface = dark ? [25, 26, 31] : WHITE } = {}) {
   const base = parseHex(hex) || parseHex(PRODUCT_BRAND);
   // Relleno: en modo oscuro un color muy oscuro se perdería contra el fondo; se aclara lo justo.
-  const fill = dark && contrast(base, bg) < 1.6 ? untilContrast(base, bg, 1.6, WHITE) : base;
+  // En oscuro, el relleno debe distinguirse del fondo (WCAG 1.4.11: 3:1 para elementos de interfaz).
+  const fill = dark && contrast(base, bg) < 3 ? untilContrast(base, bg, 3, WHITE) : base;
   // Texto sobre el relleno: blanco o casi negro, el que lea mejor.
   const onPrimary = contrast(fill, WHITE) >= contrast(fill, INK) ? WHITE : INK;
   // La marca como texto o icono sobre el fondo: oscurecida (claro) o aclarada (oscuro) hasta 4.5:1.

@@ -12,10 +12,10 @@ import { Appear, Button, Chip, EmptyState, Field, Num, Press, T, elevate, money,
 
 // Un solo estado por pedido, del más urgente al más tranquilo.
 function expressStatus(state, order, c) {
-  if (state.issue) return { text: 'Entregado sin cobrar', color: c.red, soft: c.redSoft, icon: CreditCard };
+  if (state.issue) return { text: 'Entregado sin cobrar', color: c.amber, soft: c.amberSoft, icon: CreditCard };
   if (state.canDeliver) return { text: 'Listo para entregar', color: c.green, soft: c.greenSoft, icon: CheckCheck };
   if (state.ready) return { text: 'Listo · falta cobrar', color: c.amber, soft: c.amberSoft, icon: CreditCard };
-  if (state.preparing) return { text: state.paid ? 'En cocina · pagado' : 'En cocina', color: c.sky, soft: c.skySoft, icon: ChefHat };
+  if (state.preparing) return { text: state.paid ? 'En cocina · pagado' : 'En cocina', color: c.muted, soft: c.surfaceAlt, icon: ChefHat };
   return { text: state.paid ? 'Pagado' : 'Por cobrar', color: state.paid ? c.green : c.amber, soft: state.paid ? c.greenSoft : c.amberSoft, icon: CreditCard };
 }
 
@@ -30,7 +30,7 @@ function ExpressRow({ order, onOpen, now, index }) {
   return <Appear delay={Math.min(index, 8) * 30}>
     <Press accessibilityRole="button" accessibilityLabel={`Abrir pedido ${order.id} de ${order.cliente_nombre || 'cliente'}, ${status.text}, ${money(order.total)}, ${serviceSummaryLabel(order, now)}`}
       onPress={() => onOpen(order)} hapticKind="tap"
-      style={{ padding: space.md, gap: space.md, backgroundColor: state.canDeliver ? c.greenSoft : c.surfaceAlt, borderRadius: radius.lg }} hoverStyle={{ backgroundColor: c.soft }}>
+      style={{ padding: space.md, gap: space.md, backgroundColor: c.surfaceAlt, borderRadius: radius.lg }} hoverStyle={{ backgroundColor: c.soft }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
         <View style={{ width: 48, height: 48, borderRadius: radius.md, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center' }}>
           {delivery ? <Truck size={22} color={c.text} /> : <ShoppingBag size={22} color={c.text} />}
@@ -76,7 +76,7 @@ export default function WaiterExpress({ width, orders, view, setView, drafts, op
         <T size={14} weight="600" color={c.red} style={{ flex: 1 }}>No se pudieron actualizar los pedidos.</T><Button size="sm" onPress={refresh} loading={loading}>Reintentar</Button>
       </View> : null}
       {orders.length > 4 ? <Field value={query} onChangeText={setQuery} placeholder="Buscar cliente, teléfono o dirección" accessibilityLabel="Buscar pedidos Express" /> : null}
-      {orders.length > 1 ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
+      {orders.length > 6 ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.sm }}>
         {stages.filter(([key, , n]) => key === 'all' || key === stage || n > 0).map(([key, label, n]) =>
           <Chip key={key} selected={stage === key} onPress={() => setStage(key)} count={n}>{label}</Chip>)}
       </View> : null}

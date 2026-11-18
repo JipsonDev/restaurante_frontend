@@ -38,15 +38,15 @@ export const MenuRow = memo(function MenuRow({ producto, qty = 0, showCode = fal
       {locked ? <LockKeyhole size={18} color={c.muted} /> : null}
     </Press>
     {onCustomize && canAdd && !off ? <Press accessibilityRole="button" accessibilityLabel={`Personalizar ${producto.nombre}`} onPress={custom} hapticKind="tap"
-      scaleTo={0.88} hoverStyle={{ backgroundColor: c.soft }} style={{ width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><PencilLine size={18} color={c.muted} /></Press> : null}
+      scaleTo={0.94} hoverStyle={{ backgroundColor: c.soft }} style={{ width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><PencilLine size={18} color={c.muted} /></Press> : null}
     {locked || off ? null : qty > 0 && canAdd ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, padding: 3, borderRadius: radius.md, backgroundColor: c.surface }}>
-      <Press accessibilityRole="button" accessibilityLabel={`Quitar uno de ${producto.nombre}`} onPress={() => onDecrement(producto, isPromo)} hapticKind="select" scaleTo={0.85}
+      <Press accessibilityRole="button" accessibilityLabel={`Quitar uno de ${producto.nombre}`} onPress={() => onDecrement(producto, isPromo)} hapticKind="select" scaleTo={0.94}
         style={[{ width: 38, height: 38, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surface }, elevate(c, 1)]}><Minus size={18} strokeWidth={2.6} color={c.text} /></Press>
       <View style={{ minWidth: 26, alignItems: 'center' }}><RollingNumber value={qty} size={16} weight="800" /></View>
-      <Press accessibilityRole="button" accessibilityLabel={`Añadir otro ${producto.nombre}`} onPress={add} hapticKind="tap" scaleTo={0.85}
+      <Press accessibilityRole="button" accessibilityLabel={`Añadir otro ${producto.nombre}`} onPress={add} hapticKind="tap" scaleTo={0.94}
         style={{ width: 38, height: 38, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary }}><Plus size={18} strokeWidth={2.6} color={c.onPrimary} /></Press>
-    </View> : <Press accessibilityRole="button" accessibilityLabel={`Añadir ${producto.nombre}`} onPress={add} hapticKind="tap" scaleTo={0.85}
-      style={[{ width: 44, height: 44, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary }, WEB && !c.isDark ? { boxShadow: `0 4px 12px ${c.primary}45` } : null]}>
+    </View> : <Press accessibilityRole="button" accessibilityLabel={`Añadir ${producto.nombre}`} onPress={add} hapticKind="tap" scaleTo={0.94}
+      style={[{ width: 44, height: 44, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: c.primary }/* sin halo */, null]}>
       <Plus size={22} strokeWidth={2.6} color={c.onPrimary} />
     </Press>}
   </View>;
@@ -103,12 +103,12 @@ export function MenuSearch({ value, onChangeText, placeholder = 'Buscar producto
         keyboardType={numeric ? 'number-pad' : 'default'} inputMode={numeric ? 'numeric' : 'search'}
         onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
         style={{ flex: 1, minWidth: 0, minHeight: TOUCH - 4, fontFamily: FONT, fontSize: 16, color: c.text, ...(WEB ? { outlineStyle: 'none' } : {}) }} />
-      {value ? <Press accessibilityRole="button" accessibilityLabel="Borrar búsqueda" onPress={() => onChangeText('')} scaleTo={0.85} style={{ width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><X size={18} color={c.muted} /></Press> : null}
-      {numbers ? <Press accessibilityRole="button" accessibilityLabel={numeric ? 'Buscar con letras' : 'Buscar por número'} accessibilityState={{ selected: numeric }} onPress={toggleNumeric} scaleTo={0.85}
+      {value ? <Press accessibilityRole="button" accessibilityLabel="Borrar búsqueda" onPress={() => onChangeText('')} scaleTo={0.94} style={{ width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}><X size={18} color={c.muted} /></Press> : null}
+      {numbers ? <Press accessibilityRole="button" accessibilityLabel={numeric ? 'Buscar con letras' : 'Buscar por número'} accessibilityState={{ selected: numeric }} onPress={toggleNumeric} scaleTo={0.94}
         style={{ width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: numeric ? c.ink : 'transparent' }}>
         {numeric ? <Type size={17} color={c.onInk} /> : <Hash size={17} color={c.muted} />}
       </Press> : null}
-      {voice && dictation.supported ? <Press accessibilityRole="button" accessibilityLabel={listening ? 'Detener dictado' : 'Buscar por voz'} accessibilityState={{ selected: listening }} onPress={dictation.toggle} scaleTo={0.85}
+      {voice && dictation.supported ? <Press accessibilityRole="button" accessibilityLabel={listening ? 'Detener dictado' : 'Buscar por voz'} accessibilityState={{ selected: listening }} onPress={dictation.toggle} scaleTo={0.94}
         style={{ width: 40, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: listening ? c.primary : 'transparent' }}>
         <ListeningRing active={listening} color={c.primary} />
         <Mic size={18} color={listening ? c.onPrimary : c.muted} />

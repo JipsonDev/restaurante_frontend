@@ -222,7 +222,7 @@ export function WaiterAppearance({ children }) {
 export const meseroPalette = {
   light: {
     bg: '#FFFFFF', surface: '#FFFFFF', surfaceAlt: '#F5F5F6', soft: '#EDEDEF', softer: '#E2E2E5',
-    line: '#EAEAEC', lineStrong: '#D4D4D8', text: '#17171A', muted: '#5F5F6B', faint: '#8E8E99',
+    line: '#EAEAEC', lineStrong: '#D4D4D8', text: '#17171A', muted: '#5F5F6B', faint: '#6E6E79',
     ink: '#17171A', onInk: '#FFFFFF',
     green: '#15803D', greenDot: '#16A34A', greenSoft: '#E8F6EE', greenFill: '#15803D', onGreen: '#FFFFFF',
     amber: '#9A5B00', amberSoft: '#FEF3DC', amberFill: '#FBBF24', onAmber: '#2B1A00',
@@ -232,7 +232,7 @@ export const meseroPalette = {
   },
   dark: {
     bg: '#0E0E10', surface: '#18181B', surfaceAlt: '#222226', soft: '#2B2B30', softer: '#36363C',
-    line: '#2A2A2F', lineStrong: '#3A3A41', text: '#F4F4F5', muted: '#A6A6B0', faint: '#7C7C86',
+    line: '#2A2A2F', lineStrong: '#3A3A41', text: '#F4F4F5', muted: '#A6A6B0', faint: '#8E8E9A',
     ink: '#F4F4F5', onInk: '#17171A',
     green: '#4ADE80', greenDot: '#22C55E', greenSoft: '#16261C', greenFill: '#22A355', onGreen: '#06210F',
     amber: '#FBBF24', amberSoft: '#2A2213', amberFill: '#FBBF24', onAmber: '#2B1A00',

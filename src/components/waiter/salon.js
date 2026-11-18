@@ -79,6 +79,9 @@ export function readyItems(pedidos = []) {
 // ── Casilla de mesa ────────────────────────────────────────────────────────
 export function TableTile({ mesa, state, order, width, now, selected, ready, alert, reservation, held, queued, onPress, onLongPress }) {
   const { c } = useTheme();
+  // Destello solo cuando cocina deja lista otra ronda (no por cambios que hizo el propio mesero).
+  const prevReady = useRef(ready); const [pingKey, setPingKey] = useState(0);
+  useEffect(() => { if (ready > prevReady.current) setPingKey(k => k + 1); prevReady.current = ready; }, [ready]);
   const balance = order ? Number(order.saldo_pendiente ?? Math.max(0, Number(order.total || 0) - Number(order.abonado || 0))) : 0;
   const resMinutes = reservation ? minutesUntil(reservation) : null;
   const rounds = order ? serviceRounds(order) : [];
@@ -104,7 +107,7 @@ export function TableTile({ mesa, state, order, width, now, selected, ready, ale
     onPress={() => onPress(mesa)} onLongPress={onLongPress ? () => onLongPress(mesa) : undefined} hapticKind="tap" scaleTo={0.96}
     style={[{ width, minHeight: 92, padding: 12, borderRadius: radius.lg, justifyContent: 'space-between', gap: 10, backgroundColor: tone.bg },
       selected ? (WEB_RING ? { boxShadow: `0 0 0 2px ${c.bg}, 0 0 0 4px ${c.text}` } : { opacity: 0.85 }) : null]}>
-    <Ping trigger={`${state}-${ready}`} color={tone.bg} radius={radius.lg} />
+    <Ping trigger={pingKey} color={c.greenFill} radius={radius.lg} />
     <View>
       <Num size={28} weight="700" color={free ? c.muted : fg} style={{ lineHeight: 32 }}>{mesa.numero}</Num>
     </View>
@@ -221,7 +224,7 @@ export function ZoneTabs({ zones, value, onChange, counts = {} }) {
   const move = (key, instant) => {
     const l = layouts.current[key]; if (!l) return;
     if (instant) { x.setValue(l.x); w.setValue(l.width); return; }
-    Animated.parallel([Animated.spring(x, { toValue: l.x, speed: 16, bounciness: 6, useNativeDriver: false }), Animated.spring(w, { toValue: l.width, speed: 16, bounciness: 6, useNativeDriver: false })]).start();
+    x.setValue(l.x); w.setValue(l.width);
   };
   useEffect(() => { move(value); }, [value]);
   return <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>
@@ -291,12 +294,12 @@ export function ReadyTray({ open, onClose, ready, partial = [], alerts, activity
   const itemsText = round => (round.items || []).slice(0, 4).map(i => `${i.cantidad}× ${i.nombre || i.producto_nombre || 'Producto'}`).join(' · ');
   return <BottomSheet visible={open} onClose={onClose} title="Bandeja" subtitle={ready.length ? `${ready.length} ${ready.length === 1 ? 'ronda lista' : 'rondas listas'} para llevar a la mesa` : 'Nada esperando en el pase'}>
     {alertsPrompt?.visible ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.md, borderRadius: radius.md, backgroundColor: c.surfaceAlt }}>
-      <BellRing size={22} color={c.primaryText} />
+      <BellRing size={20} color={c.text} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <T size={15} weight="700">Avisos de plato listo</T>
         <T size={13} color={c.muted}>Suena y vibra aunque tengas el teléfono bloqueado.</T>
       </View>
-      <Button size="sm" variant="primary" onPress={alertsPrompt.enable} accessibilityLabel="Activar los avisos de plato listo">Activar</Button>
+      <Button size="sm" variant="ink" onPress={alertsPrompt.enable} accessibilityLabel="Activar los avisos de plato listo">Activar</Button>
     </View> : null}
     <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
       <Chip selected={tab === 'listo'} onPress={() => setTab('listo')} count={ready.length + partial.length}>Listo</Chip>
@@ -304,36 +307,35 @@ export function ReadyTray({ open, onClose, ready, partial = [], alerts, activity
       <Chip selected={tab === 'actividad'} onPress={() => setTab('actividad')} count={unread}>Actividad</Chip>
     </View>
     {tab === 'listo' ? (ready.length ? <View style={{ gap: space.sm }}>
-      <T size={13} color={c.muted}>Desliza una ronda hacia la derecha para marcarla como entregada.</T>
-      {ready.map(({ round, pedido, minutes }, i) => <Appear key={round.id} delay={i * 40}>
+      {ready.map(({ round, pedido, minutes }) => <View key={round.id}>
         <SwipeRow direction="right" label="Entregado" icon={CheckCheck} disabled={deliveringId === round.id} onSwipe={() => onDeliver(round, pedido)}>
-        <View style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.greenSoft, gap: 6 }}>
+        <View style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.surfaceAlt, gap: 6 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
             <T size={18} weight="700" style={{ flex: 1 }}>{placeOf(pedido)}</T>
-            <Num size={14} weight="700" color={minutes != null && minutes >= (alerts.limits?.lista || 5) ? c.red : c.green}>{minutes ? `lista hace ${shortMinutes(minutes)}` : 'recién lista'}</Num>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><CheckCheck size={15} color={c.green} strokeWidth={2.4} /><T size={14} weight="700" color={c.green}>Lista</T></View>
           </View>
+          <Num size={13} color={minutes != null && minutes >= (alerts.limits?.lista || 5) ? c.red : c.muted}>{minutes ? `hace ${shortMinutes(minutes)}` : 'recién salida'}</Num>
           {itemsText(round) ? <T size={15} color={c.muted} numberOfLines={2}>{itemsText(round)}</T> : null}
           <View style={{ flexDirection: 'row', gap: space.sm, marginTop: 4 }}>
-            <Button variant="ink" icon={CheckCheck} loading={deliveringId === round.id} onPress={() => onDeliver(round, pedido)} hapticKind="success">Entregado</Button>
+            <Button variant="ink" icon={CheckCheck} loading={deliveringId === round.id} onPress={() => onDeliver(round, pedido)} hapticKind="tap">Entregado</Button>
             <Button variant="ghost" onPress={() => onOpen({ mesa_id: pedido.mesa_id, pedido_id: pedido.id, pedido })}>Ver</Button>
           </View>
         </View>
         </SwipeRow>
-      </Appear>)}
+      </View>)}
     </View> : partial.length ? null : <EmptyState icon={CheckCheck} title="Pase vacío" description="Cuando cocina marque una ronda como lista aparecerá aquí, con vibración." />) : null}
     {tab === 'listo' && partial.length ? <View style={{ gap: space.sm }}>
-      <T size={15} weight="800">Platos listos de rondas en preparación</T>
-      <T size={13} color={c.muted}>Cocina ya sacó estos platos; el resto de la ronda sigue en preparación.</T>
-      {partial.map(({ round, pedido, items, total }, i) => <Appear key={round.id} delay={i * 40}>
+      <T size={15} weight="700" style={{ marginTop: space.sm }}>Platos sueltos ya listos</T>
+      {partial.map(({ round, pedido, items, total }) => <View key={round.id}>
         <Press accessibilityRole="button" accessibilityLabel={`${placeOf(pedido)}: ${items.map(it => it.nombre).join(', ')} listos`} onPress={() => onOpen({ mesa_id: pedido.mesa_id, pedido_id: pedido.id, pedido })} hapticKind="tap"
-          style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.skySoft, gap: 4 }}>
+          style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.surfaceAlt, gap: 4 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
             <T size={17} weight="800" style={{ flex: 1 }}>{placeOf(pedido)}</T>
-            <Num size={13} weight="800" color={c.sky}>{items.length} de {total} listos</Num>
+            <Num size={13} weight="600" color={c.muted}>{items.length} de {total} listos</Num>
           </View>
           {items.map(it => <T key={it.id} size={15} weight="700" color={c.text}>✓ {it.cantidad}× {it.nombre}</T>)}
         </Press>
-      </Appear>)}
+      </View>)}
     </View> : null}
     {tab === 'demoras' ? <View style={{ gap: space.sm }}>
       {alerts.error ? <View style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.amberSoft, gap: space.sm }}>
@@ -342,7 +344,7 @@ export function ReadyTray({ open, onClose, ready, partial = [], alerts, activity
       </View> : null}
       {!alerts.error && !late.length ? <EmptyState icon={Clock3} title={alerts.limits?.enabled === false ? 'Avisos en pausa' : 'Sin demoras'} description={alerts.limits?.enabled === false ? 'Las alertas de demora están desactivadas en Ajustes.' : `Se avisa cuando cocina pasa de ${alerts.limits?.espera ?? 20} min.`} /> : null}
       {late.map(item => <Press key={item.id} accessibilityRole="button" onPress={() => onOpen(item)} hapticKind="tap"
-        style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.redSoft, gap: 4 }}>
+        style={{ borderRadius: radius.lg, padding: space.lg, backgroundColor: c.surfaceAlt, gap: 4 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
           <T size={17} weight="700" style={{ flex: 1 }}>{placeOf(null, item)}</T>
           <Num size={15} weight="700" color={c.red}>{serviceDuration(item.minutos)}</Num>

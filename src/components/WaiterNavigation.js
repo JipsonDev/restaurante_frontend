@@ -50,7 +50,7 @@ export default function WaiterNavigation({ width, name, unread, notifications, c
 export function WaiterBottomBar({ step, navigate, cartCount = 0, expressCount = 0, bottomInset = 0, setMenuOpen }) {
   const items = [
     { key: 'mesas', label: 'Mesas', icon: LayoutGrid },
-    { key: 'productos', label: 'Menú', icon: UtensilsCrossed, badge: cartCount || null },
+    { key: 'productos', label: 'Menú', icon: UtensilsCrossed },
     { key: 'express', label: 'Express', icon: ShoppingBag, badge: expressCount || null },
     { key: 'mas', label: 'Más', icon: MoreHorizontal },
   ];
@@ -61,8 +61,8 @@ export function WaiterBottomBar({ step, navigate, cartCount = 0, expressCount = 
 function Toggle({ value, onChange, label }) {
   const { c } = useTheme();
   return <Press accessibilityRole="switch" accessibilityState={{ checked: !!value }} accessibilityLabel={label} onPress={() => onChange(!value)} hapticKind="select" scaleTo={0.96}
-    style={{ width: 52, height: 32, borderRadius: 16, padding: 3, justifyContent: 'center', backgroundColor: value ? c.primary : c.line }}>
-    <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: '#FFFFFF', alignSelf: value ? 'flex-end' : 'flex-start' }} />
+    style={{ width: 52, height: 32, borderRadius: 16, padding: 3, justifyContent: 'center', backgroundColor: value ? c.ink : c.softer }}>
+    <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: value ? c.onInk : '#FFFFFF', alignSelf: value ? 'flex-end' : 'flex-start' }} />
   </Press>;
 }
 
@@ -77,6 +77,7 @@ export function WaiterMoreSheet({ open, onClose, name, navigate, dark, toggleThe
   const [push, setPush] = useState(pushStatus());
   useEffect(() => subscribePushStatus(setPush), []);
   const [testing, setTesting] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
   const [testNote, setTestNote] = useState('');
   const support = pushSupport();
   // Con avisos push activos, la prueba viaja por el servidor: es exactamente el camino de «plato listo».
@@ -95,18 +96,18 @@ export function WaiterMoreSheet({ open, onClose, name, navigate, dark, toggleThe
     : support === 'unsupported' ? { icon: Lock, tone: c.muted, title: 'Con el teléfono bloqueado: no disponible', detail: 'Este navegador no lo permite. Usa Chrome en Android o instala la app en iPhone.' }
     : null;
   const row = (Icon, label, detail, onPress, tone, right) => <Press key={label} accessibilityRole="button" accessibilityLabel={label} onPress={() => { onClose(); onPress(); }} hapticKind="tap"
-    style={{ minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.sm, borderRadius: 8 }} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
-    <View style={{ width: 42, height: 42, borderRadius: 8, backgroundColor: tone === c.red ? c.redSoft : tone === c.amber ? c.amberSoft : c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><Icon size={20} color={tone || c.text} /></View>
+    style={{ minHeight: 56, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: space.lg, paddingHorizontal: space.sm, borderRadius: 8 }} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
+    <View style={{ width: 24, alignItems: 'center' }}><Icon size={20} color={tone === c.red ? c.red : tone === c.amber ? c.amber : c.text} /></View>
     <View style={{ flex: 1, minWidth: 0 }}>
-      <T size={17} weight="600" color={tone === c.red ? c.red : c.text}>{label}</T>
+      <T size={16} weight="500" color={tone === c.red ? c.red : c.text}>{label}</T>
       {detail ? <T size={14} color={c.muted} numberOfLines={2}>{detail}</T> : null}
     </View>
-    {right != null ? <View style={{ minWidth: 28, height: 28, paddingHorizontal: 8, borderRadius: 8, backgroundColor: tone === c.amber ? c.amber : c.ink, alignItems: 'center', justifyContent: 'center' }}><Num size={13} weight="800" color={tone === c.amber ? '#FFFFFF' : c.onInk}>{right}</Num></View> : null}
+    {right != null ? <View style={{ minWidth: 28, height: 28, paddingHorizontal: 8, borderRadius: 8, backgroundColor: tone === c.amber ? c.amberFill : c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><Num size={13} weight="800" color={tone === c.amber ? c.onAmber : c.text}>{right}</Num></View> : null}
   </Press>;
-  const setting = (Icon, label, detail, key) => <View key={key} style={{ minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.sm }}>
-    <View style={{ width: 42, height: 42, borderRadius: 8, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><Icon size={20} color={c.text} /></View>
+  const setting = (Icon, label, detail, key) => <View key={key} style={{ minHeight: 56, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: space.lg, paddingHorizontal: space.sm }}>
+    <View style={{ width: 24, alignItems: 'center' }}><Icon size={20} color={c.text} /></View>
     <View style={{ flex: 1, minWidth: 0 }}>
-      <T size={17} weight="600">{label}</T>
+      <T size={16} weight="500">{label}</T>
       {detail ? <T size={14} color={c.muted}>{detail}</T> : null}
     </View>
     <Toggle value={alerts[key]} onChange={v => saveAlertSettings({ [key]: v })} label={label} />
@@ -119,32 +120,36 @@ export function WaiterMoreSheet({ open, onClose, name, navigate, dark, toggleThe
       {row(BadgePercent, 'Promos y combos', 'Ofertas activas para añadir al pedido', () => navigate('promociones'))}
       {row(FileText, 'Pedidos guardados', draftCount ? `${draftCount} sin terminar en este teléfono` : 'No hay pedidos a medias', openDrafts, draftAttention ? c.amber : null)}
 
-      {section('Avisos de cocina')}
-      {alertPermission === 'default' ? row(BellRing, 'Permitir avisos del sistema', 'Para enterarte con otra app abierta', enableAlerts, c.primaryText) : null}
-      {setting(Volume2, 'Sonido', 'Suena cuando un plato está listo', 'sound')}
-      {setting(Vibrate, 'Vibración', null, 'vibrate')}
-      {keepAwakeSupported() ? setting(Smartphone, 'Pantalla siempre encendida', 'El teléfono no se duerme: no te pierdes avisos', 'keepAwake') : null}
-      {lockState ? <Press accessibilityRole={lockState.retry ? 'button' : 'text'} disabled={!lockState.retry} onPress={() => { onClose(); enableAlerts(); }} scaleTo={1}
-        style={{ minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.sm }}>
-        <View style={{ width: 42, height: 42, borderRadius: 8, backgroundColor: lockState.tone === c.green ? c.greenSoft : lockState.tone === c.amber ? c.amberSoft : c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}><lockState.icon size={20} color={lockState.tone} /></View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <T size={16} weight="600">{lockState.title}</T>
-          <T size={14} color={c.muted}>{lockState.detail}</T>
-        </View>
-      </Press> : null}
-      <Press accessibilityRole="button" accessibilityLabel="Probar el aviso" disabled={testing} onPress={runTest} hapticKind={null}
-        style={{ alignSelf: 'flex-start', minHeight: 44, paddingHorizontal: space.lg, marginLeft: 62, borderRadius: 8, backgroundColor: c.surfaceAlt, justifyContent: 'center' }}>
-        <T size={15} weight="700">{testing ? 'Enviando…' : 'Probar el aviso'}</T>
-      </Press>
-      {testNote ? <T size={14} weight="700" color={c.green} accessibilityLiveRegion="polite" style={{ marginLeft: 62, marginTop: 6 }}>{testNote}</T> : null}
-      {alertPermission === 'denied' ? <T size={13} color={c.muted} style={{ paddingHorizontal: space.sm, marginTop: 6 }}>El navegador tiene bloqueados los avisos del sistema. Con la app abierta igual suena; para el resto, permite las notificaciones en los ajustes del sitio.</T> : null}
-
-      {section('Ajustes')}
+      <View style={{ height: 1, backgroundColor: c.line, marginVertical: space.sm }} />
+      {row(BellRing, 'Avisos de cocina', [alerts.sound ? 'Sonido' : null, alerts.vibrate ? 'vibración' : null].filter(Boolean).join(' y ') || 'Silenciados', () => setAlertsOpen(true))}
       {row(RefreshCw, 'Actualizar datos', 'Vuelve a traer mesas, menú y pedidos', refresh)}
       {row(dark ? Sun : Moon, dark ? 'Usar tema claro' : 'Usar tema oscuro', null, toggleTheme)}
       {installer.install.available ? row(Download, 'Instalar la app', installer.install.ios ? 'Agrégala a la pantalla de inicio del iPhone' : 'Ábrela como app, a pantalla completa', installer.run) : null}
     </View>
     <View style={{ height: 1, backgroundColor: c.line }} />
     {row(LogOut, 'Cerrar sesión', null, logout, c.red)}
+  </BottomSheet>
+  <BottomSheet visible={alertsOpen} onClose={() => setAlertsOpen(false)} title="Avisos de cocina" subtitle="Cuando un plato está listo">
+    <View style={{ gap: 2 }}>
+      {alertPermission === 'default' ? row(BellRing, 'Permitir avisos del sistema', 'Para enterarte con otra app abierta', enableAlerts) : null}
+      {setting(Volume2, 'Sonido', 'Suena cuando un plato está listo', 'sound')}
+      {setting(Vibrate, 'Vibración', null, 'vibrate')}
+      {keepAwakeSupported() ? setting(Smartphone, 'Pantalla siempre encendida', 'El teléfono no se duerme: no te pierdes avisos', 'keepAwake') : null}
+      {lockState ? <Press accessibilityRole={lockState.retry ? 'button' : 'text'} disabled={!lockState.retry} onPress={() => { setAlertsOpen(false); onClose(); enableAlerts(); }} scaleTo={1}
+        style={{ minHeight: 56, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: space.lg, paddingHorizontal: space.sm }}>
+        <View style={{ width: 24, alignItems: 'center' }}><lockState.icon size={20} color={lockState.tone} /></View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <T size={16} weight="600">{lockState.title}</T>
+          <T size={14} color={c.muted}>{lockState.detail}</T>
+        </View>
+      </Press> : null}
+      <Press accessibilityRole="button" accessibilityLabel="Probar el aviso" disabled={testing} onPress={runTest} hapticKind={null}
+        style={{ alignSelf: 'flex-start', minHeight: 44, paddingHorizontal: space.lg, marginLeft: 48, marginTop: 4, borderRadius: 8, backgroundColor: c.surfaceAlt, justifyContent: 'center' }}>
+        <T size={15} weight="700">{testing ? 'Enviando…' : 'Probar el aviso'}</T>
+      </Press>
+      {testNote ? <T size={14} weight="700" color={c.green} accessibilityLiveRegion="polite" style={{ marginLeft: 48, marginTop: 6 }}>{testNote}</T> : null}
+      {alertPermission === 'denied' ? <T size={13} color={c.muted} style={{ paddingHorizontal: space.sm, marginTop: 6 }}>El navegador tiene bloqueados los avisos del sistema. Con la app abierta igual suena; para el resto, permite las notificaciones en los ajustes del sitio.</T> : null}
+
+    </View>
   </BottomSheet>{installer.sheet}</>;
 }

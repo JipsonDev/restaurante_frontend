@@ -27,11 +27,14 @@ function useProductState(producto, qty, canAdd, locked, onAdd, onCustomize, choo
 // sin pedir → «+»; pedido → un cuadro con la cantidad; al tocarlo se abre «− n +» y se cierra solo a los 3 s.
 function AddControl({ producto, qty, off, locked, add, onDecrement, onAdd, small, plusBg }) {
   const { c } = useTheme();
-  const size = small ? 34 : 38;
+  const size = small ? 40 : 44;
   const box = { height: size, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' };
-  if (qty > 0 && !locked) return <QtyControl value={qty} tone="brand" size={size} label={producto.nombre} onInc={() => onAdd(producto)} onDec={() => onDecrement(producto)} />;
+  // La entrada sutil solo al pasar de 0 a 1 (no al montar filas recicladas por la lista).
+  const prevQty = useRef(qty); const justAdded = prevQty.current === 0 && qty > 0;
+  useEffect(() => { prevQty.current = qty; }, [qty]);
+  if (qty > 0 && !locked) return <QtyControl value={qty} tone="brand" size={size} anchor="right" appear={justAdded} label={producto.nombre} onInc={() => onAdd(producto)} onDec={() => onDecrement(producto)} />;
   if (off) return null;
-  return <Press accessibilityRole="button" accessibilityLabel={`Añadir ${producto.nombre}`} onPress={add} hapticKind="tap" scaleTo={0.88}
+  return <Press accessibilityRole="button" accessibilityLabel={`Añadir ${producto.nombre}`} onPress={add} hapticKind="tap" scaleTo={0.94}
     style={[box, { width: size, backgroundColor: plusBg || c.surfaceAlt }]}>
     <Plus size={20} color={c.text} strokeWidth={2.4} />
   </Press>;

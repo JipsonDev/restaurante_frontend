@@ -3,7 +3,7 @@
 // solo donde hay acción: botón principal, pestaña activa, foco y barra del carrito.
 // Movimiento corto y sin rebotes: presión 0,97 en 100 ms, hojas con curva de cajón, nada que se repita cientos de veces.
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Easing, Image, Modal, PanResponder, Platform, Pressable, Text, TextInput, Vibration, View, useWindowDimensions } from 'react-native';
+import { AccessibilityInfo, ActivityIndicator, Animated, Easing, Image, Modal, PanResponder, Platform, Pressable, Text, TextInput, Vibration, View, useWindowDimensions } from 'react-native';
 import { Check, Minus, Plus, Trash2, X } from 'lucide-react-native';
 import { useTheme } from '../../theme';
 
@@ -15,6 +15,17 @@ const ND = !WEB;
 export const EASE = Easing.bezier(0.23, 1, 0.32, 1);        // salida fuerte
 export const EASE_IN_OUT = Easing.bezier(0.77, 0, 0.175, 1);
 export const EASE_DRAWER = Easing.bezier(0.32, 0.72, 0, 1); // hojas inferiores
+
+// Movimiento reducido (ajuste del sistema): menos y más suave, no cero — se quitan escalas y desplazamientos, queda la opacidad.
+let RM = false; const rmSubs = new Set();
+const setRM = v => { RM = !!v; rmSubs.forEach(f => f(RM)); };
+try { AccessibilityInfo.isReduceMotionEnabled?.().then(setRM).catch(() => {}); AccessibilityInfo.addEventListener?.('reduceMotionChanged', setRM); } catch { /* sin soporte */ }
+export const reducedMotion = () => RM;
+export function useReducedMotion() {
+  const [r, setR] = useState(RM);
+  useEffect(() => { rmSubs.add(setR); return () => { rmSubs.delete(setR); }; }, []);
+  return r;
+}
 
 // ── Tipografía ─────────────────────────────────────────────────────────────
 export const FONT = WEB ? '"Archivo", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif' : undefined;
@@ -117,7 +128,8 @@ export function Press({ children, style, onPress, onLongPress, disabled, scaleTo
     onPress={e => { if (hapticKind) haptic(hapticKind); onPress?.(e); }} onLongPress={onLongPress ? e => { haptic('medium'); onLongPress(e); } : undefined}
     onPressIn={down} onPressOut={up} onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)}
     style={[typeof style === 'function' ? style({ hovered }) : style, hovered && !disabled ? hoverStyle : null,
-      { transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, scaleTo] }) }, { translateY: v.interpolate({ inputRange: [0, 1], outputRange: [0, sink] }) }] },
+      RM ? { opacity: v.interpolate({ inputRange: [0, 1], outputRange: [1, 0.85] }) }
+        : { transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, scaleTo] }) }, { translateY: v.interpolate({ inputRange: [0, 1], outputRange: [0, sink] }) }] },
       WEB ? { cursor: disabled ? 'default' : 'pointer', userSelect: 'none', WebkitTapHighlightColor: 'transparent', transitionProperty: 'background-color, border-color', transitionDuration: '150ms' } : null]}>
     {typeof children === 'function' ? children({ hovered }) : children}
   </AnimatedPressable>;
@@ -160,7 +172,7 @@ export function CountBadge({ value, style, border }) {
 
 export function IconButton({ icon: Icon, label, onPress, size = 44, badge, tone, disabled, color, filled }) {
   const { c } = useTheme();
-  return <Press accessibilityRole="button" accessibilityLabel={badge ? `${label}, ${badge}` : label} disabled={disabled} onPress={onPress} hapticKind="tap" scaleTo={0.92}
+  return <Press accessibilityRole="button" accessibilityLabel={badge ? `${label}, ${badge}` : label} disabled={disabled} onPress={onPress} hapticKind="tap" scaleTo={0.94}
     style={{ width: size, height: size, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.4 : 1, backgroundColor: filled ? c.surfaceAlt : 'transparent' }} hoverStyle={{ backgroundColor: c.surfaceAlt }}>
     <Icon size={22} color={color || (tone === 'danger' ? c.red : c.text)} strokeWidth={2} />
     {badge ? <CountBadge value={badge} border={c.bg} style={{ position: 'absolute', top: 4, right: 2 }} /> : null}
@@ -171,7 +183,7 @@ export function IconButton({ icon: Icon, label, onPress, size = 44, badge, tone,
 export function Chip({ children, selected, onPress, count, icon: Icon, accessibilityLabel }) {
   const { c } = useTheme();
   return <Press accessibilityRole="button" accessibilityLabel={accessibilityLabel} accessibilityState={{ selected }} onPress={onPress} hapticKind="select" scaleTo={0.95}
-    style={{ minHeight: 40, paddingHorizontal: 14, borderRadius: radius.md, backgroundColor: selected ? c.ink : c.surfaceAlt,
+    style={{ minHeight: 44, paddingHorizontal: 14, borderRadius: radius.md, backgroundColor: selected ? c.ink : c.surfaceAlt,
       flexDirection: 'row', alignItems: 'center', gap: 6 }} hoverStyle={selected ? null : { backgroundColor: c.soft }}>
     {Icon ? <Icon size={16} color={selected ? c.onInk : c.text} strokeWidth={2.2} /> : null}
     <T size={15} weight={selected ? '700' : '500'} color={selected ? c.onInk : c.text} numberOfLines={1}>{children}</T>
@@ -282,13 +294,13 @@ export function RollingNumber({ value, format = v => String(v), size = 16, weigh
     if (value === shown) return;
     dir.current = Number(value) >= Number(shown) ? 1 : -1;
     setPrev(shown); setShown(value); v.setValue(0);
-    Animated.timing(v, { toValue: 1, duration: 200, easing: EASE, useNativeDriver: ND }).start(() => setPrev(null));
+    Animated.timing(v, { toValue: 1, duration: 160, easing: EASE, useNativeDriver: ND }).start(() => setPrev(null));
   }, [value]);
   const h = Math.round(size * 1.3);
   return <View style={[{ height: h, overflow: 'hidden', justifyContent: 'center' }, style]}>
-    {prev != null ? <Animated.View style={{ position: 'absolute', left: 0, right: 0, opacity: v.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }), transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [0, -h * dir.current] }) }] }}>
+    {prev != null ? <Animated.View style={{ position: 'absolute', left: 0, right: 0, opacity: v.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }), transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [0, RM ? 0 : -h * 0.6 * dir.current] }) }] }}>
       <Num size={size} weight={weight} color={color}>{format(prev)}</Num></Animated.View> : null}
-    <Animated.View style={{ opacity: prev != null ? v : 1, transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [prev != null ? h * dir.current : 0, 0] }) }] }}>
+    <Animated.View style={{ opacity: prev != null ? v : 1, transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [prev != null && !RM ? h * 0.6 * dir.current : 0, 0] }) }] }}>
       <Num size={size} weight={weight} color={color}>{format(shown)}</Num>
     </Animated.View>
   </View>;
@@ -297,11 +309,11 @@ export function RollingNumber({ value, format = v => String(v), size = 16, weigh
 // Cantidad: bloque gris − n +, sin bordes ni resaltes que se queden pegados al tocar. En 1, el «−» se vuelve papelera (quitar).
 export function Tally({ value, onChange, min = 0, max = 99, label = 'Cantidad', size = 'md', removable = false, stretch = false, bg }) {
   const { c } = useTheme();
-  const s = size === 'sm' ? 34 : 40;
+  const s = size === 'sm' ? 40 : 44;
   const btn = (delta, disabled) => {
     const Icon = delta > 0 ? Plus : removable && value <= 1 ? Trash2 : Minus;
     return <Press accessibilityRole="button" accessibilityLabel={delta > 0 ? `Aumentar ${label.toLowerCase()}` : removable && value <= 1 ? `Quitar ${label.toLowerCase()}` : `Disminuir ${label.toLowerCase()}`} disabled={disabled}
-      onPress={() => onChange(Math.max(removable ? 0 : min, Math.min(max, value + delta)))} hapticKind="select" scaleTo={0.88}
+      onPress={() => onChange(Math.max(removable ? 0 : min, Math.min(max, value + delta)))} hapticKind="select" scaleTo={0.94}
       style={{ width: s, height: s, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.3 : 1 }}>
       <Icon size={size === 'sm' ? 16 : 18} color={delta < 0 && removable && value <= 1 ? c.red : c.text} strokeWidth={2.4} />
     </Press>;
@@ -313,29 +325,46 @@ export function Tally({ value, onChange, min = 0, max = 99, label = 'Cantidad', 
   </View>;
 }
 
-// Cantidad compacta: un cuadro con el número; al tocarlo se abre «− n +» y se cierra solo a los 3 s.
-// tone="brand" (platos ya pedidos en el menú) o "neutral" (líneas de la cuenta). En 1, el «−» es una papelera.
-export function QtyControl({ value, onInc, onDec, label = 'producto', tone = 'neutral', size = 34 }) {
+// Cantidad compacta: un cuadro con el número; al tocarlo se abre «− n +» ENCIMA (no empuja el texto) y se cierra solo a los 4 s.
+// tone="brand" (menú: ya en la ronda) o "neutral" (cuenta). anchor: lado desde el que se abre. appear: entrada sutil al pasar de 0 a 1.
+export function QtyControl({ value, onInc, onDec, label = 'producto', tone = 'neutral', size = 40, anchor = 'left', appear = false }) {
   const { c } = useTheme();
+  const reduced = useReducedMotion();
   const [open, setOpen] = useState(false);
+  const [shown, setShown] = useState(false);
+  const v = useRef(new Animated.Value(0)).current;
+  const m = useRef(new Animated.Value(appear && !RM ? 0 : 1)).current;
   const timer = useRef(null);
-  const keepOpen = () => { clearTimeout(timer.current); setOpen(true); timer.current = setTimeout(() => setOpen(false), 3000); };
+  const run = to => {
+    if (to) setShown(true);
+    Animated.timing(v, { toValue: to, duration: to ? 140 : 110, easing: EASE, useNativeDriver: ND }).start(({ finished }) => { if (finished && !to) setShown(false); });
+  };
+  const close = () => { setOpen(false); run(0); };
+  const keepOpen = () => { clearTimeout(timer.current); if (!open) { setOpen(true); run(1); } timer.current = setTimeout(close, 4000); };
   useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(() => { if (appear && !RM) Animated.timing(m, { toValue: 1, duration: 120, easing: EASE, useNativeDriver: ND }).start(); }, []);
   const bg = tone === 'brand' ? c.primary : c.surfaceAlt;
   const fg = tone === 'brand' ? c.onPrimary : c.text;
   const box = { height: size, borderRadius: radius.md, backgroundColor: bg, alignItems: 'center', justifyContent: 'center' };
-  if (!open) return <Press accessibilityRole="button" accessibilityLabel={`${value} de ${label}. Cambiar cantidad`} onPress={keepOpen} hapticKind="tap" scaleTo={0.9}
-    style={[box, { minWidth: size, paddingHorizontal: 6 }]}>
-    <Num size={16} weight="800" color={fg}>{value}</Num>
-  </Press>;
-  const step = (delta, Icon, a11y, color) => <Press accessibilityRole="button" accessibilityLabel={a11y} hapticKind="select" scaleTo={0.85}
+  const step = (delta, Icon, a11y, color) => <Press accessibilityRole="button" accessibilityLabel={a11y} hapticKind="select" scaleTo={0.94}
     onPress={() => { keepOpen(); delta > 0 ? onInc() : onDec(); }} style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-    <Icon size={17} color={color || fg} strokeWidth={2.6} />
+    <Icon size={18} color={color || fg} strokeWidth={2.6} />
   </Press>;
-  return <View accessibilityLabel={`Cantidad de ${label}: ${value}`} style={[box, { flexDirection: 'row' }]}>
-    {step(-1, value <= 1 ? Trash2 : Minus, value <= 1 ? `Quitar ${label}` : `Quitar uno de ${label}`, value <= 1 && tone !== 'brand' ? c.red : null)}
-    <Num size={16} weight="800" color={fg} style={{ minWidth: 20, textAlign: 'center' }}>{value}</Num>
-    {step(1, Plus, `Añadir otro ${label}`)}
+  return <View style={{ minWidth: size, height: size, zIndex: shown ? 5 : 0 }}>
+    <Animated.View style={{ opacity: m, transform: [{ scale: m.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) }] }}>
+      <Press accessibilityRole="button" accessibilityLabel={`${value} de ${label}. Cambiar cantidad`} onPress={keepOpen} hapticKind="tap" scaleTo={0.94}
+        importantForAccessibility={open ? 'no-hide-descendants' : 'auto'} style={[box, { minWidth: size, paddingHorizontal: 6 }]}>
+        <Num size={16} weight="800" color={fg}>{value}</Num>
+      </Press>
+    </Animated.View>
+    {shown ? <Animated.View pointerEvents={open ? 'auto' : 'none'} accessibilityLabel={`Cantidad de ${label}: ${value}`}
+      style={[box, { position: 'absolute', top: 0, [anchor]: 0, width: size * 3, flexDirection: 'row', justifyContent: 'space-between', opacity: v,
+        ...(WEB ? { transformOrigin: anchor === 'left' ? 'left center' : 'right center' } : null),
+        transform: [{ scale: reduced ? 1 : v.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) }] }, c.isDark ? null : { boxShadow: '0 1px 3px rgba(15,15,18,0.12)' }]}>
+      {step(-1, value <= 1 ? Trash2 : Minus, value <= 1 ? `Quitar ${label}` : `Quitar uno de ${label}`, value <= 1 && tone !== 'brand' ? c.red : null)}
+      <Num size={16} weight="800" color={fg} style={{ minWidth: 20, textAlign: 'center' }}>{value}</Num>
+      {step(1, Plus, `Añadir otro ${label}`)}
+    </Animated.View> : null}
   </View>;
 }
 
@@ -432,7 +461,7 @@ export function ComandaToastProvider({ children, bottomOffset = 84, placement = 
   const [items, setItems] = useState([]);
   const [extra, setExtra] = useState(0);
   const show = useCallback((message, opts = {}) => {
-    if (opts.haptic !== false) haptic(opts.tone === 'error' ? 'error' : opts.tone === 'warning' ? 'warning' : 'light');
+    if (opts.haptic !== false) haptic(typeof opts.haptic === 'string' ? opts.haptic : opts.tone === 'error' ? 'error' : opts.tone === 'warning' ? 'warning' : 'light');
     setItems([{ id: Date.now() + Math.random(), message, ...opts }]);
   }, []);
   const lift = useCallback(n => setExtra(Number(n) || 0), []);
@@ -467,7 +496,7 @@ export function TabBar({ items, value, onChange, bottomInset = 0 }) {
             <Icon size={24} color={active ? c.primaryText : c.muted} strokeWidth={active ? 2.3 : 1.9} />
             {item.badge ? <CountBadge value={item.badge} style={{ position: 'absolute', top: -5, right: -12 }} /> : null}
           </View>
-          <T size={12} weight={active ? '700' : '500'} color={active ? c.primaryText : c.muted} numberOfLines={1}>{item.label}</T>
+          <T size={12} weight={active ? '700' : '500'} color={active ? c.text : c.muted} numberOfLines={1}>{item.label}</T>
         </Press>;
       })}
     </View>
@@ -502,20 +531,24 @@ export function SwipeRow({ children, direction = 'left', onSwipe, label, icon: I
     onPanResponderRelease: (_, g) => {
       const along = g.dx * sign; const vel = g.vx * sign;
       if (along > width.current * 0.4 || (vel > 0.5 && along > 24)) {
-        busy.current = true; haptic('success');
+        busy.current = true; haptic('medium');
         Animated.spring(x, { toValue: sign * (width.current + 40), velocity: g.vx, speed: 20, bounciness: 0, useNativeDriver: ND, restDisplacementThreshold: 2, restSpeedThreshold: 2 })
-          .start(() => { onSwipe?.(); setTimeout(() => { x.setValue(0); busy.current = false; }, 260); });
+          .start(async () => {
+            // Si la acción falla, la fila vuelve; si sale bien, desaparece cuando lleguen los datos (sin volver a asomarse).
+            try { await onSwipe?.(); } catch { Animated.timing(x, { toValue: 0, duration: 200, easing: EASE, useNativeDriver: ND }).start(); }
+            finally { busy.current = false; }
+          });
       } else {
-        Animated.spring(x, { toValue: 0, velocity: g.vx, speed: 26, bounciness: 4, useNativeDriver: ND }).start();
+        Animated.spring(x, { toValue: 0, velocity: g.vx, speed: 26, bounciness: 0, useNativeDriver: ND }).start();
       }
     },
-    onPanResponderTerminate: () => Animated.spring(x, { toValue: 0, speed: 26, bounciness: 4, useNativeDriver: ND }).start(),
+    onPanResponderTerminate: () => Animated.spring(x, { toValue: 0, speed: 26, bounciness: 0, useNativeDriver: ND }).start(),
   }), [disabled, sign, onSwipe]);
   const progress = x.interpolate({ inputRange: sign < 0 ? [-200, -40, 0] : [0, 40, 200], outputRange: sign < 0 ? [1, 0.35, 0] : [0, 0.35, 1], extrapolate: 'clamp' });
   return <View onLayout={e => { width.current = e.nativeEvent.layout.width; }} style={{ borderRadius: r, overflow: 'hidden' }}>
     <Animated.View pointerEvents="none" style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, borderRadius: r, backgroundColor: tone, opacity: progress,
       flexDirection: 'row', alignItems: 'center', justifyContent: sign < 0 ? 'flex-end' : 'flex-start', paddingHorizontal: 24, gap: 8 }}>
-      {Icon ? <Animated.View style={{ transform: [{ scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.1] }) }] }}><Icon size={22} color="#FFFFFF" strokeWidth={2.4} /></Animated.View> : null}
+      {Icon ? <Animated.View style={{ transform: [{ scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] }) }] }}><Icon size={22} color="#FFFFFF" strokeWidth={2.4} /></Animated.View> : null}
       {label ? <T size={15} weight="800" color="#FFFFFF">{label}</T> : null}
     </Animated.View>
     <Animated.View {...pan.panHandlers} style={[{ transform: [{ translateX: x }] }, WEB ? { touchAction: 'pan-y', userSelect: 'none', WebkitUserSelect: 'none' } : null]}>{children}</Animated.View>
@@ -528,7 +561,8 @@ export function ConnectionDot({ state = 'live', label }) {
   const { c } = useTheme();
   const v = useRef(new Animated.Value(1)).current;
   useEffect(() => {
-    const loop = Animated.loop(Animated.sequence([Animated.timing(v, { toValue: 0, duration: state === 'live' ? 1400 : 700, useNativeDriver: ND }), Animated.timing(v, { toValue: 1, duration: 0, useNativeDriver: ND })]));
+    if (state === 'live' || RM) return undefined;
+    const loop = Animated.loop(Animated.sequence([Animated.timing(v, { toValue: 0, duration: 700, useNativeDriver: ND }), Animated.timing(v, { toValue: 1, duration: 0, useNativeDriver: ND })]));
     loop.start(); return () => loop.stop();
   }, [state]);
   // Conectado es lo normal: no se muestra nada. Solo aparece cuando hay un problema de conexión.
@@ -570,7 +604,7 @@ export function EmptyState({ icon: Icon, title, description, action }) {
 export function Appear({ children, trigger, delay = 0, style, offset = 8 }) {
   const v = useRef(new Animated.Value(0)).current;
   useEffect(() => { v.setValue(0); Animated.timing(v, { toValue: 1, duration: 200, delay, easing: EASE, useNativeDriver: ND }).start(); }, [trigger]);
-  return <Animated.View style={[style, { opacity: v, transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [offset, 0] }) }] }]}>{children}</Animated.View>;
+  return <Animated.View style={[style, { opacity: v, transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [RM ? 0 : offset, 0] }) }] }]}>{children}</Animated.View>;
 }
 
 // Marca del local en la cabecera: su logo; sin logo, iniciales en su color y el nombre.
@@ -595,8 +629,9 @@ export function Ping({ trigger, color, radius: r = radius.lg }) {
   const first = useRef(true);
   useEffect(() => {
     if (first.current) { first.current = false; return; }
-    v.setValue(0); Animated.timing(v, { toValue: 1, duration: 600, easing: EASE, useNativeDriver: ND }).start();
+    v.setValue(0); Animated.timing(v, { toValue: 1, duration: 500, easing: EASE, useNativeDriver: ND }).start();
   }, [trigger]);
-  return <Animated.View pointerEvents="none" style={{ position: 'absolute', top: -2, left: -2, right: -2, bottom: -2, borderRadius: r + 2, borderWidth: 3, borderColor: color,
-    opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.7, 0] }), transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] }) }] }} />;
+  // Destello del color nuevo que se desvanece (sin anillo ni halo). Con movimiento reducido, sin escala.
+  return <Animated.View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: r, backgroundColor: color,
+    opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0] }), transform: RM ? [] : [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 1.05] }) }] }} />;
 }

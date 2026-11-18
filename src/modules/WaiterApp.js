@@ -72,6 +72,7 @@ import { topProducts, lastRoundItems, extrasForProduct } from '../utils/waiterFa
 import CustomizeSheet from '../components/waiter/CustomizeSheet'; // Menú:
 import { TargetPickerSheet, MenuSearch, CategoryChips } from '../components/waiter/menu'; // Menú:
 import { createRefreshQueue } from '../utils/kitchenLogic.mjs';
+import { expressStage } from '../utils/expressWorkspace.mjs';
 import ProductCard from '../components/WaiterProductCard';
 import WaiterNavigation, { WaiterBottomBar, WaiterMoreSheet } from '../components/WaiterNavigation';
 import useWaiterDrafts from '../services/useWaiterDrafts';
@@ -79,7 +80,7 @@ import { validateDraft, emptyExpressInfo, isExpressDraftKey, savedDraftKeys } fr
 // Comanda: hoja de pedido y cola sin conexión.
 import { ComandaHeader, LineCustomizer, NoticeSheet, OfflineQueue, OrderLine, PastRound, PriceChangesSheet, SectionLabel, SendBar, TearAway, TotalsBlock } from '../components/waiter/order';
 import { classifyError, nextDelay, priceDiffs, queueSummary, reusableExpressDraft } from '../utils/sendQueue.mjs';
-import { IconButton as CIconButton, Press as CPress, BottomSheet as CBottomSheet, Button as CButton, Chip as CChip, LeaderLine as CLeaderLine, Tally as CTally, Field as CField, Label as CLabel, Num as CNum, Perforation as CPerforation, StampBurst as CStampBurst, T as CT, money as cMoney } from '../components/waiter/kit';
+import { haptic, IconButton as CIconButton, Press as CPress, BottomSheet as CBottomSheet, Button as CButton, Chip as CChip, LeaderLine as CLeaderLine, Tally as CTally, Field as CField, Label as CLabel, Num as CNum, Perforation as CPerforation, T as CT, money as cMoney } from '../components/waiter/kit';
 import ExpressDraftList from '../components/ExpressDraftList';
 import { catalogContext } from '../utils/waiterNavigation.mjs';
 import { BOTTOM_INSET, TOP_INSET } from '../utils/safeArea';
@@ -189,67 +190,6 @@ const softShadow = Platform.select({
 
 const EXPRESS_DESTINATION = '__express__';
 
-// BUG FIX #3: SwipeableRow — el PanResponder se recrea cuando cambia `enabled`,
-// lo que provocaba que el swipe quedara bloqueado después del primer render.
-// Solución: mover `enabled` a un ref para que el PanResponder siempre lo lea actualizado
-// sin necesidad de recrearse.
-const SwipeableRow = ({ children, onDelete, enabled, colors }) => {
-  const pan = useRef(new Animated.Value(0)).current;
-  const isOpen = useRef(false);
-  const enabledRef = useRef(enabled);
-  const onDeleteRef = useRef(onDelete);
-
-  useEffect(() => { enabledRef.current = enabled; }, [enabled]);
-  useEffect(() => { onDeleteRef.current = onDelete; }, [onDelete]);
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponderCapture: (e, gestureState) => {
-        return enabledRef.current
-          && Math.abs(gestureState.dx) > 20
-          && Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
-      },
-      onPanResponderMove: (e, gestureState) => {
-        let newDx = isOpen.current ? gestureState.dx - 80 : gestureState.dx;
-        if (newDx < -100) newDx = -100 - (Math.abs(newDx + 100) * 0.1);
-        if (newDx > 0) newDx = 0;
-        pan.setValue(newDx);
-      },
-      onPanResponderRelease: (e, gestureState) => {
-        if (gestureState.dx < -50 || (isOpen.current && gestureState.dx < 10)) {
-          isOpen.current = true;
-          Animated.spring(pan, { toValue: -80, useNativeDriver: true, tension: 50, friction: 8 }).start();
-        } else {
-          isOpen.current = false;
-          Animated.spring(pan, { toValue: 0, useNativeDriver: true, tension: 50, friction: 8 }).start();
-        }
-      },
-      onPanResponderTerminate: () => {
-        isOpen.current = false;
-        Animated.spring(pan, { toValue: 0, useNativeDriver: true, tension: 50, friction: 8 }).start();
-      }
-    })
-  ).current;
-
-  if (!enabled) return children;
-
-  return (
-    <View style={{ position: 'relative', width: '100%' }}>
-      <View style={{
-        position: 'absolute', top: 0, bottom: 0, right: 0, width: 90,
-        backgroundColor: colors.danger, borderRadius: 8,
-        alignItems: 'flex-end', justifyContent: 'center', paddingRight: 24
-      }}>
-        <TouchableOpacity onPress={() => onDeleteRef.current?.()} style={{ height: '100%', justifyContent: 'center' }}>
-          <Trash2 size={24} color={colors.onAccent} />
-        </TouchableOpacity>
-      </View>
-      <Animated.View {...panResponder.panHandlers} style={{ transform: [{ translateX: pan }] }}>
-        {children}
-      </Animated.View>
-    </View>
-  );
-};
 
 // La app del mesero usa su propia identidad («Comanda»), independiente del panel de administración.
 export default function WaiterApp() {
@@ -331,7 +271,6 @@ function App() {
   const [customAlert, setCustomAlert] = useState(null);
   // Comanda: animación de envío, cambios de precio y cola sin conexión.
   const [tearing, setTearing] = useState(false);
-  const [sentBurst, setSentBurst] = useState(false);
   const [priceReview, setPriceReview] = useState(null); // { diffs, message, items, config }
   const [priceAccepting, setPriceAccepting] = useState(false);
   const [resendTick, setResendTick] = useState(0);
@@ -460,6 +399,8 @@ function App() {
   const isExpressOrder = orderMode === 'express';
   const mesaActual = useMemo(() => mesas.find((m) => Number(m.id) === Number(mesaSel)) || null, [mesas, mesaSel]);
   const expressOrders = useMemo(() => activeOrders.filter(isPickupOrder), [activeOrders]);
+  // Insignia de Express: solo lo que pide acción (pedidos listos en cocina).
+  const expressReadyCount = useMemo(() => expressOrders.filter(o => expressStage(o).ready).length, [expressOrders]);
   const selectedExpressOrder = useMemo(
     () => pedidos.find((pedido) => isPickupOrder(pedido) && Number(pedido.id) === Number(selectedExpressPedidoId)) || null,
     [pedidos, selectedExpressPedidoId]
@@ -1249,7 +1190,6 @@ function App() {
       const sentMesaId = !isExpressOrder ? (sentMesa?.id ?? finalOrder.mesa_id) : null;
       const sentExpressId = isExpressOrder ? finalOrder.id : null;
       setTearing(true);
-      setSentBurst(true);
       setTimeout(() => {
         setTearing(false);
         setEditItemId(null);
@@ -1257,6 +1197,7 @@ function App() {
       }, 260);
       toast.show('Ronda enviada a cocina', {
         tone: 'success',
+        haptic: 'success',
         detail: sentMesaId ? `Mesa ${String(sentMesa?.numero ?? sentMesaId).padStart(2, '0')}` : (finalOrder.cliente_nombre || undefined),
         action: { label: sentMesaId ? 'Ver mesa' : 'Ver pedido', onPress: () => {
           if (sentMesaId) { setOrderMode('mesa'); setSelectedExpressPedidoId(null); setMesaSel(sentMesaId); setStep('pedido'); }
@@ -1368,6 +1309,7 @@ function App() {
     try {
       const { data } = await axios.put(`${BASE_URL}/pedidos/${round.pedido_id}/rondas/${round.id}`, { estado: 'ENTREGADO' });
       if (data.pedido) setPedidos((prev) => upsertById(prev, data.pedido));
+      haptic('success');
       scheduleLiveSync();
     } catch (error) {
       setCustomAlert({ title: 'Error al entregar', message: error.response?.data?.message || error.message });
@@ -1546,7 +1488,7 @@ function App() {
     dark={isDark} toggleTheme={toggleTheme} unread={unreadNotifications + serviceAlerts.items.length} delayCount={serviceAlerts.items.length}
     notifications={() => setNotiOpen(true)} refresh={loadData} logout={logout}
     draftCount={draftKeys.length} draftAttention={!!drafts.error || Object.keys(drafts.pending).length > 0} openDrafts={() => setDraftListOpen(true)}
-    connection={realtimeStatus} expressCount={expressOrders.length} cartCount={cartCount}
+    connection={realtimeStatus} expressCount={expressReadyCount} cartCount={cartCount}
     lastSyncAt={lastSyncAt} syncing={loading || backgroundSyncing} syncError={loadError}
     contextLabel={catalog.label} topInset={TOP_INSET} bottomInset={BOTTOM_INSET}
   />;
@@ -1629,7 +1571,7 @@ function App() {
         const waiting = !!drafts.pending[key];
         const count = (carritos[key] || []).reduce((n, it) => n + Number(it.cantidad || 0), 0);
         return <TouchableOpacity key={key} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={`Continuar ${draftLabel(key)}`} onPress={() => resumeDraft(key)}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 8, backgroundColor: colors.surfaceAlt || colors.elevated, borderWidth: waiting ? 2 : 0, borderColor: colors.warning }}>
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 8, backgroundColor: waiting ? colors.amberSoft : colors.surfaceAlt }}>
           <View style={{ flex: 1, minWidth: 0 }}>
             <CT size={17} weight="800" numberOfLines={1}>{draftLabel(key)}</CT>
             <CT size={14} color={colors.muted}>{waiting ? 'Sin enviar a cocina · se reintenta sola' : `${count} ${count === 1 ? 'producto' : 'productos'} sin enviar`}</CT>
@@ -1666,7 +1608,7 @@ function App() {
     }
     return (
       <View style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {renderTopTabs()}
+        {step === 'pedido' && !splitView ? null : renderTopTabs()}
         {renderDraftStatus()}
         {splitView ? body : scrollable ? (
           <ScrollView
@@ -1682,7 +1624,7 @@ function App() {
           </View>
         )}
         {splitView ? null : footer}
-        <WaiterBottomBar step={step} navigate={navigate} cartCount={cartCount} expressCount={expressOrders.length} bottomInset={BOTTOM_INSET} setMenuOpen={setMenuOpen} />
+        <WaiterBottomBar step={step} navigate={navigate} cartCount={cartCount} expressCount={expressReadyCount} bottomInset={BOTTOM_INSET} setMenuOpen={setMenuOpen} />
       </View>
     );
   };
@@ -1877,7 +1819,7 @@ function App() {
       const index = cart.findIndex(i => (i.localId || i.id) === itemId);
       removeItem(item);
       if (isEditing) setEditItemId(null);
-      toast.show(`${item.nombre} quitado`, { duration: 5000, action: { label: 'Deshacer', onPress: () => setCarritos(prev => {
+      toast.show(`${item.nombre} quitado`, { duration: 5000, haptic: false, action: { label: 'Deshacer', onPress: () => setCarritos(prev => {
         const list = [...(prev[key] || [])];
         if (list.some(i => (i.localId || i.id) === itemId)) return prev;
         list.splice(Math.max(0, Math.min(index, list.length)), 0, item);
@@ -1978,7 +1920,7 @@ function App() {
         )}
         {cartItems.length && catalog.editable && !split ? <CPress accessibilityRole="button" onPress={() => setStep('productos')} scaleTo={0.99}
           style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Plus size={18} color={colors.primaryText} strokeWidth={2.4} /><CT size={15} weight="600" color={colors.primaryText}>Añadir productos</CT>
+          <Plus size={18} color={colors.text} strokeWidth={2.4} /><CT size={15} weight="600">Añadir productos</CT>
         </CPress> : null}
         {(showingCart || editingCustomer) && !orderNote && !noteOpen ? <CPress accessibilityRole="button" accessibilityLabel="Añadir nota general" onPress={() => setNoteOpen(true)} scaleTo={0.99}
           style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 8, borderTopWidth: 1, borderTopColor: colors.line }}>
@@ -2062,7 +2004,6 @@ function App() {
       {/* Menú: el aviso «añadido» ahora es un toast Comanda con «Ver comanda» (ver announceAdded). */}
 
       {/* Comanda: sin modal bloqueante; el estado «Enviando…» vive en la barra de envío. */}
-      <CStampBurst text="ENVIADA" visible={sentBurst} onDone={() => setSentBurst(false)} />
       <PriceChangesSheet visible={!!priceReview} diffs={priceReview?.diffs} message={priceReview?.message} busy={priceAccepting}
         onAccept={acceptPriceChanges} onClose={() => setPriceReview(null)} />
       {customAlert ? renderCustomAlertModal() : null}

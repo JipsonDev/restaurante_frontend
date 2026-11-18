@@ -29,7 +29,7 @@ export default function ExpressDraftList({ drafts, onOpen, onDiscard }) {
       const count = items.reduce((sum, item) => sum + Number(item.cantidad || 0), 0);
       const subtotal = items.reduce((sum, item) => sum + (Number(item.precio || 0) + (item.modificadores || []).reduce((extra, mod) => extra + Number(mod.precio_extra || 0), 0)) * Number(item.cantidad || 0), 0);
       const pending = !!drafts.pending[key];
-      return <View key={key} style={{ borderRadius: radius.lg, backgroundColor: c.surfaceAlt, borderWidth: pending ? 2 : 0, borderColor: c.amber, overflow: 'hidden' }}>
+      return <View key={key} style={{ borderRadius: radius.lg, backgroundColor: pending ? c.amberSoft : c.surfaceAlt, overflow: 'hidden' }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingRight: space.sm }}>
           <Press accessibilityRole="button" accessibilityLabel={`Continuar el pedido de ${name}, ${delivery ? 'delivery' : 'para llevar'}`} onPress={() => onOpen(key)} hapticKind="tap"
             style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.md }}>
